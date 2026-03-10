@@ -115,6 +115,9 @@ local state = {
   lastAction = "Aucune",
   alert = "INFO",
 
+  currentView = "supervision",
+  safetyWarnings = {},
+
   tick = 0,
 }
 
@@ -222,13 +225,19 @@ local function fmt(n)
   end
 end
 
-local function fmtFuelAmount(n)
+local function formatFuelLevel(n)
   n = toNumber(n, 0)
-  if n >= 1000000000000 then return "SAT" end
-  if n >= 1000000000 then return "FULL" end
-  if n >= 100000000 then return "MAX" end
-  if n >= 10000000 then return "HIGH" end
-  return fmt(n)
+  if n <= 0 then return "EMPTY" end
+  if n < 2000000 then return "LOW" end
+  if n < 10000000 then return "MED" end
+  if n < 50000000 then return "HIGH" end
+  if n < 250000000 then return "FULL" end
+  if n < 1000000000 then return "SAT" end
+  return "MAX"
+end
+
+local function fmtFuelAmount(n)
+  return formatFuelLevel(n)
 end
 
 local function safePeripheral(name)
@@ -313,29 +322,54 @@ local function drawBox(x, y, w, h, title, accent)
 end
 
 local function reactorPhase()
+  if state.alert == "DANGER" then return "SAFE STOP" end
   if not state.reactorPresent then return "OFFLINE" end
   if not state.reactorFormed then return "UNFORMED" end
   if state.ignition and state.dtOpen then return "RUNNING" end
   if state.ignition then return "IGNITED" end
   if state.ignitionSequencePending then return "IGNITING" end
-  if state.laserChargeOn then return "CHARGING" end
+  if state.laserChargeOn or state.laserLineOn then return "CHARGING" end
 
   local threshold = toNumber(CFG and CFG.ignitionLaserEnergyThreshold, 0)
   local laserEnergy = toNumber(state.laserEnergy, 0)
   if laserEnergy >= threshold and threshold > 0 then return "READY" end
 
-  return "IDLE"
+  return "READY"
+end
+
+local function phaseColor(phase)
+  if phase == "RUNNING" or phase == "IGNITED" then return C.ok end
+  if phase == "READY" then return C.info end
+  if phase == "CHARGING" or phase == "IGNITING" then return C.warn end
+  if phase == "SAFE STOP" or phase == "OFFLINE" or phase == "UNFORMED" then return C.bad end
+  return C.dim
+end
+
+local function computeSafetyWarnings()
+  local warnings = {}
+  local critical = false
+  if not state.reactorPresent then table.insert(warnings, "REACTOR ABSENT") critical = true end
+  if state.reactorPresent and not state.reactorFormed then table.insert(warnings, "UNFORMED") end
+  if not hw.readerRoles.deuterium or not hw.readerRoles.tritium then table.insert(warnings, "FUEL SENSOR FAIL") end
+  if not hw.relays[CFG.actions.laser_charge.relay] or not hw.relays[CFG.actions.deuterium.relay] or not hw.relays[CFG.actions.tritium.relay] then
+    table.insert(warnings, "CONTROL LINE FAIL")
+    critical = true
+  end
+  if (state.laserChargeOn or state.laserLineOn) and (not state.reactorFormed or state.ignition) then table.insert(warnings, "SAFETY HOLD") end
+  if state.dOpen and state.tOpen and state.dtOpen then table.insert(warnings, "UNSAFE STATE") end
+  if #hw.readerRoles.unknown > 0 then table.insert(warnings, "FALLBACK DETECTION") end
+  return warnings, critical
 end
 
 local function drawHeader(title, status)
   local tw = term.getSize()
   local heartbeat = (state.tick % 8 < 4) and "●" or "○"
-  local phase = state.status or "N/A"
+  local phase = reactorPhase()
   fillLine(1, colors.gray)
-  writeAt(2, 1, shortText(title, math.max(10, tw - 34)), C.headerText, colors.gray)
-  local centerTxt = "PHASE " .. shortText(phase, 18)
+  writeAt(2, 1, shortText(title .. " [" .. string.upper(state.currentView:sub(1, 1)) .. "]", math.max(10, tw - 40)), C.headerText, colors.gray)
+  local centerTxt = "PHASE " .. shortText(phase, 16)
   local cx = math.max(2, math.floor((tw - #centerTxt) / 2))
-  writeAt(cx, 1, centerTxt, C.info, colors.gray)
+  writeAt(cx, 1, centerTxt, phaseColor(phase), colors.gray)
   local statusTxt = shortText(status or "N/A", 16)
   local rightTxt = heartbeat .. " ALERT " .. statusTxt
   local sx = math.max(2, tw - #rightTxt - 2)
@@ -345,26 +379,21 @@ end
 local function drawFooter(layout)
   local tw, th = term.getSize()
   fillLine(th, colors.gray)
-  local seg = math.max(12, math.floor(tw / 6))
-  local s1 = shortText("ACT " .. state.lastAction, seg - 1)
-  local s2 = shortText("MON " .. tostring(hw.monitorName or "term"), seg - 1)
-  local phase = (type(reactorPhase) == "function") and reactorPhase() or "UNKNOWN"
-  local s3 = shortText("PHASE " .. phase .. " / IGN " .. (state.ignition and "ON" or "OFF"), seg - 1)
-  local s4 = shortText("LASER " .. string.format("%3.0f%%", state.laserPct), seg - 1)
-  local s5 = shortText("FUEL D " .. fmtFuelAmount(state.deuteriumAmount) .. " T " .. fmtFuelAmount(state.tritiumAmount), seg - 1)
-  local s6 = shortText("GRID " .. (state.energyKnown and string.format("%3.0f%%", state.energyPct) or "N/A"), tw - (seg * 5) - 2)
-
-  writeAt(2, th, s1, C.text, colors.gray)
-  writeAt(seg + 1, th, "|", C.panelMid, colors.gray)
-  writeAt(seg + 2, th, s2, C.info, colors.gray)
-  writeAt(seg * 2 + 1, th, "|", C.panelMid, colors.gray)
-  writeAt(seg * 2 + 2, th, s3, state.ignition and C.ok or C.warn, colors.gray)
-  writeAt(seg * 3 + 1, th, "|", C.panelMid, colors.gray)
-  writeAt(seg * 3 + 2, th, s4, C.energy, colors.gray)
-  writeAt(seg * 4 + 1, th, "|", C.panelMid, colors.gray)
-  writeAt(seg * 4 + 2, th, s5, C.fuel, colors.gray)
-  writeAt(seg * 5 + 1, th, "|", C.panelMid, colors.gray)
-  writeAt(seg * 5 + 2, th, s6, C.energy, colors.gray)
+  local labels = {
+    { "ACT", shortText(state.lastAction, 18), C.text },
+    { "MON", tostring(hw.monitorName or "term"), C.info },
+    { "PHASE", reactorPhase(), phaseColor(reactorPhase()) },
+    { "LAS", yesno(state.laserLineOn), state.laserLineOn and C.warn or C.dim },
+    { "GRID", state.energyKnown and string.format("%3.0f%%", state.energyPct) or "N/A", C.energy },
+    { "FUEL", "D " .. formatFuelLevel(state.deuteriumAmount) .. " T " .. formatFuelLevel(state.tritiumAmount), C.fuel },
+  }
+  local segW = math.max(9, math.floor(tw / #labels))
+  for i, item in ipairs(labels) do
+    local sx = ((i - 1) * segW) + 1
+    local content = shortText(item[1] .. " " .. item[2], segW - 1)
+    writeAt(sx, th, content, item[3], colors.gray)
+    if i < #labels and sx + segW - 1 <= tw then writeAt(sx + segW - 1, th, "|", C.panelMid, colors.gray) end
+  end
 end
 
 local function drawKeyValue(x, y, key, value, keyColor, valueColor, maxVal)
@@ -516,7 +545,7 @@ local function drawReactorDiagram(x, y, w, h)
 
   drawCell(gcx, gcy, coreColor, state.ignition and (pulse and "**" or "##") or (state.ignitionSequencePending and (blink and "!!" or "::") or "[]"), C.text)
 
-  local laserOn = state.laserChargeOn or state.laserLineOn
+  local laserOn = state.laserChargeOn or state.laserLineOn or state.ignitionSequencePending
   local laserTone = laserOn and C.warn or C.dim
   local dTone = state.dOpen and C.ok or C.dim
   local tTone = state.tOpen and C.ok or C.dim
@@ -589,6 +618,14 @@ local function drawReactorDiagram(x, y, w, h)
 
     local fuelTxt = "DT " .. (state.dtOpen and (blink and "MIX" or "OPEN") or "LOCK")
     writeAt(rx + math.floor((gw * cellW - #fuelTxt) / 2), bottomY - 1, fuelTxt, dtTone, C.panelDark)
+  end
+
+  local tdModuleY = math.min(y + h - 3, ry + gh + 1)
+  if tdModuleY <= y + h - 2 then
+    local tMx = rx
+    local dMx = rx + gw * cellW - 6
+    writeAt(tMx, tdModuleY, " TANK T", state.tOpen and C.text or C.dim, state.tOpen and C.ok or C.panelMid)
+    writeAt(dMx, tdModuleY, " TANK D", state.dOpen and C.text or C.dim, state.dOpen and C.ok or C.panelMid)
   end
 
   local statusTxt = state.reactorPresent and (state.reactorFormed and "FORMED" or "UNFORMED") or "ABSENT"
@@ -1159,11 +1196,11 @@ local function refreshAll()
 end
 
 local function updateAlerts()
-  if not state.reactorPresent then
-    state.alert = "WARN"
-  elseif not state.reactorFormed then
-    state.alert = "WARN"
-  elseif state.energyKnown and state.energyPct <= CFG.energyLowPct then
+  local warnings, critical = computeSafetyWarnings()
+  state.safetyWarnings = warnings
+  if critical then
+    state.alert = "DANGER"
+  elseif #warnings > 0 or (state.energyKnown and state.energyPct <= CFG.energyLowPct) then
     state.alert = "WARN"
   elseif state.ignition then
     state.alert = "OK"
@@ -1321,8 +1358,12 @@ local function buildButtons(layout)
   local ctrl = layout.right or layout.left
   local bx = ctrl.x + 2
   local bw = math.max(10, ctrl.w - 4)
-  local by = ctrl.y + 5
+  local by = ctrl.y + 8
   local bh = (layout.mode == "compact") and 1 or 2
+
+  addButton("viewSup", bx, ctrl.y + 1, math.max(8, math.floor(bw / 3)), 1, "SUP", state.currentView == "supervision" and C.btnOn or C.panelMid, nil, function() state.currentView = "supervision" end)
+  addButton("viewDiag", bx + math.max(8, math.floor(bw / 3)), ctrl.y + 1, math.max(8, math.floor(bw / 3)), 1, "DIAG", state.currentView == "diagnostic" and C.btnOn or C.panelMid, nil, function() state.currentView = "diagnostic" end)
+  addButton("viewMan", bx + (math.max(8, math.floor(bw / 3)) * 2), ctrl.y + 1, bw - (math.max(8, math.floor(bw / 3)) * 2), 1, "MAN", state.currentView == "manual" and C.btnOn or C.panelMid, nil, function() state.currentView = "manual" end)
 
   addButton("master", bx, by, bw, bh, "MASTER", state.autoMaster and C.btnOn or C.btnOff, nil, function()
     state.autoMaster = not state.autoMaster
@@ -1351,6 +1392,12 @@ local function buildButtons(layout)
   addButton("ignite", bx, by + bh * 3, bw, bh, "IGNITE", C.btnAction, nil, function() triggerAutomaticIgnitionSequence() end)
   addButton("monitor", bx, by + bh * 4, bw, 1, "MONITOR", C.btnWarn, nil, function() startMonitorSelection() end)
   addButton("stop", bx, by + bh * 4 + 1, bw, 1, "E-STOP", C.bad, nil, function() hardStop("EMERGENCY STOP") end)
+
+  if state.currentView == "manual" then
+    addButton("manualLaser", bx, by + bh * 5 + 1, bw, 1, "LAS OUT " .. yesno(state.laserChargeOn), state.laserChargeOn and C.btnOn or C.btnOff, nil, function() setLaserCharge(not state.laserChargeOn) end)
+    addButton("manualT", bx, by + bh * 5 + 2, bw, 1, "T OUT " .. yesno(state.tOpen), state.tOpen and C.btnOn or C.btnOff, nil, function() openTritium(not state.tOpen) end)
+    addButton("manualD", bx, by + bh * 5 + 3, bw, 1, "D OUT " .. yesno(state.dOpen), state.dOpen and C.btnOn or C.btnOff, nil, function() openDeuterium(not state.dOpen) end)
+  end
 end
 
 local function drawButtons()
@@ -1404,57 +1451,53 @@ local function drawMonitorSelection(layout)
   drawFooter(layout)
 end
 
+local function drawIoPanel(x, y, w, h)
+  if h < 4 then return end
+  drawBox(x, y, w, h, "REAL I/O", C.borderDim)
+  local rx = x + 2
+  local ry = y + 1
+  drawKeyValue(rx, ry, "LAS OUT", yesno(state.laserLineOn), C.dim, state.laserLineOn and C.ok or C.warn, w - 6)
+  drawKeyValue(rx, ry + 1, "T OUT", yesno(state.tOpen), C.dim, state.tOpen and C.ok or C.warn, w - 6)
+  drawKeyValue(rx, ry + 2, "D OUT", yesno(state.dOpen), C.dim, state.dOpen and C.ok or C.warn, w - 6)
+  drawKeyValue(rx, ry + 3, "Reader T", hw.readerRoles.tritium and "OK" or "FAIL", C.dim, hw.readerRoles.tritium and C.ok or C.bad, w - 6)
+  if ry + 4 <= y + h - 2 then drawKeyValue(rx, ry + 4, "Reader D", hw.readerRoles.deuterium and "OK" or "FAIL", C.dim, hw.readerRoles.deuterium and C.ok or C.bad, w - 6) end
+  if ry + 5 <= y + h - 2 then drawKeyValue(rx, ry + 5, "Reader Aux", hw.readerRoles.inventory and "OK" or "FAIL", C.dim, hw.readerRoles.inventory and C.ok or C.bad, w - 6) end
+end
+
 local function drawStatusPanel(panel)
-  drawBox(panel.x, panel.y, panel.w, panel.h, "STATUS COLUMN", C.border)
+  drawBox(panel.x, panel.y, panel.w, panel.h, "SUPERVISION", C.border)
   local x = panel.x + 1
   local y = panel.y + 1
   local w = panel.w - 2
 
-  local blockH = clamp(math.floor((panel.h - 3) / 4), 4, 7)
-  local b1 = { x = x, y = y, w = w, h = blockH }
-  local b2 = { x = x, y = b1.y + b1.h, w = w, h = blockH }
-  local b3 = { x = x, y = b2.y + b2.h, w = w, h = blockH }
-  local b4 = { x = x, y = b3.y + b3.h, w = w, h = panel.y + panel.h - (b3.y + b3.h) }
+  local b1h = clamp(math.floor(panel.h * 0.28), 5, 8)
+  local b2h = clamp(math.floor(panel.h * 0.26), 5, 8)
+  local b3h = panel.h - b1h - b2h - 2
 
-  drawBox(b1.x, b1.y, b1.w, b1.h, "REACTOR", C.borderDim)
-  drawBadge(b1.x + 2, b1.y + 1, "CORE", state.reactorPresent and "ONLINE" or "OFFLINE")
-  drawBadge(b1.x + 2, b1.y + 2, "MODE", state.autoMaster and "AUTO" or "MANUAL")
-  if b1.h > 4 then
-    drawKeyValue(b1.x + 2, b1.y + 3, "STATE", reactorPhase(), C.dim, statusColor(state.alert), b1.w - 14)
+  drawBox(x, y, w, b1h, "PHASE", C.borderDim)
+  local phase = reactorPhase()
+  drawBadge(x + 2, y + 1, "STATE", phase, phaseColor(phase))
+  drawBadge(x + 2, y + 2, "CORE", state.reactorPresent and (state.reactorFormed and "FORMED" or "UNFORMED") or "OFFLINE")
+  if b1h > 5 then drawKeyValue(x + 2, y + 3, "Temp P", fmt(state.plasmaTemp), C.dim, C.info, w - 6) end
+  if b1h > 6 then drawKeyValue(x + 2, y + 4, "Temp C", fmt(state.caseTemp), C.dim, C.info, w - 6) end
+
+  local y2 = y + b1h
+  drawBox(x, y2, w, b2h, "ENERGY/FUEL", C.borderDim)
+  drawBar(x + 2, y2 + 1, math.max(8, w - 4), state.laserPct, C.warn, string.format("LAS %3.0f%%", state.laserPct))
+  drawBar(x + 2, y2 + 2, math.max(8, w - 4), state.energyKnown and state.energyPct or 0, C.energy, state.energyKnown and string.format("GRID %3.0f%%", state.energyPct) or "GRID N/A")
+  if b2h > 5 then
+    drawKeyValue(x + 2, y2 + 3, "D Tank", formatFuelLevel(state.deuteriumAmount), C.dim, C.fuel, w - 6)
+    drawKeyValue(x + 2, y2 + 4, "T Tank", formatFuelLevel(state.tritiumAmount), C.dim, C.fuel, w - 6)
   end
 
-  drawBox(b2.x, b2.y, b2.w, b2.h, "LASER", C.borderDim)
-  drawKeyValue(b2.x + 2, b2.y + 1, "STATUS", state.laserLineOn and "CHARGE" or "IDLE", C.dim, state.laserLineOn and C.ok or C.warn, b2.w - 14)
-  drawKeyValue(b2.x + 2, b2.y + 2, "ENERGY", fmt(state.laserEnergy), C.dim, C.info, b2.w - 14)
-  if b2.h > 4 then
-    drawBar(b2.x + 2, b2.y + 3, math.max(8, b2.w - 4), state.laserPct, C.warn, string.format("LAS %3.0f%%", state.laserPct))
-  end
-
-  drawBox(b3.x, b3.y, b3.w, b3.h, "ENERGY", C.borderDim)
-  drawKeyValue(b3.x + 2, b3.y + 1, "GRID", state.energyKnown and fmt(state.energyStored) or "UNKNOWN", C.dim, C.energy, b3.w - 14)
-  drawKeyValue(b3.x + 2, b3.y + 2, "CASE T", fmt(state.caseTemp), C.dim, C.info, b3.w - 14)
-  if b3.h > 4 then
-    drawBar(b3.x + 2, b3.y + 3, math.max(8, b3.w - 4), state.energyKnown and state.energyPct or 0, C.energy, state.energyKnown and string.format("GRID %3.0f%%", state.energyPct) or "GRID N/A")
-  end
-
-  if b4.h >= 4 then
-    drawBox(b4.x, b4.y, b4.w, b4.h, "FUEL", C.borderDim)
-    drawKeyValue(b4.x + 2, b4.y + 1, "D", fmtFuelAmount(state.deuteriumAmount), C.dim, C.fuel, b4.w - 14)
-    drawKeyValue(b4.x + 2, b4.y + 2, "T", fmtFuelAmount(state.tritiumAmount), C.dim, C.fuel, b4.w - 14)
-    if b4.h > 4 then
-      drawKeyValue(b4.x + 2, b4.y + 3, "D RELAY", state.dOpen and "OPEN" or "STOP", C.dim, state.dOpen and C.ok or C.warn, b4.w - 14)
-    end
-    if b4.h > 5 then
-      drawKeyValue(b4.x + 2, b4.y + 4, "T RELAY", state.tOpen and "OPEN" or "STOP", C.dim, state.tOpen and C.ok or C.warn, b4.w - 14)
-    end
-    if b4.h > 6 then
-      drawKeyValue(b4.x + 2, b4.y + 5, "Reader D", hw.readerRoles.deuterium and "OK" or "MISS", C.dim, hw.readerRoles.deuterium and C.ok or C.warn, b4.w - 14)
-    end
-    if b4.h > 7 then
-      drawKeyValue(b4.x + 2, b4.y + 6, "Reader T", hw.readerRoles.tritium and "OK" or "MISS", C.dim, hw.readerRoles.tritium and C.ok or C.warn, b4.w - 14)
-    end
-    if b4.h > 8 then
-      drawKeyValue(b4.x + 2, b4.y + 7, "Reader Aux", hw.readerRoles.inventory and "OK" or "MISS", C.dim, hw.readerRoles.inventory and C.ok or C.warn, b4.w - 14)
+  local y3 = y2 + b2h
+  drawBox(x, y3, w, b3h, "SAFETY", C.borderDim)
+  local warnings = state.safetyWarnings or {}
+  if #warnings == 0 then
+    writeAt(x + 2, y3 + 1, "NO CRITICAL WARNING", C.ok, C.panelDark)
+  else
+    for i = 1, math.min(#warnings, b3h - 2) do
+      writeAt(x + 2, y3 + i, shortText("- " .. warnings[i], w - 4), C.warn, C.panelDark)
     end
   end
 end
@@ -1464,45 +1507,71 @@ local function drawControlPanel(panel, layout)
   local x = panel.x + 1
   local w = panel.w - 2
 
-  local summaryH = clamp(math.floor(panel.h * 0.28), 6, 8)
-  drawBox(x, panel.y + 1, w, summaryH, "MODE SUMMARY", C.borderDim)
+  local autoH = clamp(math.floor(panel.h * 0.24), 6, 8)
+  local actionH = clamp(math.floor(panel.h * 0.34), 8, 12)
+  local ioH = panel.h - autoH - actionH - 2
+
+  drawBox(x, panel.y + 1, w, autoH, "AUTO", C.borderDim)
   local sx = x + 2
   drawBadge(sx, panel.y + 2, "MASTER", state.autoMaster and "AUTO" or "MANUAL")
   drawBadge(sx, panel.y + 3, "FUSION", state.fusionAuto and "AUTO" or "MANUAL")
   drawBadge(sx, panel.y + 4, "CHARGE", state.chargeAuto and "AUTO" or "MANUAL")
   drawBadge(sx, panel.y + 5, "GAS", state.gasAuto and "AUTO" or "MANUAL")
-  if summaryH >= 7 then
-    drawKeyValue(sx, panel.y + 6, "Charge L", state.laserLineOn and "ON" or "OFF", C.dim, state.laserLineOn and C.ok or C.warn, w - 6)
-  end
 
-  local controlsY = panel.y + 1 + summaryH
-  local controlsH = panel.h - summaryH - 1
-  if controlsH >= 6 then
-    drawBox(x, controlsY, w, controlsH, "COMMANDS", C.borderDim)
-  end
+  local yAction = panel.y + 1 + autoH
+  drawBox(x, yAction, w, actionH, "ACTIONS", C.borderDim)
 
   buildButtons(layout)
   drawButtons()
 
-  local fy = panel.y + panel.h - 3
-  if fy > panel.y + 9 then
-    drawKeyValue(panel.x + 3, fy, "Tank D", state.dOpen and "OPEN" or "STOP", C.dim, state.dOpen and C.ok or C.warn, panel.w - 16)
-    drawKeyValue(panel.x + 3, fy + 1, "Tank T", state.tOpen and "OPEN" or "STOP", C.dim, state.tOpen and C.ok or C.warn, panel.w - 16)
+  local yIo = yAction + actionH
+  drawIoPanel(x, yIo, w, ioH)
+end
+
+local function drawDiagnosticView(layout)
+  local left = layout.left
+  local center = layout.center
+  drawStatusPanel(left)
+  if not center then
+    drawControlPanel(layout.right, layout)
+    return
   end
+  if center then
+    drawBox(center.x, center.y, center.w, center.h, "DIAGNOSTIC", C.border)
+    local x = center.x + 2
+    local y = center.y + 1
+    drawKeyValue(x, y, "Reactor", hw.reactorName or "MISSING", C.dim, hw.reactor and C.ok or C.bad, center.w - 6)
+    drawKeyValue(x, y + 1, "Logic", hw.logicName or "MISSING", C.dim, hw.logic and C.ok or C.bad, center.w - 6)
+    drawKeyValue(x, y + 2, "Laser", hw.laserName or "MISSING", C.dim, hw.laser and C.ok or C.bad, center.w - 6)
+    drawKeyValue(x, y + 3, "Induction", hw.inductionName or "MISSING", C.dim, hw.induction and C.ok or C.warn, center.w - 6)
+    drawKeyValue(x, y + 5, "Relay LAS", CFG.actions.laser_charge.relay .. "." .. CFG.actions.laser_charge.side, C.dim, hw.relays[CFG.actions.laser_charge.relay] and C.ok or C.bad, center.w - 6)
+    drawKeyValue(x, y + 6, "Relay D", CFG.actions.deuterium.relay .. "." .. CFG.actions.deuterium.side, C.dim, hw.relays[CFG.actions.deuterium.relay] and C.ok or C.bad, center.w - 6)
+    drawKeyValue(x, y + 7, "Relay T", CFG.actions.tritium.relay .. "." .. CFG.actions.tritium.side, C.dim, hw.relays[CFG.actions.tritium.relay] and C.ok or C.bad, center.w - 6)
+    drawKeyValue(x, y + 9, "Reader D", hw.readerRoles.deuterium and hw.readerRoles.deuterium.name or "MISSING", C.dim, hw.readerRoles.deuterium and C.ok or C.bad, center.w - 6)
+    drawKeyValue(x, y + 10, "Reader T", hw.readerRoles.tritium and hw.readerRoles.tritium.name or "MISSING", C.dim, hw.readerRoles.tritium and C.ok or C.bad, center.w - 6)
+    drawKeyValue(x, y + 11, "Reader Aux", hw.readerRoles.inventory and hw.readerRoles.inventory.name or "MISSING", C.dim, hw.readerRoles.inventory and C.ok or C.warn, center.w - 6)
+    if y + 13 <= center.y + center.h - 2 then
+      drawKeyValue(x, y + 13, "Fuel D raw", tostring(state.deuteriumAmount), C.dim, C.text, center.w - 6)
+      drawKeyValue(x, y + 14, "Fuel T raw", tostring(state.tritiumAmount), C.dim, C.text, center.w - 6)
+    end
+  end
+  drawControlPanel(layout.right or layout.left, layout)
 end
 
-local function drawCompactLayout(layout)
+local function drawManualView(layout)
+  if layout.center then
+    drawReactorDiagram(layout.center.x, layout.center.y, layout.center.w, layout.center.h)
+  end
   drawStatusPanel(layout.left)
-  drawControlPanel(layout.right, layout)
+  drawControlPanel(layout.right or layout.left, layout)
 end
 
-local function drawStandardLayout(layout)
-  drawStatusPanel(layout.left)
-  drawReactorDiagram(layout.center.x, layout.center.y, layout.center.w, layout.center.h)
-  drawControlPanel(layout.right, layout)
-end
-
-local function drawLargeLayout(layout)
+local function drawSupervisionView(layout)
+  if layout.mode == "compact" then
+    drawStatusPanel(layout.left)
+    drawControlPanel(layout.right, layout)
+    return
+  end
   drawStatusPanel(layout.left)
   drawReactorDiagram(layout.center.x, layout.center.y, layout.center.w, layout.center.h)
   drawControlPanel(layout.right, layout)
@@ -1529,12 +1598,12 @@ local function drawUI()
 
   drawHeader("FUSION SUPERVISOR", state.status)
 
-  if layout.mode == "compact" then
-    drawCompactLayout(layout)
-  elseif layout.mode == "standard" then
-    drawStandardLayout(layout)
+  if state.currentView == "diagnostic" then
+    drawDiagnosticView(layout)
+  elseif state.currentView == "manual" then
+    drawManualView(layout)
   else
-    drawLargeLayout(layout)
+    drawSupervisionView(layout)
   end
 
   drawFooter(layout)
@@ -1582,6 +1651,12 @@ while state.running do
         state.gasAuto = not state.gasAuto
       elseif ch == "m" then
         startMonitorSelection()
+      elseif ch == "1" then
+        state.currentView = "supervision"
+      elseif ch == "2" then
+        state.currentView = "diagnostic"
+      elseif ch == "3" then
+        state.currentView = "manual"
       elseif ch == "i" then
         triggerAutomaticIgnitionSequence()
       elseif ch == "l" then
