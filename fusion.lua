@@ -419,74 +419,138 @@ end
 
 local function drawReactorDiagram(x, y, w, h)
   drawBox(x, y, w, h, "FUSION CHAMBER", C.border)
-  if w < 28 or h < 14 then
-    writeAt(x + 2, y + 2, "Schema indisponible", C.dim, C.panelDark)
+  if w < 30 or h < 16 then
+    writeAt(x + 2, y + 2, "Schema top-down indisponible", C.dim, C.panelDark)
     return
   end
 
-  local innerW = w - 2
-  local innerH = h - 2
-  local cx = x + math.floor(innerW / 2)
-  local cy = y + math.floor(innerH / 2)
-  local pulse = (state.tick % 6 < 3) and "●" or "○"
+  local innerX, innerY = x + 1, y + 1
+  local innerW, innerH = w - 2, h - 2
   local phase = reactorPhase()
-  local laserChar = state.laserLineOn and ((state.tick % 4 < 2) and "=" or "~") or "."
-  local fuelChar = ((state.tick % 4 < 2) and "=" or "-")
+  local pulse = (state.tick % 6 < 3)
+  local blink = (state.tick % 4 < 2)
 
-  local coreW = clamp(math.floor(innerW * 0.52), 16, math.max(16, innerW - 18))
-  local coreH = clamp(math.floor(innerH * 0.60), 10, math.max(10, innerH - 4))
-  local coreX = cx - math.floor(coreW / 2)
-  local coreY = cy - math.floor(coreH / 2)
-  local coreRight = coreX + coreW - 1
-  local coreBottom = coreY + coreH - 1
+  local function cellColor(base)
+    if state.alert == "DANGER" then return C.bad end
+    return base
+  end
 
-  local laserY = coreY + 2
-  writeAt(x + 2, laserY, "Charge Laser", C.info, C.panelDark)
-  local beamStart = x + 8
-  local beamLen = math.max(6, coreX - beamStart - 1)
-  writeAt(beamStart, laserY, string.rep(laserChar, beamLen) .. ">", state.laserLineOn and C.ok or C.dim, C.panelDark)
+  local structureColor = C.borderDim
+  if state.reactorPresent and state.reactorFormed then
+    structureColor = cellColor(C.info)
+  elseif state.reactorPresent then
+    structureColor = C.dim
+  end
 
-  local dY = cy + 1
-  local tY = cy + 3
-  local leftPipe = x + 2
-  local leftLen = math.max(3, coreX - leftPipe - 8)
-  writeAt(leftPipe, dY, "D Tank", C.info, C.panelDark)
-  writeAt(leftPipe + 7, dY, string.rep(fuelChar, leftLen) .. ">", state.dOpen and C.ok or C.dim, C.panelDark)
-  writeAt(leftPipe, tY, "T Tank", C.info, C.panelDark)
-  writeAt(leftPipe + 7, tY, string.rep(fuelChar, leftLen) .. ">", state.tOpen and C.ok or C.dim, C.panelDark)
+  local ringColor = state.reactorPresent and cellColor(C.border) or C.borderDim
+  local spineColor = state.reactorPresent and C.info or C.borderDim
+  if state.alert == "WARN" then spineColor = C.warn end
 
-  writeAt(coreX, coreY, "+" .. string.rep("-", coreW - 2) .. "+", C.border, C.panelDark)
-  for yy = coreY + 1, coreBottom - 1 do
-    writeAt(coreX, yy, "|", C.border, C.panelDark)
-    writeAt(coreRight, yy, "|", C.border, C.panelDark)
-    if yy > coreY + 1 and yy < coreBottom - 1 then
-      writeAt(coreX + 1, yy, string.rep(" ", coreW - 2), C.text, (yy % 2 == 0) and colors.black or colors.gray)
+  local coreColor
+  if not state.reactorPresent then
+    coreColor = C.panel
+  elseif state.ignition then
+    coreColor = pulse and C.ok or colors.green
+  elseif state.ignitionSequencePending then
+    coreColor = blink and C.warn or colors.yellow
+  elseif state.reactorFormed then
+    coreColor = blink and colors.cyan or C.info
+  else
+    coreColor = C.panel
+  end
+  if state.alert == "DANGER" then coreColor = pulse and C.bad or C.warn end
+
+  local cellW = 2
+  local maxGw = math.floor((innerW - 4) / cellW)
+  local gw = clamp(maxGw, 15, 21)
+  if gw % 2 == 0 then gw = gw - 1 end
+  local gh = clamp(innerH - 4, 13, 17)
+  if gh % 2 == 0 then gh = gh - 1 end
+
+  local rx = innerX + math.floor((innerW - (gw * cellW)) / 2)
+  local ry = innerY + math.floor((innerH - gh) / 2)
+
+  local gcx = math.floor((gw + 1) / 2)
+  local gcy = math.floor((gh + 1) / 2)
+
+  local function drawCell(gx, gy, bg, ch, tc)
+    if gx < 1 or gx > gw or gy < 1 or gy > gh then return end
+    local sx = rx + (gx - 1) * cellW
+    local sy = ry + gy - 1
+    local text = ch or "  "
+    if #text == 1 then text = text .. " " end
+    writeAt(sx, sy, text, tc or C.text, bg)
+  end
+
+  for gy = 1, gh do
+    for gx = 1, gw do
+      local dx = math.abs(gx - gcx)
+      local dy = math.abs(gy - gcy)
+      local layer = 0
+
+      if math.max(dx, dy) <= 4 then layer = 1 end
+      if math.max(dx, dy) <= 3 then layer = 2 end
+      if dx <= 1 and dy <= 6 then layer = math.max(layer, 1) end
+      if dy <= 1 and dx <= 6 then layer = math.max(layer, 1) end
+      if dx <= 0 and dy <= 5 then layer = math.max(layer, 2) end
+      if dy <= 0 and dx <= 5 then layer = math.max(layer, 2) end
+      if dx == 4 and dy == 4 then layer = 0 end
+      if dx <= 1 and dy <= 1 then layer = 3 end
+
+      if layer == 1 then
+        drawCell(gx, gy, structureColor)
+      elseif layer == 2 then
+        drawCell(gx, gy, ringColor)
+      elseif layer == 3 then
+        local coreGlyph = state.ignition and (pulse and "<>" or "##") or (state.ignitionSequencePending and (blink and "::" or "..") or "[]")
+        drawCell(gx, gy, coreColor, coreGlyph, C.text)
+      end
     end
   end
-  writeAt(coreX, coreBottom, "+" .. string.rep("-", coreW - 2) .. "+", C.border, C.panelDark)
 
-  local plasmaW = clamp(math.floor(coreW * 0.46), 8, coreW - 6)
-  local plasmaX = cx - math.floor(plasmaW / 2)
-  local plasmaY = cy
-  writeAt(plasmaX, plasmaY, "[" .. string.rep(pulse, plasmaW - 2) .. "]", state.ignition and C.ok or C.warn, C.panelDark)
-  writeAt(coreX + 2, coreY + 1, shortText("IGNITION  " .. (state.ignition and "ONLINE" or (state.ignitionSequencePending and "PENDING" or "IDLE")), coreW - 4), state.ignition and C.ok or C.warn, C.panelDark)
-  writeAt(coreX + 2, coreY + 3, shortText("PLASMA    " .. (state.ignition and "CONFINED" or "COLD"), coreW - 4), state.ignition and C.ok or C.dim, C.panelDark)
-  writeAt(coreX + 2, coreY + 5, shortText("FUEL FLOW " .. ((state.dtOpen or state.dOpen or state.tOpen) and "ACTIVE" or "STOP"), coreW - 4), (state.dtOpen or state.dOpen or state.tOpen) and C.fuel or C.warn, C.panelDark)
-  writeAt(coreX + 2, coreY + 7, shortText("STABILITY " .. (state.alert == "DANGER" and "CRITICAL" or "NOMINAL"), coreW - 4), state.alert == "DANGER" and C.bad or C.ok, C.panelDark)
-
-  local outX = coreRight + 1
-  if outX < x + w - 7 then
-    local outLen = math.max(3, x + w - outX - 3)
-    writeAt(outX, cy, string.rep("-", outLen) .. ">", C.energy, C.panelDark)
-    writeAt(outX, cy - 2, shortText("OUTPUT GRID", outLen), C.energy, C.panelDark)
-    local stTxt = state.energyKnown and string.format("CHARGE %3.0f%%", state.energyPct) or "CHARGE N/A"
-    writeAt(outX, cy + 1, shortText(stTxt, outLen), C.energy, C.panelDark)
+  for i = -4, 4 do
+    drawCell(gcx + i, gcy, spineColor)
+    drawCell(gcx, gcy + i, spineColor)
   end
 
-  local eTxt = state.energyKnown and ("GRID " .. string.format("%3.0f%%", state.energyPct)) or "GRID N/A"
-  local lTxt = "LAS " .. string.format("%3.0f%%", state.laserPct)
-  writeAt(x + 2, y + h - 2, shortText("PHASE " .. phase, math.floor(w * 0.50)), statusColor(state.alert), C.panelDark)
-  writeAt(x + math.floor(w * 0.50), y + h - 2, shortText(lTxt .. "  " .. eTxt, w - math.floor(w * 0.50) - 2), C.info, C.panelDark)
+  drawCell(gcx, gcy, coreColor, state.ignition and (pulse and "**" or "##") or (state.ignitionSequencePending and (blink and "!!" or "::") or "[]"), C.text)
+
+  local laserOn = state.laserChargeOn or state.laserLineOn
+  local laserTone = laserOn and C.warn or C.dim
+  local dTone = state.dOpen and C.ok or C.dim
+  local tTone = state.tOpen and C.ok or C.dim
+  local dtTone = state.dtOpen and C.fuel or C.dim
+
+  local topY = ry - 1
+  if topY >= y + 1 then
+    local laserTxt = string.format("LAS %3.0f%%", state.laserPct)
+    writeAt(rx + math.floor((gw * cellW - #laserTxt) / 2), topY, laserTxt, laserTone, C.panelDark)
+  end
+
+  local leftX = rx - 6
+  if leftX >= x + 2 then
+    writeAt(leftX, ry + gcy - 1, "D " .. (state.dOpen and ">>" or ".."), dTone, C.panelDark)
+  end
+
+  local rightTxt = "T " .. (state.tOpen and "<<" or "..")
+  local rightX = rx + gw * cellW + 1
+  if rightX + #rightTxt <= x + w - 2 then
+    writeAt(rightX, ry + gcy - 1, rightTxt, tTone, C.panelDark)
+  end
+
+  local bottomY = ry + gh
+  if bottomY <= y + h - 2 then
+    local fuelTxt = "DT " .. (state.dtOpen and (blink and "FLOW" or "OPEN") or "LOCK")
+    writeAt(rx + math.floor((gw * cellW - #fuelTxt) / 2), bottomY, fuelTxt, dtTone, C.panelDark)
+  end
+
+  local statusTxt = state.reactorPresent and (state.reactorFormed and "FORMED" or "UNFORMED") or "ABSENT"
+  local ignTxt = state.ignition and "IGNITED" or (state.ignitionSequencePending and "IGN PEND" or "IDLE")
+  local gridTxt = state.energyKnown and string.format("GRID %3.0f%%", state.energyPct) or "GRID N/A"
+
+  writeAt(x + 2, y + 2, shortText("CORE " .. statusTxt, math.max(8, math.floor(w * 0.33))), state.reactorPresent and C.info or C.bad, C.panelDark)
+  writeAt(x + 2, y + h - 2, shortText("PHASE " .. phase .. " | " .. ignTxt, math.max(10, math.floor(w * 0.58))), statusColor(state.alert), C.panelDark)
+  writeAt(x + math.floor(w * 0.62), y + h - 2, shortText(gridTxt, math.max(8, w - math.floor(w * 0.62) - 2)), C.energy, C.panelDark)
 end
 
 local function drawBadge(x, y, label, value, tone)
