@@ -436,6 +436,176 @@ local function getModemInfo(modem)
   return { nameLocal = okL and localName or "N/A", namesRemote = okR and remotes or {} }
 end
 
+local function safeWrap(name)
+  local ok, wrapped = safeCall(function() return peripheral.wrap(name) end)
+  if ok and wrapped then return wrapped end
+  return nil
+end
+
+local function safeGetMethods(name)
+  return getPeripheralMethods(name)
+end
+
+local function safeInvokeMethod(target, methodName, ...)
+  if not target or type(target[methodName]) ~= "function" then return false, "method unavailable" end
+  return safeCall(function() return target[methodName](...) end)
+end
+
+local function getSuggestedRole(name, pType, methods, readerRole)
+  local low = string.lower(tostring(name or "") .. " " .. tostring(pType or ""))
+  if readerRole then return readerRole end
+  if pType == "block_reader" then return "block_reader" end
+  if pType == "redstone_relay" then return "relay" end
+  if pType == "monitor" then return "monitor" end
+  if pType == "modem" then return "modem" end
+  if low:find("logic", 1, true) and low:find("fusion", 1, true) then return "logic_adapter" end
+  if low:find("fusion", 1, true) then return "fusion_controller" end
+  if low:find("induction", 1, true) then return "induction_port" end
+  if low:find("laser", 1, true) then return "laser_amplifier" end
+  if low:find("computer", 1, true) or low:find("turtle", 1, true) then return "computer" end
+  if hasMethods(methods, { "setAnalogOutput", "getAnalogInput" }) then return "relay" end
+  if hasMethods(methods, { "getBlockData" }) then return "block_reader" end
+  if hasMethods(methods, { "getNamesRemote", "getNameLocal" }) then return "modem" end
+  if hasMethods(methods, { "getSize", "setTextScale" }) then return "monitor" end
+  return "other"
+end
+
+local function probeNoArgMethods(wrapped, methods)
+  local probes = {}
+  local probeCandidates = {
+    "getStatus", "isActive", "getEnergy", "getEnergyFilledPercentage", "getTemperature", "getNameLocal",
+    "getNamesRemote", "getTransferCap", "getMode", "getLength", "getSize", "isWireless", "isOpen"
+  }
+  local set = {}
+  for _, m in ipairs(methods or {}) do set[m] = true end
+  for _, m in ipairs(probeCandidates) do
+    if set[m] and wrapped then
+      local ok, value = safeInvokeMethod(wrapped, m)
+      probes[m] = ok and value or "ERR"
+    end
+  end
+  return probes
+end
+
+local function getDeviceSummaryByType(name, pType, wrapped, methods, readerSummaryMap)
+  local summary, raw = {}, {}
+  local low = string.lower(tostring(name or "") .. " " .. tostring(pType or ""))
+
+  if pType == "block_reader" or hasMethods(methods, { "getBlockData" }) then
+    local rs = readerSummaryMap and readerSummaryMap[name]
+    if not rs then rs = getReaderSummary(name) end
+    summary.readerRole = rs and rs.role or "unknown"
+    summary.chemical_id = rs and rs.chemical_id or nil
+    summary.chemical_amount = rs and rs.chemical_amount or nil
+    summary.inventory_id = rs and rs.inventory_id or nil
+    summary.active_state = rs and rs.active or nil
+    summary.redstone = rs and rs.redstone or nil
+    summary.current_redstone = rs and rs.current_redstone or nil
+    raw.blockData = rs and rs.raw or nil
+    if rs and rs.error then raw.error = rs.error end
+    return summary, raw
+  end
+
+  if pType == "redstone_relay" or hasMethods(methods, { "setAnalogOutput", "getAnalogInput" }) then
+    local activeSides, sideState = 0, {}
+    if wrapped then
+      for _, side in ipairs(SIDE_LIST) do
+        local info = getRelaySideInfo(wrapped, side)
+        sideState[side] = info
+        if type(info.analogOutput) == "number" and info.analogOutput > 0 then activeSides = activeSides + 1 end
+      end
+    else
+      raw.error = "wrap impossible"
+    end
+    summary.activeSides = activeSides
+    summary.hasOutput = activeSides > 0
+    raw.sides = sideState
+    return summary, raw
+  end
+
+  if pType == "modem" or hasMethods(methods, { "getNamesRemote", "getNameLocal" }) then
+    if wrapped then
+      local info = getModemInfo(wrapped)
+      local remoteTypes = {}
+      for _, remoteName in ipairs(info.namesRemote or {}) do
+        local ok, remoteType = safeCall(function() return peripheral.getType(remoteName) end)
+        remoteTypes[remoteName] = ok and remoteType or "ERR"
+      end
+      summary.nameLocal = info.nameLocal
+      summary.remoteCount = #(info.namesRemote or {})
+      raw.namesRemote = info.namesRemote
+      raw.remoteTypes = remoteTypes
+    else
+      raw.error = "wrap impossible"
+    end
+    return summary, raw
+  end
+
+  if pType == "monitor" or low:find("monitor", 1, true) then
+    if wrapped then
+      local ok, size = safeCall(function() return { wrapped.getSize() } end)
+      summary.selected = name == selectedMonitorName
+      summary.size = ok and { width = size[1], height = size[2] } or "ERR"
+      raw.monitorInfo = { width = ok and size[1] or nil, height = ok and size[2] or nil }
+    else
+      raw.error = "wrap impossible"
+    end
+    return summary, raw
+  end
+
+  if low:find("fusion", 1, true) or low:find("logic", 1, true) or low:find("induction", 1, true) or low:find("laser", 1, true) then
+    raw.probed = probeNoArgMethods(wrapped, methods)
+    summary.probeCount = #sortedKeys(raw.probed or {})
+    return summary, raw
+  end
+
+  raw.probed = probeNoArgMethods(wrapped, methods)
+  summary.methodCount = #methods
+  return summary, raw
+end
+
+local function buildAllDevicesDetailed(data)
+  local result = {}
+  local typeCounts = {}
+  local aliasCount, roleCount, wrapOkCount = 0, 0, 0
+  local readerMap = {}
+  for _, r in ipairs(data.readerSummaries or {}) do readerMap[r.name] = r end
+
+  for _, name in ipairs(data.peripherals or {}) do
+    local pType = tostring(peripheral.getType(name) or "unknown")
+    local methods = safeGetMethods(name)
+    local wrapped = safeWrap(name)
+    local alias = getAlias(name)
+    local suggestedRole = getSuggestedRole(name, pType, methods, readerMap[name] and readerMap[name].role or nil)
+    local summary, raw = getDeviceSummaryByType(name, pType, wrapped, methods, readerMap)
+
+    result[name] = {
+      name = name,
+      type = pType,
+      alias = alias,
+      suggestedRole = suggestedRole,
+      methods = methods,
+      wrapped = wrapped ~= nil,
+      summary = summary,
+      raw = raw,
+    }
+
+    typeCounts[pType] = (typeCounts[pType] or 0) + 1
+    if alias then aliasCount = aliasCount + 1 end
+    if suggestedRole and suggestedRole ~= "other" then roleCount = roleCount + 1 end
+    if wrapped then wrapOkCount = wrapOkCount + 1 end
+  end
+
+  data.deviceStats = {
+    total = #data.peripherals,
+    byType = typeCounts,
+    withAlias = aliasCount,
+    withSuggestedRole = roleCount,
+    wrapOk = wrapOkCount,
+  }
+  return result
+end
+
 local function gatherAllData()
   local data = {}
   data.peripherals = peripheral.getNames(); table.sort(data.peripherals)
@@ -447,6 +617,10 @@ local function gatherAllData()
   data.fusionControllers = getFusionControllers()
   data.inductionPorts = getInductionPorts()
   data.laserAmplifiers = getLaserAmplifiers()
+  data.computers = getPeripheralNamesByMatcher(function(name, pType)
+    local low = string.lower(name .. " " .. pType)
+    return low:find("computer", 1, true) ~= nil or low:find("turtle", 1, true) ~= nil
+  end)
 
   data.readerSummaries = {}
   for _, name in ipairs(data.blockReaders) do table.insert(data.readerSummaries, getReaderSummary(name)) end
@@ -477,6 +651,7 @@ local function gatherAllData()
   data.totalRemotePeripherals = totalRemote
 
   data.aliases = aliases
+  data.allDevicesDetailed = buildAllDevicesDetailed(data)
   return data
 end
 
@@ -984,6 +1159,62 @@ local function buildFormattedReport(data)
     table.insert(out, "")
   end
 
+  table.insert(out, "[DEVICES COMPLETE]")
+  local stats = data.deviceStats or {}
+  table.insert(out, "total_devices = " .. short(stats.total))
+  table.insert(out, "devices_with_alias = " .. short(stats.withAlias))
+  table.insert(out, "devices_with_suggested_role = " .. short(stats.withSuggestedRole))
+  table.insert(out, "devices_wrap_ok = " .. short(stats.wrapOk))
+  table.insert(out, "devices_by_type = " .. encodeRaw(stats.byType or {}, 0, {}, 0))
+  table.insert(out, "")
+
+  local function addDeviceSection(title, names)
+    if #names == 0 then return end
+    table.insert(out, "## " .. title .. " (" .. #names .. ")")
+    for _, name in ipairs(names) do
+      local d = data.allDevicesDetailed and data.allDevicesDetailed[name]
+      if d then
+        table.insert(out, "----- " .. d.name .. " -----")
+        table.insert(out, "Type: " .. short(d.type))
+        table.insert(out, "Alias: " .. short(d.alias))
+        table.insert(out, "Role: " .. short(d.suggestedRole))
+        table.insert(out, "Wrapped: " .. tostring(d.wrapped))
+        table.insert(out, "Methods:")
+        if #d.methods == 0 then table.insert(out, "- (none)") else for _, m in ipairs(d.methods) do table.insert(out, "- " .. m) end end
+        table.insert(out, "Summary:")
+        local summaryDump = flattenTable(d.summary, 0, nil, nil, { maxDepth = config.maxFlattenDepth, maxLines = 60 })
+        if #summaryDump == 0 then table.insert(out, "- (none)") else for _, line in ipairs(summaryDump) do table.insert(out, "- " .. line) end end
+        table.insert(out, "")
+      end
+    end
+  end
+
+  local grouped = {
+    monitors = data.monitors or {},
+    block_readers = data.blockReaders or {},
+    redstone_relays = data.redstoneRelays or {},
+    modems = data.modems or {},
+    fusion_controllers = data.fusionControllers or {},
+    induction_ports = data.inductionPorts or {},
+    laser_amplifiers = data.laserAmplifiers or {},
+    computers = data.computers or {},
+  }
+  local seen = {}
+  for _, arr in pairs(grouped) do for _, n in ipairs(arr) do seen[n] = true end end
+  local others = {}
+  for _, n in ipairs(data.peripherals or {}) do if not seen[n] then table.insert(others, n) end end
+  table.sort(others)
+
+  addDeviceSection("monitors", grouped.monitors)
+  addDeviceSection("block_readers", grouped.block_readers)
+  addDeviceSection("redstone_relays", grouped.redstone_relays)
+  addDeviceSection("modems", grouped.modems)
+  addDeviceSection("fusion controllers / logic adapters", grouped.fusion_controllers)
+  addDeviceSection("induction ports", grouped.induction_ports)
+  addDeviceSection("laser amplifiers", grouped.laser_amplifiers)
+  addDeviceSection("computers", grouped.computers)
+  addDeviceSection("other peripherals", others)
+
   return out
 end
 
@@ -1007,6 +1238,8 @@ local function buildRawReport(data)
     monitorStates = monitorStates,
     currentPage = currentPage,
     aliases = aliases,
+    allDevicesDetailed = data.allDevicesDetailed,
+    deviceStats = data.deviceStats,
     latestData = data,
   }
   return { "-- blockreader_raw.txt", "return " .. encodeRaw(snapshot, 0, {}, 0) }
