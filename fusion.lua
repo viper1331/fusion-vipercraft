@@ -312,6 +312,21 @@ local function drawBox(x, y, w, h, title, accent)
   end
 end
 
+local function reactorPhase()
+  if not state.reactorPresent then return "OFFLINE" end
+  if not state.reactorFormed then return "UNFORMED" end
+  if state.ignition and state.dtOpen then return "RUNNING" end
+  if state.ignition then return "IGNITED" end
+  if state.ignitionSequencePending then return "IGNITING" end
+  if state.laserChargeOn then return "CHARGING" end
+
+  local threshold = toNumber(CFG and CFG.ignitionLaserEnergyThreshold, 0)
+  local laserEnergy = toNumber(state.laserEnergy, 0)
+  if laserEnergy >= threshold and threshold > 0 then return "READY" end
+
+  return "IDLE"
+end
+
 local function drawHeader(title, status)
   local tw = term.getSize()
   local heartbeat = (state.tick % 8 < 4) and "●" or "○"
@@ -333,7 +348,8 @@ local function drawFooter(layout)
   local seg = math.max(12, math.floor(tw / 6))
   local s1 = shortText("ACT " .. state.lastAction, seg - 1)
   local s2 = shortText("MON " .. tostring(hw.monitorName or "term"), seg - 1)
-  local s3 = shortText("PHASE " .. reactorPhase() .. " / IGN " .. (state.ignition and "ON" or "OFF"), seg - 1)
+  local phase = (type(reactorPhase) == "function") and reactorPhase() or "UNKNOWN"
+  local s3 = shortText("PHASE " .. phase .. " / IGN " .. (state.ignition and "ON" or "OFF"), seg - 1)
   local s4 = shortText("LASER " .. string.format("%3.0f%%", state.laserPct), seg - 1)
   local s5 = shortText("FUEL D " .. fmtFuelAmount(state.deuteriumAmount) .. " T " .. fmtFuelAmount(state.tritiumAmount), seg - 1)
   local s6 = shortText("GRID " .. (state.energyKnown and string.format("%3.0f%%", state.energyPct) or "N/A"), tw - (seg * 5) - 2)
@@ -399,16 +415,6 @@ local function computeLayout(tw, th)
     layout.right = { x = lw + cw + 1, y = top, w = rw, h = h }
   end
   return layout
-end
-
-local function reactorPhase()
-  if not state.reactorPresent then return "OFFLINE" end
-  if not state.reactorFormed then return "FORMED" end
-  if state.ignitionSequencePending then return "IGNITING" end
-  if state.ignition and state.dtOpen then return "FUEL FLOW" end
-  if state.ignition then return "IGNITED" end
-  if state.laserChargeOn then return "CHARGING" end
-  return "SAFE STOP"
 end
 
 local function drawReactorDiagram(x, y, w, h)
