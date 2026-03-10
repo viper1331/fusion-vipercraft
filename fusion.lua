@@ -281,26 +281,37 @@ end
 
 local function drawHeader(title, status)
   local tw = term.getSize()
-  local heartbeat = (state.tick % 8 < 4) and "◆" or "◇"
+  local heartbeat = (state.tick % 8 < 4) and "●" or "○"
+  local phase = state.status or "N/A"
   fillLine(1, C.headerBg)
-  writeAt(2, 1, shortText(title, math.max(8, tw - 28)), C.headerText, C.headerBg)
-  local statusTxt = "[" .. shortText(status or "N/A", 16) .. "]"
-  local sx = math.max(2, tw - #statusTxt - 3)
-  writeAt(sx - 2, 1, heartbeat, state.ignition and C.ok or C.warn, C.headerBg)
-  writeAt(sx, 1, statusTxt, C.text, C.headerBg)
+  writeAt(2, 1, shortText(title, math.max(10, tw - 30)), C.headerText, C.headerBg)
+  local centerTxt = "PHASE " .. shortText(phase, 14)
+  local cx = math.floor((tw - #centerTxt) / 2)
+  if cx > 2 then
+    writeAt(cx, 1, centerTxt, C.info, C.headerBg)
+  end
+  local statusTxt = shortText(status or "N/A", 16)
+  local rightTxt = heartbeat .. " " .. statusTxt
+  local sx = math.max(2, tw - #rightTxt - 2)
+  writeAt(sx, 1, rightTxt, statusColor(state.alert), C.headerBg)
 end
 
 local function drawFooter(layout)
   local tw, th = term.getSize()
   fillLine(th, C.footerBg)
-  local left = "ACT " .. shortText(state.lastAction, math.max(10, math.floor(tw * 0.45) - 5))
-  local right = "MON " .. shortText(tostring(hw.monitorName or "term"), math.max(8, math.floor(tw * 0.28)))
-  writeAt(2, th, left, C.text, C.footerBg)
-  writeAt(math.max(2, tw - #right - 1), th, right, C.text, C.footerBg)
-  if layout.mode == "large" then
-    local center = "L:" .. string.format("%3.0f%%", state.laserPct) .. " E:" .. (state.energyKnown and string.format("%3.0f%%", state.energyPct) or "N/A")
-    writeAt(math.max(2, math.floor((tw - #center) / 2)), th, center, C.info, C.footerBg)
-  end
+  local seg = math.max(14, math.floor(tw / 4))
+  local s1 = shortText("ACT " .. state.lastAction, seg - 1)
+  local s2 = shortText("IGN " .. (state.ignition and "ON" or "OFF") .. "  MODE " .. (state.autoMaster and "AUTO" or "MAN"), seg - 1)
+  local s3 = shortText("FUEL D " .. fmt(state.deuteriumAmount) .. "  T " .. fmt(state.tritiumAmount), seg - 1)
+  local s4 = shortText("LAS " .. string.format("%3.0f%%", state.laserPct) .. "  MON " .. tostring(hw.monitorName or "term"), tw - (seg * 3) - 2)
+
+  writeAt(2, th, s1, C.text, C.footerBg)
+  writeAt(seg + 1, th, "|", C.borderDim, C.footerBg)
+  writeAt(seg + 2, th, s2, C.info, C.footerBg)
+  writeAt(seg * 2 + 1, th, "|", C.borderDim, C.footerBg)
+  writeAt(seg * 2 + 2, th, s3, C.fuel, C.footerBg)
+  writeAt(seg * 3 + 1, th, "|", C.borderDim, C.footerBg)
+  writeAt(seg * 3 + 2, th, s4, C.text, C.footerBg)
 end
 
 local function drawKeyValue(x, y, key, value, keyColor, valueColor, maxVal)
@@ -315,26 +326,37 @@ local function computeLayout(tw, th)
   end
 
   local mode = "compact"
-  if tw >= 66 and th >= 20 then mode = "standard" end
-  if tw >= 92 and th >= 23 then mode = "large" end
+  if tw >= 58 and th >= 19 then mode = "standard" end
+  if tw >= 74 and th >= 26 then mode = "large" end
 
   local top, bottom = 2, th - 1
   local h = bottom - top + 1
   local layout = { mode = mode, top = top, bottom = bottom, height = h, width = tw, tooSmall = false }
 
   if mode == "compact" then
-    local lw = clamp(math.floor(tw * 0.56), 18, tw - 14)
+    local lw = clamp(math.floor(tw * 0.54), 18, tw - 14)
     layout.left = { x = 1, y = top, w = lw, h = h }
     layout.right = { x = lw + 1, y = top, w = tw - lw, h = h }
   elseif mode == "standard" then
-    local lw = clamp(math.floor(tw * 0.44), 26, tw - 32)
-    layout.left = { x = 1, y = top, w = lw, h = h }
-    layout.right = { x = lw + 1, y = top, w = tw - lw, h = h }
-  else
-    local lw = clamp(math.floor(tw * 0.26), 22, 30)
-    local rw = clamp(math.floor(tw * 0.28), 24, 34)
+    local lw = clamp(math.floor(tw * 0.30), 18, 24)
+    local rw = clamp(math.floor(tw * 0.26), 17, 22)
     local cw = tw - lw - rw
-    if cw < 24 then rw = rw - (24 - cw) cw = 24 end
+    if cw < 22 then
+      rw = math.max(16, rw - (22 - cw))
+      cw = tw - lw - rw
+    end
+    layout.left = { x = 1, y = top, w = lw, h = h }
+    layout.center = { x = lw + 1, y = top, w = cw, h = h }
+    layout.right = { x = lw + cw + 1, y = top, w = rw, h = h }
+  else
+    local lw = clamp(math.floor(tw * 0.24), 19, 24)
+    local rw = clamp(math.floor(tw * 0.24), 19, 24)
+    local cw = tw - lw - rw
+    if cw < 30 then
+      local delta = 30 - cw
+      rw = math.max(16, rw - delta)
+      cw = tw - lw - rw
+    end
     layout.left = { x = 1, y = top, w = lw, h = h }
     layout.center = { x = lw + 1, y = top, w = cw, h = h }
     layout.right = { x = lw + cw + 1, y = top, w = rw, h = h }
@@ -354,34 +376,74 @@ end
 
 local function drawReactorDiagram(x, y, w, h)
   drawBox(x, y, w, h, "REACTOR SCHEMA", C.border)
-  if w < 18 or h < 9 then
+  if w < 24 or h < 12 then
     writeAt(x + 2, y + 2, "Schema indisponible", C.dim, C.panelDark)
     return
   end
 
-  local cx = x + math.floor(w / 2)
-  local cy = y + math.floor(h / 2)
-  local pulse = (state.tick % 6 < 3) and "*" or "+"
+  local innerW = w - 2
+  local innerH = h - 2
+  local cx = x + math.floor(innerW / 2)
+  local cy = y + math.floor(innerH / 2)
+  local pulse = (state.tick % 6 < 3) and "◆" or "◇"
   local phase = reactorPhase()
+  local laserChar = state.laserChargeOn and ((state.tick % 4 < 2) and "=" or "-") or "."
+  local fuelChar = ((state.tick % 4 < 2) and "=" or "-")
 
-  writeAt(x + 2, y + 2, "LASER", C.info, C.panelDark)
-  writeAt(x + 8, y + 2, string.rep("-", math.max(2, cx - x - 9)) .. ">", state.laserChargeOn and C.ok or C.dim, C.panelDark)
-  writeAt(cx - 3, cy - 1, "+-----+", C.borderDim, C.panelDark)
-  writeAt(cx - 3, cy, "| " .. pulse .. " |", state.ignition and C.ok or C.warn, C.panelDark)
-  writeAt(cx - 3, cy + 1, "+-----+", C.borderDim, C.panelDark)
-  writeAt(cx - 1, cy + 2, "CORE", C.text, C.panelDark)
+  local coreW = clamp(math.floor(innerW * 0.28), 9, 15)
+  local coreH = clamp(math.floor(innerH * 0.42), 7, 13)
+  local coreX = cx - math.floor(coreW / 2)
+  local coreY = cy - math.floor(coreH / 2)
 
-  local py = math.min(y + h - 4, cy + 4)
-  writeAt(x + 2, py - 1, "D2", C.info, C.panelDark)
-  writeAt(x + 5, py - 1, string.rep("=", math.max(2, cx - x - 10)) .. ">", state.dOpen and C.ok or C.dim, C.panelDark)
-  writeAt(cx + 5, py - 1, state.dOpen and "OPEN" or "STOP", state.dOpen and C.ok or C.warn, C.panelDark)
-  writeAt(x + 2, py, "T2", C.info, C.panelDark)
-  writeAt(x + 5, py, string.rep("=", math.max(2, cx - x - 10)) .. ">", state.tOpen and C.ok or C.dim, C.panelDark)
-  writeAt(cx + 5, py, state.tOpen and "OPEN" or "STOP", state.tOpen and C.ok or C.warn, C.panelDark)
+  -- laser conduit
+  local laserY = cy - 3
+  writeAt(x + 2, laserY, "LASER", C.info, C.panelDark)
+  local beamStart = x + 8
+  local beamLen = math.max(4, coreX - beamStart - 1)
+  writeAt(beamStart, laserY, string.rep(laserChar, beamLen) .. ">", state.laserChargeOn and C.ok or C.dim, C.panelDark)
+
+  -- fuel conduits (D/T)
+  local dY = cy + 2
+  local tY = cy + 4
+  local leftPipe = x + 2
+  local leftLen = math.max(3, coreX - leftPipe - 2)
+  writeAt(leftPipe, dY, "D", C.info, C.panelDark)
+  writeAt(leftPipe + 2, dY, string.rep(fuelChar, leftLen) .. ">", state.dOpen and C.ok or C.dim, C.panelDark)
+  writeAt(leftPipe, tY, "T", C.info, C.panelDark)
+  writeAt(leftPipe + 2, tY, string.rep(fuelChar, leftLen) .. ">", state.tOpen and C.ok or C.dim, C.panelDark)
+
+  -- reactor chamber
+  writeAt(coreX, coreY, "+" .. string.rep("-", coreW - 2) .. "+", C.borderDim, C.panelDark)
+  for yy = coreY + 1, coreY + coreH - 2 do
+    writeAt(coreX, yy, "|", C.borderDim, C.panelDark)
+    writeAt(coreX + coreW - 1, yy, "|", C.borderDim, C.panelDark)
+    if yy == cy then
+      local coreTxt = " PLASMA " .. pulse .. " "
+      local tx = coreX + math.max(1, math.floor((coreW - #coreTxt) / 2))
+      writeAt(tx, yy, coreTxt, state.ignition and C.ok or C.warn, C.panelDark)
+    elseif yy == cy - 2 then
+      local ignTxt = state.ignitionSequencePending and "IGNITION PENDING" or "IGNITION " .. (state.ignition and "ACTIVE" or "IDLE")
+      writeAt(coreX + 1, yy, shortText(ignTxt, coreW - 2), state.ignition and C.ok or C.dim, C.panelDark)
+    elseif yy == cy + 2 then
+      local flow = (state.dtOpen or state.dOpen or state.tOpen) and "FUEL FLOW" or "FUEL STOP"
+      writeAt(coreX + 1, yy, shortText(flow, coreW - 2), (state.dtOpen or state.dOpen or state.tOpen) and C.fuel or C.warn, C.panelDark)
+    end
+  end
+  writeAt(coreX, coreY + coreH - 1, "+" .. string.rep("-", coreW - 2) .. "+", C.borderDim, C.panelDark)
+
+  -- right side technical output
+  local outX = coreX + coreW + 1
+  if outX < x + w - 5 then
+    writeAt(outX, cy - 1, "-> GRID", C.energy, C.panelDark)
+    local stTxt = state.energyKnown and string.format("%3.0f%%", state.energyPct) or "N/A"
+    writeAt(outX, cy, "   " .. stTxt, C.energy, C.panelDark)
+    writeAt(outX, cy + 2, state.alert == "DANGER" and "ALERT !" or "STABLE", statusColor(state.alert), C.panelDark)
+  end
 
   local eTxt = state.energyKnown and ("GRID " .. string.format("%3.0f%%", state.energyPct)) or "GRID N/A"
-  writeAt(x + 2, y + h - 2, shortText("PHASE " .. phase, w - 4), statusColor(state.alert), C.panelDark)
-  writeAt(math.max(x + 2, x + w - #eTxt - 2), y + h - 2, eTxt, C.energy, C.panelDark)
+  local lTxt = "LAS " .. string.format("%3.0f%%", state.laserPct)
+  writeAt(x + 2, y + h - 2, shortText("PHASE " .. phase, math.floor(w * 0.45)), statusColor(state.alert), C.panelDark)
+  writeAt(x + math.floor(w * 0.45), y + h - 2, shortText(lTxt .. "  " .. eTxt, w - math.floor(w * 0.45) - 2), C.info, C.panelDark)
 end
 
 local function drawBadge(x, y, label, value, tone)
@@ -393,16 +455,23 @@ end
 
 local function drawBar(x, y, w, pct, color, label)
   pct = clamp(toNumber(pct, 0), 0, 100)
+  if w < 4 then return end
   local fill = math.floor((w * pct) / 100)
   writeAt(x, y, string.rep(" ", w), C.text, C.panel)
   if fill > 0 then
     writeAt(x, y, string.rep(" ", fill), C.text, color or C.ok)
   end
   if label and #label > 0 and w > 6 then
-    local txt = shortText(label, w - 1)
+    local txt = shortText(label, w - 2)
     local lx = x + math.floor((w - #txt) / 2)
     writeAt(lx, y, txt, C.text, C.panelDark)
   end
+end
+
+local function drawBars(panel, x, y)
+  local bw = math.max(8, panel.w - 4)
+  drawBar(x, y, bw, state.laserPct, C.ok, string.format("LASER %3.0f%%", state.laserPct))
+  drawBar(x, y + 2, bw, state.energyKnown and state.energyPct or 0, C.energy, state.energyKnown and string.format("GRID %3.0f%%", state.energyPct) or "GRID N/A")
 end
 
 local function drawKV(x, y, key, value, keyColor, valueColor)
@@ -1101,54 +1170,61 @@ local function drawMonitorSelection(layout)
   drawFooter(layout)
 end
 
-local function drawLeftStats(panel)
-  drawBox(panel.x, panel.y, panel.w, panel.h, "SYSTEM STATUS", C.border)
-  local x, y = panel.x + 1, panel.y + 1
+local function drawStatusPanel(panel)
+  drawBox(panel.x, panel.y, panel.w, panel.h, "SUPERVISION", C.border)
+  local x, y = panel.x + 2, panel.y + 1
+
   drawBadge(x, y, "CORE", state.reactorPresent and "ONLINE" or "OFFLINE")
   drawBadge(x, y + 1, "MODE", state.autoMaster and "AUTO" or "MANUAL")
   drawBadge(x, y + 2, "ALERT", state.alert, statusColor(state.alert))
-  drawKeyValue(x, y + 3, "IGNITION", state.ignition and "ACTIVE" or "IDLE", C.dim, state.ignition and C.ok or C.warn, 12)
+  drawKeyValue(x, y + 3, "STATE", reactorPhase(), C.dim, statusColor(state.alert), panel.w - 14)
 
-  drawKeyValue(x, y + 5, "LASER", fmt(state.laserEnergy), C.dim, C.text, panel.w - 14)
-  drawBar(x, y + 6, panel.w - 3, state.laserPct, C.ok, string.format("LASER %3.0f%%", state.laserPct))
-  drawKeyValue(x, y + 7, "CHARGE", state.laserChargeOn and "ON" or "OFF", C.dim, state.laserChargeOn and C.ok or C.bad, 8)
+  drawKeyValue(x, y + 5, "IGNITION", state.ignition and "ACTIVE" or "IDLE", C.dim, state.ignition and C.ok or C.warn, panel.w - 14)
+  drawKeyValue(x, y + 6, "LASER", fmt(state.laserEnergy), C.dim, C.info, panel.w - 14)
+  drawKeyValue(x, y + 7, "CHARGE", state.laserChargeOn and "ON" or "OFF", C.dim, state.laserChargeOn and C.ok or C.bad, panel.w - 14)
 
-  if y + 11 < panel.y + panel.h - 1 then
-    drawKeyValue(x, y + 9, "ENERGY", state.energyKnown and fmt(state.energyStored) or "UNKNOWN", C.dim, C.energy, panel.w - 14)
-    drawBar(x, y + 10, panel.w - 3, state.energyKnown and state.energyPct or 0, C.energy, state.energyKnown and string.format("GRID %3.0f%%", state.energyPct) or "GRID N/A")
-    drawKeyValue(x, y + 11, "CASE T", fmt(state.caseTemp), C.dim, C.info, 10)
+  drawBars(panel, x, y + 9)
+
+  local fy = y + 12
+  if fy < panel.y + panel.h - 2 then
+    drawKeyValue(x, fy, "ENERGY", state.energyKnown and fmt(state.energyStored) or "UNKNOWN", C.dim, C.energy, panel.w - 14)
+    drawKeyValue(x, fy + 1, "CASE T", fmt(state.caseTemp), C.dim, C.info, panel.w - 14)
+    drawKeyValue(x, fy + 2, "FUEL D", fmt(state.deuteriumAmount), C.dim, C.fuel, panel.w - 14)
+    drawKeyValue(x, fy + 3, "FUEL T", fmt(state.tritiumAmount), C.dim, C.fuel, panel.w - 14)
   end
 end
 
 local function drawControlPanel(panel, layout)
   drawBox(panel.x, panel.y, panel.w, panel.h, "CONTROL", C.border)
-  local x = panel.x + 1
-  drawBadge(x, panel.y + 1, "FUSION", state.fusionAuto and "AUTO" or "MANUAL")
-  drawBadge(x, panel.y + 2, "CHARGE", state.chargeAuto and "AUTO" or "MANUAL")
-  drawBadge(x, panel.y + 3, "GAS", state.gasAuto and "AUTO" or "MANUAL")
+  local x = panel.x + 2
+  drawBadge(x, panel.y + 1, "MASTER", state.autoMaster and "AUTO" or "MANUAL")
+  drawBadge(x, panel.y + 2, "FUSION", state.fusionAuto and "AUTO" or "MANUAL")
+  drawBadge(x, panel.y + 3, "CHARGE", state.chargeAuto and "AUTO" or "MANUAL")
+  drawBadge(x, panel.y + 4, "GAS", state.gasAuto and "AUTO" or "MANUAL")
+
   buildButtons(layout)
   drawButtons()
+
   local fy = panel.y + panel.h - 3
   if fy > panel.y + 8 then
-    drawKeyValue(x, fy, "DEUT", fmt(state.deuteriumAmount), C.dim, C.fuel, panel.w - 14)
-    drawKeyValue(x, fy + 1, "TRIT", fmt(state.tritiumAmount), C.dim, C.fuel, panel.w - 14)
+    drawKeyValue(x, fy, "D/T", state.dtOpen and "OPEN" or "STOP", C.dim, state.dtOpen and C.ok or C.warn, panel.w - 14)
+    drawKeyValue(x, fy + 1, "LASER", state.laserChargeOn and "CHARGE" or "IDLE", C.dim, state.laserChargeOn and C.ok or C.dim, panel.w - 14)
   end
 end
 
 local function drawCompactLayout(layout)
-  drawLeftStats(layout.left)
+  drawStatusPanel(layout.left)
   drawControlPanel(layout.right, layout)
 end
 
 local function drawStandardLayout(layout)
-  local diagramH = clamp(math.floor(layout.right.h * 0.60), 9, layout.right.h - 8)
-  drawLeftStats(layout.left)
-  drawReactorDiagram(layout.right.x, layout.right.y, layout.right.w, diagramH)
-  drawControlPanel({ x = layout.right.x, y = layout.right.y + diagramH, w = layout.right.w, h = layout.right.h - diagramH }, layout)
+  drawStatusPanel(layout.left)
+  drawReactorDiagram(layout.center.x, layout.center.y, layout.center.w, layout.center.h)
+  drawControlPanel(layout.right, layout)
 end
 
 local function drawLargeLayout(layout)
-  drawLeftStats(layout.left)
+  drawStatusPanel(layout.left)
   drawReactorDiagram(layout.center.x, layout.center.y, layout.center.w, layout.center.h)
   drawControlPanel(layout.right, layout)
 end
