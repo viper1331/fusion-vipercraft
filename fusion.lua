@@ -24,15 +24,28 @@ local CFG = {
 
   ignitionRetryDelay = 3.0,
 
-  -- Mapping des redstone relays
+  -- Topologie connue issue de diagviewer (prioritaire, avec fallback)
+  knownReaders = {
+    deuterium = "block_reader_1",
+    tritium = "block_reader_2",
+    inventory = "block_reader_6",
+  },
+
+  knownRelays = {
+    laser_charge = { relay = "redstone_relay_0", side = "top",   label = "Charge Laser" },
+    deuterium    = { relay = "redstone_relay_1", side = "front", label = "Tank Deuterium" },
+    tritium      = { relay = "redstone_relay_2", side = "front", label = "Tank Tritium" },
+  },
+
+  -- Mapping des actions redstone
   actions = {
     laser_charge = { relay = "redstone_relay_0", side = "top",   analog = 15, pulse = false },
-    laser_fire   = { relay = "redstone_relay_1", side = "front", analog = 15, pulse = true, pulseTime = 0.4 },
-    hohlraum     = { relay = "redstone_relay_2", side = "front", analog = 15, pulse = true, pulseTime = 0.2 },
+    deuterium    = { relay = "redstone_relay_1", side = "front", analog = 15, pulse = false },
+    tritium      = { relay = "redstone_relay_2", side = "front", analog = 15, pulse = false },
 
+    laser_fire   = nil,
+    hohlraum     = nil,
     dt_fuel      = nil,
-    deuterium    = nil,
-    tritium      = nil,
   },
 }
 
@@ -85,6 +98,16 @@ local state = {
   dOpen = false,
   tOpen = false,
 
+  laserLineOn = false,
+  knownLabels = {
+    laser = "Charge Laser",
+    deuterium = "Tank Deuterium",
+    tritium = "Tank Tritium",
+    readerD = "Reader Deuterium",
+    readerT = "Reader Tritium",
+    readerAux = "Reader Aux",
+  },
+
   ignitionSequencePending = false,
   lastIgnitionAttempt = 0,
 
@@ -117,6 +140,7 @@ local hw = {
   readerRoles = {
     deuterium = nil,
     tritium = nil,
+    inventory = nil,
     energy = nil,
     active = {},
     unknown = {},
@@ -196,6 +220,15 @@ local function fmt(n)
   else
     return tostring(math.floor(n))
   end
+end
+
+local function fmtFuelAmount(n)
+  n = toNumber(n, 0)
+  if n >= 1000000000000 then return "SAT" end
+  if n >= 1000000000 then return "FULL" end
+  if n >= 100000000 then return "MAX" end
+  if n >= 10000000 then return "HIGH" end
+  return fmt(n)
 end
 
 local function safePeripheral(name)
@@ -302,7 +335,7 @@ local function drawFooter(layout)
   local s2 = shortText("MON " .. tostring(hw.monitorName or "term"), seg - 1)
   local s3 = shortText("PHASE " .. reactorPhase() .. " / IGN " .. (state.ignition and "ON" or "OFF"), seg - 1)
   local s4 = shortText("LASER " .. string.format("%3.0f%%", state.laserPct), seg - 1)
-  local s5 = shortText("FUEL D " .. fmt(state.deuteriumAmount) .. " T " .. fmt(state.tritiumAmount), seg - 1)
+  local s5 = shortText("FUEL D " .. fmtFuelAmount(state.deuteriumAmount) .. " T " .. fmtFuelAmount(state.tritiumAmount), seg - 1)
   local s6 = shortText("GRID " .. (state.energyKnown and string.format("%3.0f%%", state.energyPct) or "N/A"), tw - (seg * 5) - 2)
 
   writeAt(2, th, s1, C.text, colors.gray)
@@ -391,7 +424,7 @@ local function drawReactorDiagram(x, y, w, h)
   local cy = y + math.floor(innerH / 2)
   local pulse = (state.tick % 6 < 3) and "●" or "○"
   local phase = reactorPhase()
-  local laserChar = state.laserChargeOn and ((state.tick % 4 < 2) and "=" or "~") or "."
+  local laserChar = state.laserLineOn and ((state.tick % 4 < 2) and "=" or "~") or "."
   local fuelChar = ((state.tick % 4 < 2) and "=" or "-")
 
   local coreW = clamp(math.floor(innerW * 0.52), 16, math.max(16, innerW - 18))
@@ -402,19 +435,19 @@ local function drawReactorDiagram(x, y, w, h)
   local coreBottom = coreY + coreH - 1
 
   local laserY = coreY + 2
-  writeAt(x + 2, laserY, "LASER", C.info, C.panelDark)
+  writeAt(x + 2, laserY, "Charge Laser", C.info, C.panelDark)
   local beamStart = x + 8
   local beamLen = math.max(6, coreX - beamStart - 1)
-  writeAt(beamStart, laserY, string.rep(laserChar, beamLen) .. ">", state.laserChargeOn and C.ok or C.dim, C.panelDark)
+  writeAt(beamStart, laserY, string.rep(laserChar, beamLen) .. ">", state.laserLineOn and C.ok or C.dim, C.panelDark)
 
   local dY = cy + 1
   local tY = cy + 3
   local leftPipe = x + 2
-  local leftLen = math.max(5, coreX - leftPipe - 2)
-  writeAt(leftPipe, dY, "D", C.info, C.panelDark)
-  writeAt(leftPipe + 2, dY, string.rep(fuelChar, leftLen) .. ">", state.dOpen and C.ok or C.dim, C.panelDark)
-  writeAt(leftPipe, tY, "T", C.info, C.panelDark)
-  writeAt(leftPipe + 2, tY, string.rep(fuelChar, leftLen) .. ">", state.tOpen and C.ok or C.dim, C.panelDark)
+  local leftLen = math.max(3, coreX - leftPipe - 8)
+  writeAt(leftPipe, dY, "D Tank", C.info, C.panelDark)
+  writeAt(leftPipe + 7, dY, string.rep(fuelChar, leftLen) .. ">", state.dOpen and C.ok or C.dim, C.panelDark)
+  writeAt(leftPipe, tY, "T Tank", C.info, C.panelDark)
+  writeAt(leftPipe + 7, tY, string.rep(fuelChar, leftLen) .. ">", state.tOpen and C.ok or C.dim, C.panelDark)
 
   writeAt(coreX, coreY, "+" .. string.rep("-", coreW - 2) .. "+", C.border, C.panelDark)
   for yy = coreY + 1, coreBottom - 1 do
@@ -627,6 +660,47 @@ local function scanPeripherals()
   end
 end
 
+local function resolveKnownRelays()
+  for action, cfg in pairs(CFG.knownRelays) do
+    if CFG.actions[action] == nil then
+      CFG.actions[action] = { relay = cfg.relay, side = cfg.side, analog = 15, pulse = false }
+    else
+      CFG.actions[action].relay = cfg.relay
+      CFG.actions[action].side = cfg.side
+      CFG.actions[action].analog = CFG.actions[action].analog or 15
+      CFG.actions[action].pulse = false
+    end
+  end
+end
+
+local function resolveKnownReaders()
+  local byName = {}
+
+  for _, entry in ipairs(hw.blockReaders) do
+    byName[entry.name] = entry
+  end
+
+  if byName[CFG.knownReaders.deuterium] then
+    hw.readerRoles.deuterium = byName[CFG.knownReaders.deuterium]
+    hw.readerRoles.deuterium.role = "deuterium"
+  end
+
+  if byName[CFG.knownReaders.tritium] then
+    hw.readerRoles.tritium = byName[CFG.knownReaders.tritium]
+    hw.readerRoles.tritium.role = "tritium"
+  end
+
+  if byName[CFG.knownReaders.inventory] then
+    hw.readerRoles.inventory = byName[CFG.knownReaders.inventory]
+    hw.readerRoles.inventory.role = "inventory"
+  end
+end
+
+local function resolveKnownTopology()
+  resolveKnownRelays()
+  resolveKnownReaders()
+end
+
 local function classifyBlockReaderData(data)
   if type(data) ~= "table" then return "unknown" end
 
@@ -647,6 +721,10 @@ local function classifyBlockReaderData(data)
     return "energy"
   end
 
+  if data.inventory ~= nil or data.items ~= nil or data.slots ~= nil then
+    return "inventory"
+  end
+
   if data.active_state ~= nil or data.redstone ~= nil or data.current_redstone ~= nil then
     return "active"
   end
@@ -658,10 +736,13 @@ local function scanBlockReaders()
   hw.readerRoles = {
     deuterium = nil,
     tritium = nil,
+    inventory = nil,
     energy = nil,
     active = {},
     unknown = {},
   }
+
+  resolveKnownTopology()
 
   for _, entry in ipairs(hw.blockReaders) do
     entry.role = "unknown"
@@ -675,10 +756,14 @@ local function scanBlockReaders()
       end
     end
 
-    if entry.role == "deuterium" and not hw.readerRoles.deuterium then
+    if entry == hw.readerRoles.deuterium or entry == hw.readerRoles.tritium or entry == hw.readerRoles.inventory then
+      -- deja force par topologie connue
+    elseif entry.role == "deuterium" and not hw.readerRoles.deuterium then
       hw.readerRoles.deuterium = entry
     elseif entry.role == "tritium" and not hw.readerRoles.tritium then
       hw.readerRoles.tritium = entry
+    elseif entry.role == "inventory" and not hw.readerRoles.inventory then
+      hw.readerRoles.inventory = entry
     elseif entry.role == "energy" and not hw.readerRoles.energy then
       hw.readerRoles.energy = entry
     elseif entry.role == "active" then
@@ -744,6 +829,25 @@ local function relayWrite(actionName, on)
   return false
 end
 
+local function readRelayOutputState(actionName, fallback)
+  local cfg = CFG.actions[actionName]
+  if not cfg then return fallback end
+  local relay = hw.relays[cfg.relay]
+  if not relay then return fallback end
+
+  if type(relay.getAnalogOutput) == "function" then
+    local ok, v = pcall(relay.getAnalogOutput, cfg.side)
+    if ok then return toNumber(v, 0) > 0 end
+  end
+
+  if type(relay.getOutput) == "function" then
+    local ok, v = pcall(relay.getOutput, cfg.side)
+    if ok then return v == true end
+  end
+
+  return fallback
+end
+
 local function setLaserCharge(on)
   if relayWrite("laser_charge", on) then
     state.laserChargeOn = on
@@ -754,14 +858,18 @@ local function setLaserCharge(on)
 end
 
 local function fireLaser()
-  if relayWrite("laser_fire", true) then
+  if CFG.actions.laser_fire and relayWrite("laser_fire", true) then
     state.lastAction = "Pulse laser"
+  else
+    state.lastAction = "Laser pulse non cable"
   end
 end
 
 local function injectHohlraum()
-  if relayWrite("hohlraum", true) then
+  if CFG.actions.hohlraum and relayWrite("hohlraum", true) then
     state.lastAction = "Injection hohlraum"
+  else
+    state.lastAction = "Ligne hohlraum non cablee"
   end
 end
 
@@ -906,9 +1014,10 @@ local function readReaders()
   state.deuteriumName, state.deuteriumAmount = readChemicalFromReader(hw.readerRoles.deuterium)
   state.tritiumName, state.tritiumAmount = readChemicalFromReader(hw.readerRoles.tritium)
 
-  if #hw.readerRoles.active > 0 then
+  local auxReader = hw.readerRoles.inventory or hw.readerRoles.active[1]
+  if auxReader then
     state.auxPresent = true
-    local active, rs = readActiveFromReader(hw.readerRoles.active[1])
+    local active, rs = readActiveFromReader(auxReader)
     state.auxActive = active
     state.auxRedstone = rs
   else
@@ -916,6 +1025,10 @@ local function readReaders()
     state.auxActive = false
     state.auxRedstone = 0
   end
+
+  state.laserLineOn = readRelayOutputState("laser_charge", state.laserChargeOn)
+  state.dOpen = readRelayOutputState("deuterium", state.dOpen)
+  state.tOpen = readRelayOutputState("tritium", state.tOpen)
 end
 
 local function refreshAll()
@@ -1194,7 +1307,7 @@ local function drawStatusPanel(panel)
   end
 
   drawBox(b2.x, b2.y, b2.w, b2.h, "LASER", C.borderDim)
-  drawKeyValue(b2.x + 2, b2.y + 1, "STATUS", state.laserChargeOn and "CHARGE" or "IDLE", C.dim, state.laserChargeOn and C.ok or C.warn, b2.w - 14)
+  drawKeyValue(b2.x + 2, b2.y + 1, "STATUS", state.laserLineOn and "CHARGE" or "IDLE", C.dim, state.laserLineOn and C.ok or C.warn, b2.w - 14)
   drawKeyValue(b2.x + 2, b2.y + 2, "ENERGY", fmt(state.laserEnergy), C.dim, C.info, b2.w - 14)
   if b2.h > 4 then
     drawBar(b2.x + 2, b2.y + 3, math.max(8, b2.w - 4), state.laserPct, C.warn, string.format("LAS %3.0f%%", state.laserPct))
@@ -1209,10 +1322,22 @@ local function drawStatusPanel(panel)
 
   if b4.h >= 4 then
     drawBox(b4.x, b4.y, b4.w, b4.h, "FUEL", C.borderDim)
-    drawKeyValue(b4.x + 2, b4.y + 1, "D", fmt(state.deuteriumAmount), C.dim, C.fuel, b4.w - 14)
-    drawKeyValue(b4.x + 2, b4.y + 2, "T", fmt(state.tritiumAmount), C.dim, C.fuel, b4.w - 14)
+    drawKeyValue(b4.x + 2, b4.y + 1, "D", fmtFuelAmount(state.deuteriumAmount), C.dim, C.fuel, b4.w - 14)
+    drawKeyValue(b4.x + 2, b4.y + 2, "T", fmtFuelAmount(state.tritiumAmount), C.dim, C.fuel, b4.w - 14)
     if b4.h > 4 then
-      drawKeyValue(b4.x + 2, b4.y + 3, "D/T", state.dtOpen and "OPEN" or "STOP", C.dim, state.dtOpen and C.ok or C.warn, b4.w - 14)
+      drawKeyValue(b4.x + 2, b4.y + 3, "D RELAY", state.dOpen and "OPEN" or "STOP", C.dim, state.dOpen and C.ok or C.warn, b4.w - 14)
+    end
+    if b4.h > 5 then
+      drawKeyValue(b4.x + 2, b4.y + 4, "T RELAY", state.tOpen and "OPEN" or "STOP", C.dim, state.tOpen and C.ok or C.warn, b4.w - 14)
+    end
+    if b4.h > 6 then
+      drawKeyValue(b4.x + 2, b4.y + 5, "Reader D", hw.readerRoles.deuterium and "OK" or "MISS", C.dim, hw.readerRoles.deuterium and C.ok or C.warn, b4.w - 14)
+    end
+    if b4.h > 7 then
+      drawKeyValue(b4.x + 2, b4.y + 6, "Reader T", hw.readerRoles.tritium and "OK" or "MISS", C.dim, hw.readerRoles.tritium and C.ok or C.warn, b4.w - 14)
+    end
+    if b4.h > 8 then
+      drawKeyValue(b4.x + 2, b4.y + 7, "Reader Aux", hw.readerRoles.inventory and "OK" or "MISS", C.dim, hw.readerRoles.inventory and C.ok or C.warn, b4.w - 14)
     end
   end
 end
@@ -1229,6 +1354,9 @@ local function drawControlPanel(panel, layout)
   drawBadge(sx, panel.y + 3, "FUSION", state.fusionAuto and "AUTO" or "MANUAL")
   drawBadge(sx, panel.y + 4, "CHARGE", state.chargeAuto and "AUTO" or "MANUAL")
   drawBadge(sx, panel.y + 5, "GAS", state.gasAuto and "AUTO" or "MANUAL")
+  if summaryH >= 7 then
+    drawKeyValue(sx, panel.y + 6, "Charge L", state.laserLineOn and "ON" or "OFF", C.dim, state.laserLineOn and C.ok or C.warn, w - 6)
+  end
 
   local controlsY = panel.y + 1 + summaryH
   local controlsH = panel.h - summaryH - 1
@@ -1241,8 +1369,8 @@ local function drawControlPanel(panel, layout)
 
   local fy = panel.y + panel.h - 3
   if fy > panel.y + 9 then
-    drawKeyValue(panel.x + 3, fy, "D/T", state.dtOpen and "OPEN" or "STOP", C.dim, state.dtOpen and C.ok or C.warn, panel.w - 16)
-    drawKeyValue(panel.x + 3, fy + 1, "LASER", state.laserChargeOn and "CHARGE" or "IDLE", C.dim, state.laserChargeOn and C.ok or C.dim, panel.w - 16)
+    drawKeyValue(panel.x + 3, fy, "Tank D", state.dOpen and "OPEN" or "STOP", C.dim, state.dOpen and C.ok or C.warn, panel.w - 16)
+    drawKeyValue(panel.x + 3, fy + 1, "Tank T", state.tOpen and "OPEN" or "STOP", C.dim, state.tOpen and C.ok or C.warn, panel.w - 16)
   end
 end
 
