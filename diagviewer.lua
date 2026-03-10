@@ -447,8 +447,14 @@ local function safeGetMethods(name)
 end
 
 local function safeInvokeMethod(target, methodName, ...)
-  if not target or type(target[methodName]) ~= "function" then return false, "method unavailable" end
-  return safeCall(function() return target[methodName](...) end)
+  if not target or type(target[methodName]) ~= "function" then
+    return false, "method unavailable"
+  end
+
+  local args = { ... }
+  return safeCall(function()
+    return target[methodName](table.unpack(args))
+  end)
 end
 
 local function getSuggestedRole(name, pType, methods, readerRole)
