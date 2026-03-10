@@ -521,27 +521,53 @@ local function drawReactorDiagram(x, y, w, h)
   local tTone = state.tOpen and C.ok or C.dim
   local dtTone = state.dtOpen and C.fuel or C.dim
 
+  local conduitTone = C.borderDim
+  if state.alert == "WARN" then conduitTone = C.warn end
+  if state.alert == "DANGER" then conduitTone = C.bad end
+
+  local laserPathTone = laserOn and C.warn or conduitTone
+  local tPathTone = state.tOpen and C.ok or conduitTone
+  local dPathTone = state.dOpen and C.ok or conduitTone
+
+  for gyLine = gcy - 5, gcy - 2 do
+    drawCell(gcx, gyLine, laserPathTone, laserOn and (pulse and "||" or "::") or "  ", C.text)
+  end
+
+  for gyLine = gcy + 2, gcy + 5 do
+    drawCell(gcx - 4, gyLine, tPathTone)
+    drawCell(gcx + 4, gyLine, dPathTone)
+  end
+  for gxLine = gcx - 3, gcx - 1 do
+    drawCell(gxLine, gcy + 2, tPathTone)
+  end
+  for gxLine = gcx + 1, gcx + 3 do
+    drawCell(gxLine, gcy + 2, dPathTone)
+  end
+
+  drawCell(gcx - 4, gcy + 5, tPathTone, state.tOpen and (blink and "<<" or "TT") or "T ", C.text)
+  drawCell(gcx + 4, gcy + 5, dPathTone, state.dOpen and (blink and ">>" or "DD") or "D ", C.text)
+
   local topY = ry - 1
   if topY >= y + 1 then
     local laserTxt = string.format("LAS %3.0f%%", state.laserPct)
     writeAt(rx + math.floor((gw * cellW - #laserTxt) / 2), topY, laserTxt, laserTone, C.panelDark)
   end
 
-  local leftX = rx - 6
-  if leftX >= x + 2 then
-    writeAt(leftX, ry + gcy - 1, "D " .. (state.dOpen and ">>" or ".."), dTone, C.panelDark)
-  end
-
-  local rightTxt = "T " .. (state.tOpen and "<<" or "..")
-  local rightX = rx + gw * cellW + 1
-  if rightX + #rightTxt <= x + w - 2 then
-    writeAt(rightX, ry + gcy - 1, rightTxt, tTone, C.panelDark)
-  end
-
   local bottomY = ry + gh
   if bottomY <= y + h - 2 then
-    local fuelTxt = "DT " .. (state.dtOpen and (blink and "FLOW" or "OPEN") or "LOCK")
-    writeAt(rx + math.floor((gw * cellW - #fuelTxt) / 2), bottomY, fuelTxt, dtTone, C.panelDark)
+    local tTxt = "T " .. (state.tOpen and (blink and "FLOW" or "OPEN") or "LOCK")
+    local dTxt = "D " .. (state.dOpen and (blink and "FLOW" or "OPEN") or "LOCK")
+    local tX = rx + 1
+    local dX = rx + gw * cellW - #dTxt - 1
+    if tX >= x + 2 then
+      writeAt(tX, bottomY, tTxt, tTone, C.panelDark)
+    end
+    if dX + #dTxt <= x + w - 2 then
+      writeAt(dX, bottomY, dTxt, dTone, C.panelDark)
+    end
+
+    local fuelTxt = "DT " .. (state.dtOpen and (blink and "MIX" or "OPEN") or "LOCK")
+    writeAt(rx + math.floor((gw * cellW - #fuelTxt) / 2), bottomY - 1, fuelTxt, dtTone, C.panelDark)
   end
 
   local statusTxt = state.reactorPresent and (state.reactorFormed and "FORMED" or "UNFORMED") or "ABSENT"
