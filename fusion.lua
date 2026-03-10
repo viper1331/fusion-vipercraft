@@ -491,9 +491,9 @@ local function drawReactorDiagram(x, y, w, h)
 
   local cellW = 2
   local maxGw = math.floor((innerW - 4) / cellW)
-  local gw = clamp(maxGw, 15, 21)
+  local gw = clamp(maxGw, 17, 23)
   if gw % 2 == 0 then gw = gw - 1 end
-  local gh = clamp(innerH - 4, 13, 17)
+  local gh = clamp(innerH - 4, 15, 19)
   if gh % 2 == 0 then gh = gh - 1 end
 
   local rx = innerX + math.floor((innerW - (gw * cellW)) / 2)
@@ -518,13 +518,13 @@ local function drawReactorDiagram(x, y, w, h)
       local dy = math.abs(gy - gcy)
       local layer = 0
 
-      if math.max(dx, dy) <= 4 then layer = 1 end
-      if math.max(dx, dy) <= 3 then layer = 2 end
-      if dx <= 1 and dy <= 6 then layer = math.max(layer, 1) end
-      if dy <= 1 and dx <= 6 then layer = math.max(layer, 1) end
-      if dx <= 0 and dy <= 5 then layer = math.max(layer, 2) end
-      if dy <= 0 and dx <= 5 then layer = math.max(layer, 2) end
-      if dx == 4 and dy == 4 then layer = 0 end
+      if math.max(dx, dy) <= 5 then layer = 1 end
+      if math.max(dx, dy) <= 4 then layer = 2 end
+      if dx <= 1 and dy <= 7 then layer = math.max(layer, 1) end
+      if dy <= 1 and dx <= 7 then layer = math.max(layer, 1) end
+      if dx <= 0 and dy <= 6 then layer = math.max(layer, 2) end
+      if dy <= 0 and dx <= 6 then layer = math.max(layer, 2) end
+      if dx == 5 and dy == 5 then layer = 0 end
       if dx <= 1 and dy <= 1 then layer = 3 end
 
       if layer == 1 then
@@ -538,7 +538,7 @@ local function drawReactorDiagram(x, y, w, h)
     end
   end
 
-  for i = -4, 4 do
+  for i = -5, 5 do
     drawCell(gcx + i, gcy, spineColor)
     drawCell(gcx, gcy + i, spineColor)
   end
@@ -580,7 +580,8 @@ local function drawReactorDiagram(x, y, w, h)
     drawCell(gcx, gyLine, laserPathTone, laserOn and (pulse and "||" or "::") or "  ", C.text)
   end
 
-  for gyLine = gcy + 2, gcy + 5 do
+  local legY = math.min(gh - 1, gcy + 6)
+  for gyLine = gcy + 2, legY do
     drawCell(gcx - 4, gyLine, tPathTone)
     drawCell(gcx + 4, gyLine, dPathTone)
   end
@@ -591,8 +592,8 @@ local function drawReactorDiagram(x, y, w, h)
     drawCell(gxLine, gcy + 2, dPathTone)
   end
 
-  drawCell(gcx - 4, gcy + 5, tPathTone, state.tOpen and (blink and "<<" or "TT") or "T ", C.text)
-  drawCell(gcx + 4, gcy + 5, dPathTone, state.dOpen and (blink and ">>" or "DD") or "D ", C.text)
+  drawCell(gcx - 4, legY, tPathTone, state.tOpen and (blink and "<<" or "TT") or "T ", C.text)
+  drawCell(gcx + 4, legY, dPathTone, state.dOpen and (blink and ">>" or "DD") or "D ", C.text)
 
   local topY = moduleY - 1
   if topY >= y + 1 then
@@ -618,6 +619,29 @@ local function drawReactorDiagram(x, y, w, h)
 
     local fuelTxt = "DT " .. (state.dtOpen and (blink and "MIX" or "OPEN") or "LOCK")
     writeAt(rx + math.floor((gw * cellW - #fuelTxt) / 2), bottomY - 1, fuelTxt, dtTone, C.panelDark)
+
+    local labelY = bottomY + 1
+    if labelY <= y + h - 3 then
+      local leftBranchX = rx + (gcx - 4 - 1) * cellW
+      local rightBranchX = rx + (gcx + 4 - 1) * cellW
+      local centerBranchX = rx + (gcx - 1) * cellW
+      writeAt(leftBranchX, labelY, "||", tPathTone, C.panelDark)
+      writeAt(centerBranchX, labelY, "||", dtTone, C.panelDark)
+      writeAt(rightBranchX, labelY, "||", dPathTone, C.panelDark)
+
+      local lockY = labelY + 1
+      if lockY <= y + h - 2 then
+        local tLock = " T LOCK "
+        local dtLock = " DT LOCK "
+        local dLock = " D LOCK "
+        local tLockX = leftBranchX - math.floor((#tLock - 2) / 2)
+        local dtLockX = centerBranchX - math.floor((#dtLock - 2) / 2)
+        local dLockX = rightBranchX - math.floor((#dLock - 2) / 2)
+        writeAt(tLockX, lockY, tLock, C.text, state.tOpen and C.ok or C.panelMid)
+        writeAt(dtLockX, lockY, dtLock, C.text, state.dtOpen and C.fuel or C.panelMid)
+        writeAt(dLockX, lockY, dLock, C.text, state.dOpen and C.ok or C.panelMid)
+      end
+    end
   end
 
   local tdModuleY = math.min(y + h - 3, ry + gh + 1)
@@ -628,13 +652,8 @@ local function drawReactorDiagram(x, y, w, h)
     writeAt(dMx, tdModuleY, " TANK D", state.dOpen and C.text or C.dim, state.dOpen and C.ok or C.panelMid)
   end
 
-  local statusTxt = state.reactorPresent and (state.reactorFormed and "FORMED" or "UNFORMED") or "ABSENT"
-  local ignTxt = state.ignition and "IGNITED" or (state.ignitionSequencePending and "IGN PEND" or "IDLE")
-  local gridTxt = state.energyKnown and string.format("GRID %3.0f%%", state.energyPct) or "GRID N/A"
 
-  writeAt(x + 2, y + 2, shortText("CORE " .. statusTxt, math.max(8, math.floor(w * 0.33))), state.reactorPresent and C.info or C.bad, C.panelDark)
-  writeAt(x + 2, y + h - 2, shortText("PHASE " .. phase .. " | " .. ignTxt, math.max(10, math.floor(w * 0.58))), statusColor(state.alert), C.panelDark)
-  writeAt(x + math.floor(w * 0.62), y + h - 2, shortText(gridTxt, math.max(8, w - math.floor(w * 0.62) - 2)), C.energy, C.panelDark)
+  writeAt(x + 2, y + 2, shortText("CORE " .. (state.reactorPresent and (state.reactorFormed and "FORMED" or "UNFORMED") or "ABSENT"), math.max(8, math.floor(w * 0.33))), state.reactorPresent and C.info or C.bad, C.panelDark)
 end
 
 local function drawBadge(x, y, label, value, tone)
@@ -1456,12 +1475,16 @@ local function drawIoPanel(x, y, w, h)
   drawBox(x, y, w, h, "REAL I/O", C.borderDim)
   local rx = x + 2
   local ry = y + 1
-  drawKeyValue(rx, ry, "LAS OUT", yesno(state.laserLineOn), C.dim, state.laserLineOn and C.ok or C.warn, w - 6)
-  drawKeyValue(rx, ry + 1, "T OUT", yesno(state.tOpen), C.dim, state.tOpen and C.ok or C.warn, w - 6)
-  drawKeyValue(rx, ry + 2, "D OUT", yesno(state.dOpen), C.dim, state.dOpen and C.ok or C.warn, w - 6)
-  drawKeyValue(rx, ry + 3, "Reader T", hw.readerRoles.tritium and "OK" or "FAIL", C.dim, hw.readerRoles.tritium and C.ok or C.bad, w - 6)
-  if ry + 4 <= y + h - 2 then drawKeyValue(rx, ry + 4, "Reader D", hw.readerRoles.deuterium and "OK" or "FAIL", C.dim, hw.readerRoles.deuterium and C.ok or C.bad, w - 6) end
-  if ry + 5 <= y + h - 2 then drawKeyValue(rx, ry + 5, "Reader Aux", hw.readerRoles.inventory and "OK" or "FAIL", C.dim, hw.readerRoles.inventory and C.ok or C.bad, w - 6) end
+  local maxY = y + h - 2
+  writeAt(rx, ry, "OUT", C.info, C.panelDark)
+  if ry + 1 <= maxY then drawKeyValue(rx, ry + 1, "LAS", yesno(state.laserLineOn), C.dim, state.laserLineOn and C.ok or C.warn, w - 6) end
+  if ry + 2 <= maxY then drawKeyValue(rx, ry + 2, "T", yesno(state.tOpen), C.dim, state.tOpen and C.ok or C.warn, w - 6) end
+  if ry + 3 <= maxY then drawKeyValue(rx, ry + 3, "D", yesno(state.dOpen), C.dim, state.dOpen and C.ok or C.warn, w - 6) end
+
+  if ry + 4 <= maxY then writeAt(rx, ry + 4, "SENSE", C.info, C.panelDark) end
+  if ry + 5 <= maxY then drawKeyValue(rx, ry + 5, "R-T", hw.readerRoles.tritium and "OK" or "FAIL", C.dim, hw.readerRoles.tritium and C.ok or C.bad, w - 6) end
+  if ry + 6 <= maxY then drawKeyValue(rx, ry + 6, "R-D", hw.readerRoles.deuterium and "OK" or "FAIL", C.dim, hw.readerRoles.deuterium and C.ok or C.bad, w - 6) end
+  if ry + 7 <= maxY then drawKeyValue(rx, ry + 7, "R-AUX", hw.readerRoles.inventory and "OK" or "FAIL", C.dim, hw.readerRoles.inventory and C.ok or C.bad, w - 6) end
 end
 
 local function drawStatusPanel(panel)
@@ -1495,6 +1518,15 @@ local function drawStatusPanel(panel)
   local warnings = state.safetyWarnings or {}
   if #warnings == 0 then
     writeAt(x + 2, y3 + 1, "NO CRITICAL WARNING", C.ok, C.panelDark)
+    if y3 + 2 <= y3 + b3h - 2 then
+      drawKeyValue(x + 2, y3 + 2, "Relays", (hw.relays[CFG.actions.laser_charge.relay] and hw.relays[CFG.actions.deuterium.relay] and hw.relays[CFG.actions.tritium.relay]) and "READY" or "CHECK", C.dim, C.info, w - 6)
+    end
+    if y3 + 3 <= y3 + b3h - 2 then
+      drawKeyValue(x + 2, y3 + 3, "Readers", (hw.readerRoles.deuterium and hw.readerRoles.tritium and hw.readerRoles.inventory) and "SYNC" or "PARTIAL", C.dim, C.info, w - 6)
+    end
+    if y3 + 4 <= y3 + b3h - 2 then
+      drawKeyValue(x + 2, y3 + 4, "Locks", (state.dOpen or state.tOpen or state.dtOpen) and "OPEN" or "SEALED", C.dim, (state.dOpen or state.tOpen or state.dtOpen) and C.warn or C.ok, w - 6)
+    end
   else
     for i = 1, math.min(#warnings, b3h - 2) do
       writeAt(x + 2, y3 + i, shortText("- " .. warnings[i], w - 4), C.warn, C.panelDark)
