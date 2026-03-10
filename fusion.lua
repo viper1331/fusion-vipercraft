@@ -53,6 +53,9 @@ local CONFIG_FILE = "fusion_monitor.cfg"
 
 local nativeTerm = term.current()
 local buttons = {}
+local touchHitboxes = {}
+local pressedButtonId = nil
+local pressedUntil = 0
 
 local state = {
   running = true,
@@ -1334,8 +1337,39 @@ local function fullAuto()
   updateAlerts()
 end
 
-local function addButton(id, x, y, w, h, label, bg, fg, action)
-  buttons[id] = { x = x, y = y, w = w, h = h or 1, label = label, bg = bg, fg = fg or C.btnText, action = action }
+local function clearHitboxes()
+  touchHitboxes = {}
+end
+
+local function registerHitbox(id, x, y, w, h, action)
+  touchHitboxes[#touchHitboxes + 1] = {
+    id = id,
+    x = x,
+    y = y,
+    w = w,
+    h = h,
+    action = action,
+  }
+end
+
+local function isInsideBox(x, y, box)
+  return x >= box.x and x < (box.x + box.w) and y >= box.y and y < (box.y + box.h)
+end
+
+local function addButton(id, x, y, w, h, label, bg, fg, action, opts)
+  buttons[#buttons + 1] = {
+    id = id,
+    x = x,
+    y = y,
+    w = w,
+    h = h or 2,
+    label = label,
+    bg = bg,
+    fg = fg or C.btnText,
+    action = action,
+    touchPadX = (opts and opts.touchPadX) or 1,
+    touchPadY = (opts and opts.touchPadY) or 1,
+  }
 end
 
 local function startMonitorSelection()
@@ -1362,6 +1396,7 @@ end
 
 local function buildButtons(layout)
   buttons = {}
+  clearHitboxes()
 
   if state.choosingMonitor then
     local boxW = clamp(layout.width - 6, 24, 60)
@@ -1378,11 +1413,12 @@ local function buildButtons(layout)
   local bx = ctrl.x + 2
   local bw = math.max(10, ctrl.w - 4)
   local by = ctrl.y + 8
-  local bh = (layout.mode == "compact") and 1 or 2
+  local bh = math.max(2, (layout.mode == "compact") and 2 or 2)
+  local bGap = 1
 
-  addButton("viewSup", bx, ctrl.y + 1, math.max(8, math.floor(bw / 3)), 1, "SUP", state.currentView == "supervision" and C.btnOn or C.panelMid, nil, function() state.currentView = "supervision" end)
-  addButton("viewDiag", bx + math.max(8, math.floor(bw / 3)), ctrl.y + 1, math.max(8, math.floor(bw / 3)), 1, "DIAG", state.currentView == "diagnostic" and C.btnOn or C.panelMid, nil, function() state.currentView = "diagnostic" end)
-  addButton("viewMan", bx + (math.max(8, math.floor(bw / 3)) * 2), ctrl.y + 1, bw - (math.max(8, math.floor(bw / 3)) * 2), 1, "MAN", state.currentView == "manual" and C.btnOn or C.panelMid, nil, function() state.currentView = "manual" end)
+  addButton("viewSup", bx, ctrl.y + 1, math.max(8, math.floor(bw / 3)), 2, "SUP", state.currentView == "supervision" and C.btnOn or C.panelMid, nil, function() state.currentView = "supervision" end, { touchPadX = 1, touchPadY = 0 })
+  addButton("viewDiag", bx + math.max(8, math.floor(bw / 3)), ctrl.y + 1, math.max(8, math.floor(bw / 3)), 2, "DIAG", state.currentView == "diagnostic" and C.btnOn or C.panelMid, nil, function() state.currentView = "diagnostic" end, { touchPadX = 1, touchPadY = 0 })
+  addButton("viewMan", bx + (math.max(8, math.floor(bw / 3)) * 2), ctrl.y + 1, bw - (math.max(8, math.floor(bw / 3)) * 2), 2, "MAN", state.currentView == "manual" and C.btnOn or C.panelMid, nil, function() state.currentView = "manual" end, { touchPadX = 1, touchPadY = 0 })
 
   addButton("master", bx, by, bw, bh, "MASTER", state.autoMaster and C.btnOn or C.btnOff, nil, function()
     state.autoMaster = not state.autoMaster
@@ -1398,42 +1434,62 @@ local function buildButtons(layout)
     state.lastAction = "Toggle MASTER"
   end)
 
-  addButton("fusion", bx, by + bh, bw, bh, "FUSION", state.fusionAuto and C.btnOn or C.btnOff, nil, function()
+  addButton("fusion", bx, by + (bh + bGap), bw, bh, "FUSION", state.fusionAuto and C.btnOn or C.btnOff, nil, function()
     state.fusionAuto = not state.fusionAuto
     state.lastAction = "Toggle FUSION"
   end)
 
-  addButton("charge", bx, by + bh * 2, bw, bh, "CHARGE", state.chargeAuto and C.btnOn or C.btnOff, nil, function()
+  addButton("charge", bx, by + (bh + bGap) * 2, bw, bh, "CHARGE", state.chargeAuto and C.btnOn or C.btnOff, nil, function()
     state.chargeAuto = not state.chargeAuto
     state.lastAction = "Toggle CHARGE"
   end)
 
-  addButton("ignite", bx, by + bh * 3, bw, bh, "IGNITE", C.btnAction, nil, function() triggerAutomaticIgnitionSequence() end)
-  addButton("monitor", bx, by + bh * 4, bw, 1, "MONITOR", C.btnWarn, nil, function() startMonitorSelection() end)
-  addButton("stop", bx, by + bh * 4 + 1, bw, 1, "E-STOP", C.bad, nil, function() hardStop("EMERGENCY STOP") end)
+  addButton("ignite", bx, by + (bh + bGap) * 3, bw, bh, "IGNITE", C.btnAction, nil, function() triggerAutomaticIgnitionSequence() end)
+  addButton("monitor", bx, by + (bh + bGap) * 4, bw, 2, "MONITOR", C.btnWarn, nil, function() startMonitorSelection() end)
+  addButton("stop", bx, by + (bh + bGap) * 5, bw, 2, "E-STOP", C.bad, nil, function() hardStop("EMERGENCY STOP") end)
 
   if state.currentView == "manual" then
-    addButton("manualLaser", bx, by + bh * 5 + 1, bw, 1, "LAS OUT " .. yesno(state.laserChargeOn), state.laserChargeOn and C.btnOn or C.btnOff, nil, function() setLaserCharge(not state.laserChargeOn) end)
-    addButton("manualT", bx, by + bh * 5 + 2, bw, 1, "T OUT " .. yesno(state.tOpen), state.tOpen and C.btnOn or C.btnOff, nil, function() openTritium(not state.tOpen) end)
-    addButton("manualD", bx, by + bh * 5 + 3, bw, 1, "D OUT " .. yesno(state.dOpen), state.dOpen and C.btnOn or C.btnOff, nil, function() openDeuterium(not state.dOpen) end)
+    addButton("manualLaser", bx, by + (bh + bGap) * 6, bw, 2, "LAS OUT " .. yesno(state.laserChargeOn), state.laserChargeOn and C.btnOn or C.btnOff, nil, function() setLaserCharge(not state.laserChargeOn) end)
+    addButton("manualT", bx, by + (bh + bGap) * 7, bw, 2, "T OUT " .. yesno(state.tOpen), state.tOpen and C.btnOn or C.btnOff, nil, function() openTritium(not state.tOpen) end)
+    addButton("manualD", bx, by + (bh + bGap) * 8, bw, 2, "D OUT " .. yesno(state.dOpen), state.dOpen and C.btnOn or C.btnOff, nil, function() openDeuterium(not state.dOpen) end)
   end
 end
 
+local function applyButtonTouchTargets(button)
+  local maxW, maxH = term.getSize()
+  local tx = clamp(button.x - button.touchPadX, 1, maxW)
+  local ty = clamp(button.y - button.touchPadY, 1, maxH)
+  local tw = clamp(button.w + (button.touchPadX * 2), 1, maxW - tx + 1)
+  local th = clamp(button.h + (button.touchPadY * 2), 1, maxH - ty + 1)
+  registerHitbox(button.id, tx, ty, tw, th, button.action)
+end
+
+local function drawButton(button)
+  local isPressed = (pressedButtonId == button.id and os.clock() <= pressedUntil)
+  local drawBg = isPressed and C.panelMid or button.bg
+  for yy = button.y, button.y + button.h - 1 do
+    writeAt(button.x, yy, string.rep(" ", button.w), button.fg, drawBg)
+  end
+  local lx = button.x + math.max(0, math.floor((button.w - #button.label) / 2))
+  local ly = button.y + math.floor((button.h - 1) / 2)
+  writeAt(lx, ly, button.label, button.fg, drawBg)
+  applyButtonTouchTargets(button)
+end
+
 local function drawButtons()
-  for _, b in pairs(buttons) do
-    for yy = b.y, b.y + b.h - 1 do
-      writeAt(b.x, yy, string.rep(" ", b.w), b.fg, b.bg)
-    end
-    local lx = b.x + math.max(0, math.floor((b.w - #b.label) / 2))
-    local ly = b.y + math.floor((b.h - 1) / 2)
-    writeAt(lx, ly, b.label, b.fg, b.bg)
+  clearHitboxes()
+  for _, b in ipairs(buttons) do
+    drawButton(b)
   end
 end
 
 local function handleTouch(x, y)
-  for _, b in pairs(buttons) do
-    if y >= b.y and y < b.y + b.h and x >= b.x and x < b.x + b.w then
-      b.action()
+  for i = #touchHitboxes, 1, -1 do
+    local hit = touchHitboxes[i]
+    if isInsideBox(x, y, hit) then
+      pressedButtonId = hit.id
+      pressedUntil = os.clock() + 0.20
+      hit.action()
       return true
     end
   end
