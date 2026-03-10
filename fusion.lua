@@ -468,7 +468,8 @@ local function drawReactorDiagram(x, y, w, h)
   if gh % 2 == 0 then gh = gh - 1 end
 
   local rx = innerX + math.floor((innerW - (gw * cellW)) / 2)
-  local ry = innerY + math.floor((innerH - gh) / 2)
+  local ryBase = innerY + math.floor((innerH - gh) / 2)
+  local ry = math.min(innerY + innerH - gh, ryBase + 1)
 
   local gcx = math.floor((gw + 1) / 2)
   local gcy = math.floor((gh + 1) / 2)
@@ -529,7 +530,24 @@ local function drawReactorDiagram(x, y, w, h)
   local tPathTone = state.tOpen and C.ok or conduitTone
   local dPathTone = state.dOpen and C.ok or conduitTone
 
-  for gyLine = gcy - 5, gcy - 2 do
+  local moduleW = clamp(math.min(gw * cellW - 2, 12), 8, 12)
+  if moduleW % 2 ~= 0 then moduleW = moduleW - 1 end
+  local moduleX = rx + math.floor((gw * cellW - moduleW) / 2)
+  local moduleY = math.max(y + 1, ry - 3)
+  local gapTop = moduleY + 1
+  local gapBottom = ry - 1
+
+  for gxCol = moduleX, moduleX + moduleW - 1 do
+    writeAt(gxCol, moduleY, " ", C.text, laserOn and C.warn or C.panelMid)
+  end
+  local moduleLabel = laserOn and "LAS ON" or "LAS"
+  writeAt(moduleX + math.floor((moduleW - #moduleLabel) / 2), moduleY, moduleLabel, laserOn and C.text or C.dim, laserOn and C.warn or C.panelMid)
+
+  for yLine = gapTop, gapBottom do
+    writeAt(rx + (gcx - 1) * cellW, yLine, laserOn and (pulse and "||" or "::") or "..", laserOn and C.text or C.dim, C.panelDark)
+  end
+
+  for gyLine = 2, gcy - 2 do
     drawCell(gcx, gyLine, laserPathTone, laserOn and (pulse and "||" or "::") or "  ", C.text)
   end
 
@@ -547,10 +565,13 @@ local function drawReactorDiagram(x, y, w, h)
   drawCell(gcx - 4, gcy + 5, tPathTone, state.tOpen and (blink and "<<" or "TT") or "T ", C.text)
   drawCell(gcx + 4, gcy + 5, dPathTone, state.dOpen and (blink and ">>" or "DD") or "D ", C.text)
 
-  local topY = ry - 1
+  local topY = moduleY - 1
   if topY >= y + 1 then
     local laserTxt = string.format("LAS %3.0f%%", state.laserPct)
     writeAt(rx + math.floor((gw * cellW - #laserTxt) / 2), topY, laserTxt, laserTone, C.panelDark)
+  elseif moduleX + moduleW + 1 <= x + w - 2 then
+    local laserTxt = string.format("%3.0f%%", state.laserPct)
+    writeAt(moduleX + moduleW + 1, moduleY, laserTxt, laserTone, C.panelDark)
   end
 
   local bottomY = ry + gh
