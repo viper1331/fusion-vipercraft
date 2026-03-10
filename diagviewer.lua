@@ -4,10 +4,19 @@ local config = {
   maxFlattenDepth = 5,
   maxFlattenLines = 260,
   defaultMonitorScale = 0.5,
+  aliasFile = "diagviewer_aliases.lua",
   ui = {
     showBoxes = true,
     showTabBar = true,
     compactFooter = false,
+    roleColors = {
+      deuterium = colors.lightBlue,
+      tritium = colors.pink,
+      chemical = colors.cyan,
+      active = colors.lime,
+      inventory = colors.yellow,
+      unknown = colors.lightGray,
+    }
   }
 }
 
@@ -19,8 +28,11 @@ local selectedSideIndex = 1
 local selectedMonitorIndex = 0
 local selectedMonitorName = nil
 local selectedMethodsCategory = 1
+local selectedAliasIndex = 1
+local aliasEditor = { active = false, target = nil, value = "" }
 
 local SIDE_LIST = { "top", "bottom", "left", "right", "front", "back" }
+local ROLE_ORDER = { "deuterium", "tritium", "chemical", "active", "inventory", "unknown" }
 local PAGE_ORDER = {
   "summary",
   "block_readers",
@@ -29,6 +41,7 @@ local PAGE_ORDER = {
   "fusion",
   "relay_test",
   "methods",
+  "aliases",
   "monitors",
   "peripherals"
 }
@@ -41,8 +54,23 @@ local PAGE_TITLES = {
   fusion = "FUSION EQUIPMENT",
   relay_test = "RELAY TEST",
   methods = "METHOD EXPLORER",
+  aliases = "ALIAS MANAGER",
   monitors = "MONITOR MANAGEMENT",
   peripherals = "PERIPHERAL INVENTORY"
+}
+
+local SUGGESTED_ALIASES = {
+  ["redstone_relay_0"] = "Charge Laser",
+  ["redstone_relay_1"] = "Tank Deuterium",
+  ["redstone_relay_2"] = "Tank Tritium",
+  ["block_reader_1"] = "Reader Deuterium",
+  ["block_reader_2"] = "Reader Tritium",
+  ["block_reader_6"] = "Reader Aux",
+  ["fusionReactorLogicAdapter_0"] = "Logic Adapter Fusion",
+  ["mekanismgenerators:fusion_reactor_controller_3"] = "Fusion Reactor Controller",
+  ["inductionPort_1"] = "Induction Matrix",
+  ["laserAmplifier_1"] = "Laser Amplifier",
+  ["monitor_2"] = "Moniteur Principal"
 }
 
 local colorsUI = {
@@ -65,11 +93,8 @@ local colorsUI = {
 }
 
 local latestData = {}
-local statusState = {
-  defaultMessage = "Ready",
-  tempMessage = nil,
-  tempUntil = 0,
-}
+local aliases = {}
+local statusState = { defaultMessage = "Ready", tempMessage = nil, tempUntil = 0 }
 
 local function safeCall(fn, ...)
   local ok, result = pcall(fn, ...)
@@ -107,70 +132,107 @@ local function setStatus(message, duration)
 end
 
 local function getCurrentStatus()
-  if statusState.tempMessage and os.clock() <= statusState.tempUntil then
-    return statusState.tempMessage
-  end
+  if statusState.tempMessage and os.clock() <= statusState.tempUntil then return statusState.tempMessage end
   statusState.tempMessage = nil
   return statusState.defaultMessage
 end
 
-local function flattenTable(tbl, indent, out, visited, options, state)
+local function encodeRaw(value, indent, visited, depth)
   indent = indent or 0
-  out = out or {}
   visited = visited or {}
-  options = options or {}
-  state = state or { lines = 0 }
+  depth = depth or 0
+  if type(value) ~= "table" then
+    if type(value) == "string" then return string.format("%q", value) end
+    return tostring(value)
+  end
+  if visited[value] then return "\"<circular>\"" end
+  if depth > config.maxFlattenDepth + 3 then return "\"<max depth>\"" end
+  visited[value] = true
+  local pad = string.rep(" ", indent)
+  local nextPad = string.rep(" ", indent + 2)
+  local parts = { "{" }
+  for _, key in ipairs(sortedKeys(value)) do
+    local keyRepr = type(key) == "string" and key:match("^[%a_][%w_]*$") and key or "[" .. encodeRaw(key, indent + 2, visited, depth + 1) .. "]"
+    table.insert(parts, nextPad .. keyRepr .. " = " .. encodeRaw(value[key], indent + 2, visited, depth + 1) .. ",")
+  end
+  table.insert(parts, pad .. "}")
+  visited[value] = nil
+  return table.concat(parts, "\n")
+end
 
+local function loadAliases()
+  aliases = {}
+  if not fs.exists(config.aliasFile) then return end
+  local ok, loaded = pcall(dofile, config.aliasFile)
+  if ok and type(loaded) == "table" then
+    for k, v in pairs(loaded) do
+      if type(k) == "string" and type(v) == "string" and #v > 0 then aliases[k] = v end
+    end
+  else
+    setStatus("Alias: fichier invalide", 3)
+  end
+end
+
+local function saveAliases()
+  local content = { "return " .. encodeRaw(aliases, 0, {}, 0) }
+  local file = fs.open(config.aliasFile, "w")
+  if not file then return false end
+  file.write(content[1])
+  file.close()
+  return true
+end
+
+local function getAlias(name)
+  return aliases[name]
+end
+
+local function setAlias(name, alias)
+  if not name then return end
+  local clean = tostring(alias or ""):gsub("^%s+", ""):gsub("%s+$", "")
+  if clean == "" then
+    aliases[name] = nil
+  else
+    aliases[name] = clean
+  end
+  saveAliases()
+end
+
+local function removeAlias(name)
+  aliases[name] = nil
+  saveAliases()
+end
+
+local function getSuggestedAlias(name)
+  return SUGGESTED_ALIASES[name]
+end
+
+local function getDisplayName(name)
+  return getAlias(name) or name
+end
+
+local function flattenTable(tbl, indent, out, visited, options, state)
+  indent = indent or 0; out = out or {}; visited = visited or {}; options = options or {}; state = state or { lines = 0 }
   local maxDepth = options.maxDepth or config.maxFlattenDepth
   local maxLines = options.maxLines or config.maxFlattenLines
-
-  if state.lines >= maxLines then
-    return out
-  end
-
+  if state.lines >= maxLines then return out end
   if type(tbl) ~= "table" then
-    table.insert(out, string.rep(" ", indent) .. tostring(tbl))
-    state.lines = state.lines + 1
-    return out
+    table.insert(out, string.rep(" ", indent) .. tostring(tbl)); state.lines = state.lines + 1; return out
   end
-
-  if visited[tbl] then
-    table.insert(out, string.rep(" ", indent) .. "<circular reference>")
-    state.lines = state.lines + 1
-    return out
-  end
-
-  if indent / 2 >= maxDepth then
-    table.insert(out, string.rep(" ", indent) .. "<max depth reached>")
-    state.lines = state.lines + 1
-    return out
-  end
-
+  if visited[tbl] then table.insert(out, string.rep(" ", indent) .. "<circular reference>"); state.lines = state.lines + 1; return out end
+  if indent / 2 >= maxDepth then table.insert(out, string.rep(" ", indent) .. "<max depth reached>"); state.lines = state.lines + 1; return out end
   visited[tbl] = true
-
   for _, key in ipairs(sortedKeys(tbl)) do
-    if state.lines >= maxLines then
-      table.insert(out, string.rep(" ", indent) .. "<line limit reached>")
-      state.lines = state.lines + 1
-      break
-    end
-
+    if state.lines >= maxLines then table.insert(out, string.rep(" ", indent) .. "<line limit reached>"); break end
     local value = tbl[key]
     local prefix = string.rep(" ", indent) .. tostring(key) .. " = "
     if type(value) == "table" then
-      table.insert(out, prefix .. "{")
-      state.lines = state.lines + 1
+      table.insert(out, prefix .. "{"); state.lines = state.lines + 1
       flattenTable(value, indent + 2, out, visited, options, state)
-      if state.lines < maxLines then
-        table.insert(out, string.rep(" ", indent) .. "}")
-        state.lines = state.lines + 1
-      end
+      if state.lines < maxLines then table.insert(out, string.rep(" ", indent) .. "}"); state.lines = state.lines + 1 end
     else
-      table.insert(out, prefix .. tostring(value))
-      state.lines = state.lines + 1
+      table.insert(out, prefix .. tostring(value)); state.lines = state.lines + 1
     end
   end
-
   visited[tbl] = nil
   return out
 end
@@ -188,11 +250,15 @@ end
 
 local function getPeripheralMethods(name)
   local ok, methods = safeCall(function() return peripheral.getMethods(name) end)
-  if ok and type(methods) == "table" then
-    table.sort(methods)
-    return methods
-  end
+  if ok and type(methods) == "table" then table.sort(methods); return methods end
   return {}
+end
+
+local function hasMethods(methods, required)
+  local set = {}
+  for _, m in ipairs(methods or {}) do set[m] = true end
+  for _, wanted in ipairs(required) do if not set[wanted] then return false end end
+  return true
 end
 
 local function getPeripheralNamesByMatcher(matcher)
@@ -200,93 +266,31 @@ local function getPeripheralNamesByMatcher(matcher)
   for _, name in ipairs(peripheral.getNames()) do
     local pType = tostring(peripheral.getType(name) or "")
     local methods = getPeripheralMethods(name)
-    if matcher(name, pType, methods) then
-      table.insert(found, name)
-    end
+    if matcher(name, pType, methods) then table.insert(found, name) end
   end
   table.sort(found)
   return found
 end
 
-local function hasMethods(methods, required)
-  local set = {}
-  for _, m in ipairs(methods or {}) do set[m] = true end
-  for _, wanted in ipairs(required) do
-    if not set[wanted] then return false end
-  end
-  return true
-end
-
-local function getBlockReaders()
-  return getPeripheralNamesByMatcher(function(_, pType, methods)
-    return pType == "block_reader" or hasMethods(methods, { "getBlockData" })
-  end)
-end
-
-local function getRedstoneRelays()
-  return getPeripheralNamesByMatcher(function(_, pType, methods)
-    return pType == "redstone_relay" or hasMethods(methods, { "setAnalogOutput", "getAnalogInput" })
-  end)
-end
-
-local function getModems()
-  return getPeripheralNamesByMatcher(function(_, pType, methods)
-    return pType == "modem" or hasMethods(methods, { "getNamesRemote", "getNameLocal" })
-  end)
-end
-
-local function getFusionControllers()
-  return getPeripheralNamesByMatcher(function(name, pType)
-    local lName = string.lower(name)
-    local lType = string.lower(pType)
-    return lType:find("fusion_reactor_controller", 1, true) ~= nil
-      or lName:find("fusion", 1, true) ~= nil
-  end)
-end
-
-local function getInductionPorts()
-  return getPeripheralNamesByMatcher(function(name, pType)
-    local lName = string.lower(name)
-    local lType = string.lower(pType)
-    return pType == "inductionPort"
-      or lType:find("induction", 1, true) ~= nil
-      or lName:find("induction", 1, true) ~= nil
-  end)
-end
-
-local function getLaserAmplifiers()
-  return getPeripheralNamesByMatcher(function(name, pType)
-    local lName = string.lower(name)
-    local lType = string.lower(pType)
-    return pType == "laserAmplifier"
-      or lType:find("laser", 1, true) ~= nil
-      or lName:find("laser", 1, true) ~= nil
-  end)
-end
+local function getBlockReaders() return getPeripheralNamesByMatcher(function(_, pType, methods) return pType == "block_reader" or hasMethods(methods, { "getBlockData" }) end) end
+local function getRedstoneRelays() return getPeripheralNamesByMatcher(function(_, pType, methods) return pType == "redstone_relay" or hasMethods(methods, { "setAnalogOutput", "getAnalogInput" }) end) end
+local function getModems() return getPeripheralNamesByMatcher(function(_, pType, methods) return pType == "modem" or hasMethods(methods, { "getNamesRemote", "getNameLocal" }) end) end
+local function getFusionControllers() return getPeripheralNamesByMatcher(function(name, pType) local s = string.lower(name .. " " .. pType) return s:find("fusion", 1, true) ~= nil end) end
+local function getInductionPorts() return getPeripheralNamesByMatcher(function(name, pType) local s = string.lower(name .. " " .. pType) return s:find("induction", 1, true) ~= nil end) end
+local function getLaserAmplifiers() return getPeripheralNamesByMatcher(function(name, pType) local s = string.lower(name .. " " .. pType) return s:find("laser", 1, true) ~= nil end) end
 
 local function getMonitorCandidates()
   local found = {}
   for _, name in ipairs(peripheral.getNames()) do
     local pType = tostring(peripheral.getType(name) or "")
     local methods = getPeripheralMethods(name)
-    local methodSet = {}
-    for _, m in ipairs(methods) do methodSet[m] = true end
-
-    local looksLikeMonitor =
-      pType == "monitor"
-      or string.find(string.lower(name), "monitor", 1, true)
-      or (methodSet.getSize and methodSet.write and methodSet.setTextScale)
-
-    if looksLikeMonitor then
+    local set = {}; for _, m in ipairs(methods) do set[m] = true end
+    if pType == "monitor" or string.find(string.lower(name), "monitor", 1, true) or (set.getSize and set.write and set.setTextScale) then
       local info = { name = name, type = pType, methods = methods, width = "?", height = "?", ok = false }
-      local wrapped = peripheral.wrap(name)
-      if wrapped and methodSet.getSize then
-        local ok, size = safeCall(function() return { wrapped.getSize() } end)
-        if ok and type(size) == "table" then
-          info.width = size[1] or "?"
-          info.height = size[2] or "?"
-          info.ok = true
-        end
+      local mon = peripheral.wrap(name)
+      if mon and set.getSize then
+        local ok, size = safeCall(function() return { mon.getSize() } end)
+        if ok then info.width = size[1] or "?"; info.height = size[2] or "?"; info.ok = true end
       end
       table.insert(found, info)
     end
@@ -295,147 +299,87 @@ local function getMonitorCandidates()
   return found
 end
 
-local function getMonitors()
-  local out = {}
-  for _, info in ipairs(getMonitorCandidates()) do table.insert(out, info.name) end
-  return out
-end
-
-local function getMonitorInfo(name)
-  for _, info in ipairs(getMonitorCandidates()) do
-    if info.name == name then return info end
-  end
-  return { name = name, type = "?", width = "?", height = "?", ok = false, methods = {} }
-end
+local function getMonitors() local out = {}; for _, i in ipairs(getMonitorCandidates()) do table.insert(out, i.name) end; return out end
+local function getMonitorInfo(name) for _, i in ipairs(getMonitorCandidates()) do if i.name == name then return i end end; return { name = name, type = "?", width = "?", height = "?", ok = false } end
 
 local function refreshSelectedMonitor()
   local monitors = getMonitors()
-  if #monitors == 0 then
-    selectedMonitorIndex = 0
-    selectedMonitorName = nil
-    return
-  end
-
-  if selectedMonitorName then
-    for i, name in ipairs(monitors) do
-      if name == selectedMonitorName then
-        selectedMonitorIndex = i
-        return
-      end
-    end
-  end
-
-  if selectedMonitorIndex == 0 and #monitors == 1 then
-    selectedMonitorIndex = 1
-  end
+  if #monitors == 0 then selectedMonitorIndex = 0; selectedMonitorName = nil; return end
+  if selectedMonitorName then for i, n in ipairs(monitors) do if n == selectedMonitorName then selectedMonitorIndex = i; return end end end
+  if selectedMonitorIndex == 0 and #monitors == 1 then selectedMonitorIndex = 1 end
   if selectedMonitorIndex < 0 then selectedMonitorIndex = 0 end
   if selectedMonitorIndex > #monitors then selectedMonitorIndex = 1 end
-
-  if selectedMonitorIndex == 0 then
-    selectedMonitorName = nil
-  else
-    selectedMonitorName = monitors[selectedMonitorIndex]
-  end
+  selectedMonitorName = selectedMonitorIndex == 0 and nil or monitors[selectedMonitorIndex]
 end
 
 local function selectNextMonitor()
   local monitors = getMonitors()
-  if #monitors == 0 then
-    selectedMonitorIndex = 0
-    selectedMonitorName = nil
-    setStatus("Aucun moniteur detecte", 2.5)
-    return
-  end
-
-  if selectedMonitorName then
-    local currentIndex = nil
-    for i, name in ipairs(monitors) do
-      if name == selectedMonitorName then currentIndex = i break end
-    end
-    if currentIndex then selectedMonitorIndex = currentIndex end
-  end
-
-  if selectedMonitorIndex == 0 then
-    selectedMonitorIndex = 1
-  else
-    selectedMonitorIndex = selectedMonitorIndex + 1
-    if selectedMonitorIndex > #monitors then selectedMonitorIndex = 1 end
-  end
-
+  if #monitors == 0 then selectedMonitorIndex = 0; selectedMonitorName = nil; setStatus("Aucun moniteur detecte", 2); return end
+  if selectedMonitorName then for i, n in ipairs(monitors) do if n == selectedMonitorName then selectedMonitorIndex = i end end end
+  selectedMonitorIndex = selectedMonitorIndex == 0 and 1 or (selectedMonitorIndex % #monitors) + 1
   selectedMonitorName = monitors[selectedMonitorIndex]
   local info = getMonitorInfo(selectedMonitorName)
-  setStatus("Moniteur: " .. selectedMonitorName .. " (" .. tostring(info.width) .. "x" .. tostring(info.height) .. ")", 3)
+  setStatus("Moniteur: " .. selectedMonitorName .. " (" .. tostring(info.width) .. "x" .. tostring(info.height) .. ")", 2.5)
 end
 
-local function disableMonitorOutput()
-  selectedMonitorIndex = 0
-  selectedMonitorName = nil
-  setStatus("Affichage moniteur desactive", 2.5)
-end
+local function disableMonitorOutput() selectedMonitorIndex = 0; selectedMonitorName = nil; setStatus("Affichage moniteur desactive", 2) end
+local function getSelectedMonitor() refreshSelectedMonitor(); return selectedMonitorName and peripheral.wrap(selectedMonitorName) or nil end
 
-local function getSelectedMonitor()
-  refreshSelectedMonitor()
-  if not selectedMonitorName then return nil end
-  local mon = peripheral.wrap(selectedMonitorName)
-  if not mon then
-    selectedMonitorIndex = 0
-    selectedMonitorName = nil
-    return nil
+local function getReaderSummary(name)
+  local reader = peripheral.wrap(name)
+  if not reader then return { name = name, error = "wrap impossible" } end
+  local ok, data = safeCall(function() return reader.getBlockData() end)
+  if not ok or type(data) ~= "table" then return { name = name, error = tostring(data) } end
+  local result = { name = name, raw = data, active = data.active_state, redstone = data.redstone, current_redstone = data.current_redstone, control_type = data.control_type, dumping = data.dumping }
+  if data.chemical_tanks and data.chemical_tanks[1] and data.chemical_tanks[1].stored then
+    result.chemical_id = data.chemical_tanks[1].stored.id
+    result.chemical_amount = data.chemical_tanks[1].stored.amount
   end
-  return mon
+  result.inventory_id = data.inventory_id
+  return result
 end
 
-local function safeGetBlockData(reader)
-  return safeCall(function() return reader.getBlockData() end)
+local function classifyReaderSummary(readerSummary)
+  if readerSummary.error then return "unknown" end
+  local chemId = string.lower(tostring(readerSummary.chemical_id or ""))
+  if chemId:find("deuterium", 1, true) then return "deuterium" end
+  if chemId:find("tritium", 1, true) then return "tritium" end
+  if readerSummary.raw and readerSummary.raw.chemical_tanks then return "chemical" end
+  if readerSummary.raw and readerSummary.raw.active_state ~= nil then return "active" end
+  if readerSummary.inventory_id or (readerSummary.raw and readerSummary.raw.inventory_id) then return "inventory" end
+  return "unknown"
+end
+
+local function classifyAllReaders(readerSummaries)
+  local byName, counts = {}, {}
+  for _, role in ipairs(ROLE_ORDER) do counts[role] = 0 end
+  for _, summary in ipairs(readerSummaries or {}) do
+    local role = classifyReaderSummary(summary)
+    summary.role = role
+    byName[summary.name] = role
+    counts[role] = (counts[role] or 0) + 1
+  end
+  return { byName = byName, counts = counts }
 end
 
 local function getRelaySideInfo(relay, side)
-  local info = {}
-  local okAIn, valAIn = safeCall(function() return relay.getAnalogInput(side) end)
-  local okAOut, valAOut = safeCall(function() return relay.getAnalogOutput(side) end)
-  info.analogInput = okAIn and valAIn or "ERR"
-  info.analogOutput = okAOut and valAOut or "ERR"
+  local okIn, valIn = safeCall(function() return relay.getAnalogInput(side) end)
+  local okOut, valOut = safeCall(function() return relay.getAnalogOutput(side) end)
+  local info = { analogInput = okIn and valIn or "ERR", analogOutput = okOut and valOut or "ERR" }
   info.digitalInput = type(info.analogInput) == "number" and info.analogInput > 0 or "ERR"
   info.digitalOutput = type(info.analogOutput) == "number" and info.analogOutput > 0 or "ERR"
   return info
 end
 
 local function getModemInfo(modem)
-  local info = {}
-  local okLocalName, valLocalName = safeCall(function() return modem.getNameLocal() end)
-  local okNamesRemote, valNamesRemote = safeCall(function() return modem.getNamesRemote() end)
-  info.nameLocal = okLocalName and valLocalName or "N/A"
-  info.namesRemote = okNamesRemote and valNamesRemote or {}
-  return info
-end
-
-local function getReaderSummary(name)
-  local reader = peripheral.wrap(name)
-  if not reader then return { name = name, error = "wrap impossible" } end
-  local ok, data = safeGetBlockData(reader)
-  if not ok or type(data) ~= "table" then
-    return { name = name, error = tostring(data) }
-  end
-  local result = {
-    name = name,
-    raw = data,
-    active = data.active_state,
-    redstone = data.redstone,
-    current_redstone = data.current_redstone,
-    control_type = data.control_type,
-    dumping = data.dumping,
-  }
-  if data.chemical_tanks and data.chemical_tanks[1] and data.chemical_tanks[1].stored then
-    result.chemical_id = data.chemical_tanks[1].stored.id
-    result.chemical_amount = data.chemical_tanks[1].stored.amount
-  end
-  return result
+  local okL, localName = safeCall(function() return modem.getNameLocal() end)
+  local okR, remotes = safeCall(function() return modem.getNamesRemote() end)
+  return { nameLocal = okL and localName or "N/A", namesRemote = okR and remotes or {} }
 end
 
 local function gatherAllData()
   local data = {}
-  data.peripherals = peripheral.getNames()
-  table.sort(data.peripherals)
+  data.peripherals = peripheral.getNames(); table.sort(data.peripherals)
   data.blockReaders = getBlockReaders()
   data.redstoneRelays = getRedstoneRelays()
   data.monitors = getMonitors()
@@ -447,13 +391,17 @@ local function gatherAllData()
 
   data.readerSummaries = {}
   for _, name in ipairs(data.blockReaders) do table.insert(data.readerSummaries, getReaderSummary(name)) end
+  data.readerClassification = classifyAllReaders(data.readerSummaries)
 
   data.relaySummaries = {}
   for _, name in ipairs(data.redstoneRelays) do
     local relay = peripheral.wrap(name)
-    local relayData = { name = name, methods = getPeripheralMethods(name), sides = {} }
+    local relayData = { name = name, methods = getPeripheralMethods(name), sides = {}, activeSides = 0 }
     if relay then
-      for _, side in ipairs(SIDE_LIST) do relayData.sides[side] = getRelaySideInfo(relay, side) end
+      for _, side in ipairs(SIDE_LIST) do
+        relayData.sides[side] = getRelaySideInfo(relay, side)
+        if type(relayData.sides[side].analogOutput) == "number" and relayData.sides[side].analogOutput > 0 then relayData.activeSides = relayData.activeSides + 1 end
+      end
     else
       relayData.error = "wrap impossible"
     end
@@ -463,435 +411,363 @@ local function gatherAllData()
   data.modemSummaries = {}
   for _, name in ipairs(data.modems) do
     local modem = peripheral.wrap(name)
-    if modem then
-      table.insert(data.modemSummaries, { name = name, info = getModemInfo(modem) })
-    else
-      table.insert(data.modemSummaries, { name = name, error = "wrap impossible" })
-    end
+    table.insert(data.modemSummaries, modem and { name = name, info = getModemInfo(modem) } or { name = name, error = "wrap impossible" })
   end
+  local totalRemote = 0
+  for _, m in ipairs(data.modemSummaries) do if m.info and m.info.namesRemote then totalRemote = totalRemote + #m.info.namesRemote end end
+  data.totalRemotePeripherals = totalRemote
 
-  local remoteCount = 0
-  for _, modemData in ipairs(data.modemSummaries) do
-    if modemData.info and modemData.info.namesRemote then
-      remoteCount = remoteCount + #modemData.info.namesRemote
-    end
-  end
-  data.totalRemotePeripherals = remoteCount
-
+  data.aliases = aliases
   return data
 end
 
-local function clearDevice(dev)
-  dev.setBackgroundColor(colorsUI.bg)
-  dev.setTextColor(colorsUI.text)
-  dev.clear()
-  dev.setCursorPos(1, 1)
+local function computeLayout(w, h)
+  if w >= 95 and h >= 30 then return { mode = "large", columns = 3 } end
+  if w >= 65 and h >= 20 then return { mode = "standard", columns = 2 } end
+  return { mode = "compact", columns = 1 }
 end
 
+local function clearDevice(dev)
+  dev.setBackgroundColor(colorsUI.bg); dev.setTextColor(colorsUI.text); dev.clear(); dev.setCursorPos(1, 1)
+end
 local function writeAt(dev, x, y, text, color, bg)
   if bg then dev.setBackgroundColor(bg) end
-  dev.setCursorPos(x, y)
-  dev.setTextColor(color or colorsUI.text)
-  dev.write(text)
-  dev.setTextColor(colorsUI.text)
+  dev.setCursorPos(x, y); dev.setTextColor(color or colorsUI.text); dev.write(tostring(text or "")); dev.setTextColor(colorsUI.text)
   if bg then dev.setBackgroundColor(colorsUI.bg) end
 end
-
 local function writeClipped(dev, x, y, text, color, bg)
-  local w, _ = dev.getSize()
-  text = tostring(text or "")
+  local w = ({ dev.getSize() })[1]
   if x > w then return end
-  writeAt(dev, x, y, string.sub(text, 1, w - x + 1), color, bg)
+  writeAt(dev, x, y, string.sub(tostring(text or ""), 1, w - x + 1), color, bg)
 end
-
 local function center(dev, y, text, color)
-  local w, _ = dev.getSize()
-  local x = math.max(1, math.floor((w - #text) / 2) + 1)
-  writeAt(dev, x, y, text, color)
+  local w = ({ dev.getSize() })[1]
+  local t = tostring(text or "")
+  writeAt(dev, math.max(1, math.floor((w - #t) / 2) + 1), y, t, color)
 end
-
 local function drawHLine(dev, y, color)
-  local w, _ = dev.getSize()
+  local w = ({ dev.getSize() })[1]
   writeAt(dev, 1, y, string.rep("-", w), color or colorsUI.dim)
 end
-
 local function drawBox(dev, x, y, width, height, title, borderColor)
   if width < 3 or height < 3 then return end
-  local right = x + width - 1
-  local bottom = y + height - 1
+  local right, bottom = x + width - 1, y + height - 1
   local bc = borderColor or colorsUI.box
-
   writeAt(dev, x, y, "+" .. string.rep("-", width - 2) .. "+", bc)
-  for row = y + 1, bottom - 1 do
-    writeAt(dev, x, row, "|", bc)
-    writeAt(dev, right, row, "|", bc)
-  end
+  for row = y + 1, bottom - 1 do writeAt(dev, x, row, "|", bc); writeAt(dev, right, row, "|", bc) end
   writeAt(dev, x, bottom, "+" .. string.rep("-", width - 2) .. "+", bc)
-
-  if title and #title > 0 and width > 6 then
-    local t = " " .. ellipsis(title, width - 6) .. " "
-    writeAt(dev, x + 2, y, t, colorsUI.title)
-  end
+  if title and #title > 0 and width > 6 then writeClipped(dev, x + 2, y, " " .. title .. " ", colorsUI.title) end
 end
 
-local function makeLine(text, color)
-  return { text = tostring(text or ""), color = color or colorsUI.text }
-end
-
-local function renderScrollable(dev, lines)
-  local w, h = dev.getSize()
-  local contentTop = 4
-  local contentBottom = h - 2
-  if config.ui.showTabBar then contentTop = 5 end
-  local viewHeight = contentBottom - contentTop + 1
-  if viewHeight < 1 then return end
-
-  local total = #lines
-  local maxOffset = math.max(0, total - viewHeight)
-  if scrollOffset < 0 then scrollOffset = 0 end
-  if scrollOffset > maxOffset then scrollOffset = maxOffset end
-
-  if config.ui.showBoxes then
-    drawBox(dev, 1, contentTop - 1, w, viewHeight + 2, "CONTENT", colorsUI.dim)
-  end
-
-  local y = contentTop
-  for i = 1, viewHeight do
-    local idx = scrollOffset + i
-    local line = lines[idx]
-    if line then
-      writeClipped(dev, 2, y, ellipsis(line.text, w - 3), line.color)
-    end
+local function drawPanel(dev, panel)
+  if config.ui.showBoxes then drawBox(dev, panel.x, panel.y, panel.w, panel.h, panel.title, colorsUI.dim) end
+  local y = panel.y + 1
+  for _, line in ipairs(panel.lines or {}) do
+    if y >= panel.y + panel.h then break end
+    writeClipped(dev, panel.x + 1, y, ellipsis(line.text, panel.w - 2), line.color)
     y = y + 1
   end
-
-  local scrollInfo = string.format("Rows %d-%d/%d", math.min(total, scrollOffset + 1), math.min(total, scrollOffset + viewHeight), total)
-  writeClipped(dev, math.max(1, w - #scrollInfo), h - 1, scrollInfo, colorsUI.dim)
 end
 
-local function pageLabel(page)
-  return PAGE_TITLES[page] or page
+local function makeLine(text, color) return { text = tostring(text or ""), color = color or colorsUI.text } end
+local function roleColor(role) return config.ui.roleColors[role or "unknown"] or colorsUI.text end
+local function roleBadge(role) return "[" .. string.upper(role or "unknown") .. "]" end
+
+local function pageLabel(page) return PAGE_TITLES[page] or page end
+local function monitorStateText(data)
+  if selectedMonitorName then
+    local i = getMonitorInfo(selectedMonitorName)
+    return string.format("Monitor: %s (%sx%s)", getDisplayName(selectedMonitorName), tostring(i.width), tostring(i.height))
+  end
+  return #data.monitors > 0 and string.format("Monitor: OFF (%d detected)", #data.monitors) or "Monitor: none"
 end
 
 local function drawHeader(dev)
-  local w, _ = dev.getSize()
-  local title = "VIPERCRAFT DIAGVIEWER :: " .. pageLabel(currentPage)
+  local w = ({ dev.getSize() })[1]
   writeAt(dev, 1, 1, string.rep(" ", w), colors.white, colorsUI.headerBg)
-  center(dev, 1, ellipsis(title, w), colors.white)
+  center(dev, 1, ellipsis("VIPERCRAFT DIAGVIEWER :: " .. pageLabel(currentPage), w), colors.white)
   drawHLine(dev, 2, colorsUI.dim)
 end
 
 local function drawTabs(dev)
   if not config.ui.showTabBar then return end
-  local w, _ = dev.getSize()
+  local w = ({ dev.getSize() })[1]
   local x = 1
-  for _, page in ipairs(PAGE_ORDER) do
-    local label = string.sub(page, 1, 3):upper()
+  for i, p in ipairs(PAGE_ORDER) do
+    local label = tostring(i) .. ":" .. string.sub(p, 1, 3):upper()
     local text = " " .. label .. " "
-    local bg = (page == currentPage) and colorsUI.tabActiveBg or colorsUI.tabBg
     if x + #text - 1 <= w then
-      writeAt(dev, x, 3, text, colors.white, bg)
+      writeAt(dev, x, 3, text, colors.white, p == currentPage and colorsUI.tabActiveBg or colorsUI.tabBg)
       x = x + #text
     end
   end
   drawHLine(dev, 4, colorsUI.dim)
 end
 
-local function monitorStateText(data)
-  if selectedMonitorName then
-    local info = getMonitorInfo(selectedMonitorName)
-    return string.format("Monitor: %s (%sx%s)", selectedMonitorName, tostring(info.width), tostring(info.height))
-  end
-  if #data.monitors > 0 then
-    return string.format("Monitor: OFF (%d detected)", #data.monitors)
-  end
-  return "Monitor: none"
-end
-
 local function drawStatusBar(dev, data)
   local w, h = dev.getSize()
-  local status = getCurrentStatus() .. " | " .. monitorStateText(data)
   writeAt(dev, 1, h - 1, string.rep(" ", w), colors.white, colorsUI.statusBg)
-  writeClipped(dev, 1, h - 1, ellipsis(status, w), colors.yellow, colorsUI.statusBg)
+  writeClipped(dev, 1, h - 1, ellipsis(getCurrentStatus() .. " | " .. monitorStateText(data), w), colors.yellow, colorsUI.statusBg)
 end
 
 local function drawFooter(dev)
   local w, h = dev.getSize()
-  local help = "1-7 pages | 8 monitors | 9 peripherals | arrows scroll | <- -> tabs | R refresh | E report | J raw | M nextMon | N monOff | X allOff | Q quit"
+  local help = "1-7 pages | 8 aliases | 9 monitors | 0 peripherals | arrows scroll | Enter/T alias | Del alias- | M/N monitor | R/E/J/X/Q"
   writeAt(dev, 1, h, string.rep(" ", w), colors.white, colorsUI.footerBg)
   writeClipped(dev, 1, h, ellipsis(help, w), colors.white, colorsUI.footerBg)
 end
 
-local function listMethodsForCategory(data, category)
-  local out = {}
-  local function addPeripheralMethods(title, names)
-    table.insert(out, makeLine("[" .. title .. "]", colorsUI.section))
-    if #names == 0 then
-      table.insert(out, makeLine("  - none", colorsUI.bad))
-      return
-    end
-    for _, name in ipairs(names) do
-      table.insert(out, makeLine("  " .. name, colorsUI.info))
-      local methods = getPeripheralMethods(name)
-      if #methods == 0 then
-        table.insert(out, makeLine("    (no methods)", colorsUI.bad))
-      else
-        for _, m in ipairs(methods) do
-          table.insert(out, makeLine("    - " .. m, colorsUI.text))
-        end
-      end
-    end
+local function renderScrollable(dev, lines)
+  local w, h = dev.getSize()
+  local contentTop, contentBottom = config.ui.showTabBar and 5 or 4, h - 2
+  local viewHeight = contentBottom - contentTop + 1
+  local maxOffset = math.max(0, #lines - viewHeight)
+  if scrollOffset < 0 then scrollOffset = 0 end
+  if scrollOffset > maxOffset then scrollOffset = maxOffset end
+  if config.ui.showBoxes then drawBox(dev, 1, contentTop - 1, w, viewHeight + 2, "CONTENT", colorsUI.dim) end
+  for i = 1, viewHeight do
+    local line = lines[scrollOffset + i]
+    if line then writeClipped(dev, 2, contentTop + i - 1, ellipsis(line.text, w - 3), line.color) end
   end
+  local info = string.format("Rows %d-%d/%d", math.min(#lines, scrollOffset + 1), math.min(#lines, scrollOffset + viewHeight), #lines)
+  writeClipped(dev, math.max(1, w - #info), h - 1, info, colorsUI.dim)
+end
 
-  if category == "all" or category == "monitors" then addPeripheralMethods("monitors", data.monitors) end
-  if category == "all" or category == "block_readers" then addPeripheralMethods("block_readers", data.blockReaders) end
-  if category == "all" or category == "redstone_relays" then addPeripheralMethods("redstone_relays", data.redstoneRelays) end
-  if category == "all" or category == "modems" then addPeripheralMethods("modems", data.modems) end
-  if category == "all" or category == "fusion" then addPeripheralMethods("fusion controllers", data.fusionControllers) end
-  if category == "all" or category == "induction" then addPeripheralMethods("induction ports", data.inductionPorts) end
-  if category == "all" or category == "lasers" then addPeripheralMethods("laser amplifiers", data.laserAmplifiers) end
+local function drawSummaryDashboard(dev, data)
+  local w, h = dev.getSize()
+  local top, bottom = config.ui.showTabBar and 5 or 4, h - 2
+  local lh = bottom - top + 1
+  local layout = computeLayout(w, lh)
+  local cols = layout.columns
+  local panelW = math.floor((w - (cols + 1)) / cols)
+  local panelH = math.max(5, math.floor((lh - 3) / 2))
+  local panels = {
+    { title = "Hardware", lines = {
+      makeLine("Peripherals: " .. #data.peripherals, colorsUI.info),
+      makeLine("Block readers: " .. #data.blockReaders),
+      makeLine("Relays: " .. #data.redstoneRelays),
+      makeLine("Modems: " .. #data.modems),
+      makeLine("Monitors: " .. #data.monitors)
+    } },
+    { title = "Readers by role", lines = {} },
+    { title = "Relay activity", lines = {} },
+    { title = "Network", lines = {
+      makeLine("Remote peripherals: " .. (data.totalRemotePeripherals or 0), colorsUI.warn),
+      makeLine("Modems detected: " .. #data.modemSummaries),
+    } },
+    { title = "Fusion stack", lines = {
+      makeLine("Controllers: " .. #data.fusionControllers),
+      makeLine("Induction ports: " .. #data.inductionPorts),
+      makeLine("Laser amplifiers: " .. #data.laserAmplifiers),
+    } },
+    { title = "Display", lines = {
+      makeLine(monitorStateText(data), colorsUI.info),
+      makeLine("Layout: " .. layout.mode),
+      makeLine("Alias file: " .. config.aliasFile, colorsUI.dim),
+    } },
+  }
+  for _, role in ipairs(ROLE_ORDER) do table.insert(panels[2].lines, makeLine(role .. ": " .. tostring(data.readerClassification.counts[role] or 0), roleColor(role))) end
+  local activeRelay = 0
+  for _, r in ipairs(data.relaySummaries) do if (r.activeSides or 0) > 0 then activeRelay = activeRelay + 1 end end
+  table.insert(panels[3].lines, makeLine("Relays actifs: " .. activeRelay, activeRelay > 0 and colorsUI.good or colorsUI.warn))
+  for _, r in ipairs(data.relaySummaries) do if (r.activeSides or 0) > 0 then table.insert(panels[3].lines, makeLine("- " .. getDisplayName(r.name) .. " (" .. r.activeSides .. ")", colorsUI.good)) end end
+  if activeRelay == 0 then table.insert(panels[3].lines, makeLine("Aucune sortie active", colorsUI.dim)) end
 
-  return out
+  for i, p in ipairs(panels) do
+    local col = ((i - 1) % cols) + 1
+    local row = math.floor((i - 1) / cols) + 1
+    local px = 1 + (col - 1) * (panelW + 1)
+    local py = top + (row - 1) * (panelH + 1)
+    if py + panelH - 1 <= bottom then drawPanel(dev, { x = px, y = py, w = panelW, h = panelH, title = p.title, lines = p.lines }) end
+  end
 end
 
 local function buildPageLines(data)
   local lines = {}
-
-  if currentPage == "summary" then
-    table.insert(lines, makeLine("SYSTEM OVERVIEW", colorsUI.title))
-    table.insert(lines, makeLine("Total peripherals: " .. #data.peripherals, colorsUI.info))
-    table.insert(lines, makeLine("Block readers:     " .. #data.blockReaders, colorsUI.text))
-    table.insert(lines, makeLine("Redstone relays:   " .. #data.redstoneRelays, colorsUI.text))
-    table.insert(lines, makeLine("Modems:            " .. #data.modems, colorsUI.text))
-    table.insert(lines, makeLine("Fusion ctrl:       " .. #data.fusionControllers, colorsUI.text))
-    table.insert(lines, makeLine("Induction ports:   " .. #data.inductionPorts, colorsUI.text))
-    table.insert(lines, makeLine("Laser amplifiers:  " .. #data.laserAmplifiers, colorsUI.text))
-    table.insert(lines, makeLine("Remote peripherals via modem: " .. (data.totalRemotePeripherals or 0), colorsUI.warn))
-    table.insert(lines, makeLine("", colorsUI.text))
-    table.insert(lines, makeLine("BLOCK READER QUICK STATUS", colorsUI.section))
-    if #data.readerSummaries == 0 then
-      table.insert(lines, makeLine("No block_reader detected", colorsUI.bad))
-    else
-      for _, r in ipairs(data.readerSummaries) do
-        if r.error then
-          table.insert(lines, makeLine("- " .. r.name .. " | ERROR: " .. r.error, colorsUI.bad))
-        else
-          local state = (r.active == 1) and "ACTIVE" or "IDLE"
-          local chem = r.chemical_id and (" | chem=" .. tostring(r.chemical_id)) or ""
-          table.insert(lines, makeLine(string.format("- %s | %s | rs=%s | crs=%s%s", r.name, state, short(r.redstone), short(r.current_redstone), chem), (r.active == 1) and colorsUI.good or colorsUI.warn))
-        end
-      end
-    end
-    table.insert(lines, makeLine("", colorsUI.text))
-    table.insert(lines, makeLine(monitorStateText(data), colorsUI.info))
-
-  elseif currentPage == "block_readers" then
+  if currentPage == "block_readers" then
     table.insert(lines, makeLine("DETAILED BLOCK READER DIAGNOSTICS", colorsUI.title))
-    if #data.blockReaders == 0 then
-      table.insert(lines, makeLine("No block_reader detected", colorsUI.bad))
-    else
-      for _, name in ipairs(data.blockReaders) do
-        table.insert(lines, makeLine("[" .. name .. "]", colorsUI.section))
-        local reader = peripheral.wrap(name)
-        if reader then
-          local ok, blockData = safeGetBlockData(reader)
-          if ok and type(blockData) == "table" then
-            local dump = flattenTable(blockData, 0, nil, nil, { maxDepth = config.maxFlattenDepth, maxLines = config.maxFlattenLines })
-            for _, d in ipairs(dump) do
-              table.insert(lines, makeLine("  " .. d, colorsUI.text))
-            end
-          else
-            table.insert(lines, makeLine("  Error getBlockData: " .. tostring(blockData), colorsUI.bad))
-          end
-        else
-          table.insert(lines, makeLine("  Wrap impossible", colorsUI.bad))
-        end
-        table.insert(lines, makeLine("", colorsUI.text))
+    for _, r in ipairs(data.readerSummaries) do
+      table.insert(lines, makeLine("[" .. getDisplayName(r.name) .. "] <" .. r.name .. "> " .. roleBadge(r.role), roleColor(r.role)))
+      if r.error then table.insert(lines, makeLine("  ERROR: " .. r.error, colorsUI.bad)) else
+        table.insert(lines, makeLine("  chemical_id=" .. short(r.chemical_id) .. " amount=" .. short(r.chemical_amount), colorsUI.info))
+        for _, d in ipairs(flattenTable(r.raw, 0, nil, nil, { maxDepth = config.maxFlattenDepth, maxLines = config.maxFlattenLines })) do table.insert(lines, makeLine("  " .. d)) end
       end
+      table.insert(lines, makeLine(""))
     end
-
   elseif currentPage == "relays" then
-    table.insert(lines, makeLine("REDSTONE RELAY DETAILS", colorsUI.title))
-    if #data.relaySummaries == 0 then
-      table.insert(lines, makeLine("No redstone_relay detected", colorsUI.bad))
-    else
-      for _, relay in ipairs(data.relaySummaries) do
-        table.insert(lines, makeLine("[" .. relay.name .. "]", colorsUI.section))
-        if relay.error then
-          table.insert(lines, makeLine("  " .. relay.error, colorsUI.bad))
-        else
-          for _, side in ipairs(SIDE_LIST) do
-            local info = relay.sides[side]
-            table.insert(lines, makeLine(string.format("  %-6s DIN:%s DOUT:%s AIN:%s AOUT:%s", side, short(info.digitalInput), short(info.digitalOutput), short(info.analogInput), short(info.analogOutput)), colorsUI.text))
-          end
-        end
-        table.insert(lines, makeLine("", colorsUI.text))
-      end
-    end
-
+    table.insert(lines, makeLine("Use visual relay dashboard (non-scroll)", colorsUI.dim))
   elseif currentPage == "network" then
     table.insert(lines, makeLine("MODEM NETWORK DIAGNOSTICS", colorsUI.title))
-    if #data.modemSummaries == 0 then
-      table.insert(lines, makeLine("No modem detected", colorsUI.bad))
-    else
-      for _, modemData in ipairs(data.modemSummaries) do
-        table.insert(lines, makeLine("[" .. modemData.name .. "]", colorsUI.section))
-        if modemData.error then
-          table.insert(lines, makeLine("  " .. modemData.error, colorsUI.bad))
-        else
-          table.insert(lines, makeLine("  localName: " .. short(modemData.info.nameLocal), colorsUI.info))
-          table.insert(lines, makeLine("  remoteCount: " .. #modemData.info.namesRemote, colorsUI.info))
-          local modem = peripheral.wrap(modemData.name)
-          for _, remoteName in ipairs(modemData.info.namesRemote) do
-            local remoteType = "?"
-            if modem then
-              local okType, valType = safeCall(function() return modem.getTypeRemote(remoteName) end)
-              if okType then remoteType = tostring(valType) end
-            end
-            table.insert(lines, makeLine("    - " .. remoteName .. " -> " .. remoteType, colorsUI.text))
-          end
-        end
-        table.insert(lines, makeLine("", colorsUI.text))
+    for _, m in ipairs(data.modemSummaries) do
+      local head = "[" .. getDisplayName(m.name) .. "] <" .. m.name .. ">"
+      table.insert(lines, makeLine(head, colorsUI.section))
+      if m.error then table.insert(lines, makeLine("  " .. m.error, colorsUI.bad)) else
+        table.insert(lines, makeLine("  local: " .. short(m.info.nameLocal), colorsUI.info))
+        table.insert(lines, makeLine("  remotes: " .. #m.info.namesRemote, colorsUI.warn))
+        for _, rn in ipairs(m.info.namesRemote) do table.insert(lines, makeLine("   - " .. getDisplayName(rn) .. " <" .. rn .. ">")) end
       end
     end
-
   elseif currentPage == "fusion" then
-    table.insert(lines, makeLine("MEKANISM / FUSION EQUIPMENT", colorsUI.title))
-    table.insert(lines, makeLine("Fusion Controllers: " .. #data.fusionControllers, colorsUI.section))
-    for _, name in ipairs(data.fusionControllers) do table.insert(lines, makeLine("  - " .. name, colorsUI.text)) end
-    table.insert(lines, makeLine("", colorsUI.text))
-    table.insert(lines, makeLine("Induction Ports: " .. #data.inductionPorts, colorsUI.section))
-    for _, name in ipairs(data.inductionPorts) do table.insert(lines, makeLine("  - " .. name, colorsUI.text)) end
-    table.insert(lines, makeLine("", colorsUI.text))
-    table.insert(lines, makeLine("Laser Amplifiers: " .. #data.laserAmplifiers, colorsUI.section))
-    for _, name in ipairs(data.laserAmplifiers) do table.insert(lines, makeLine("  - " .. name, colorsUI.text)) end
-
-  elseif currentPage == "relay_test" then
-    table.insert(lines, makeLine("RELAY TEST CONSOLE", colorsUI.title))
-    if #data.redstoneRelays == 0 then
-      table.insert(lines, makeLine("No redstone_relay detected", colorsUI.bad))
-    else
-      if selectedRelayIndex < 1 then selectedRelayIndex = 1 end
-      if selectedRelayIndex > #data.redstoneRelays then selectedRelayIndex = #data.redstoneRelays end
-      if selectedSideIndex < 1 then selectedSideIndex = 1 end
-      if selectedSideIndex > #SIDE_LIST then selectedSideIndex = #SIDE_LIST end
-
-      local relayName = data.redstoneRelays[selectedRelayIndex]
-      local side = SIDE_LIST[selectedSideIndex]
-      local relay = peripheral.wrap(relayName)
-
-      table.insert(lines, makeLine("Relay selected: " .. relayName .. " (" .. selectedRelayIndex .. "/" .. #data.redstoneRelays .. ")", colorsUI.good))
-      table.insert(lines, makeLine("Side selected : " .. side .. " (" .. selectedSideIndex .. "/" .. #SIDE_LIST .. ")", colorsUI.good))
-      table.insert(lines, makeLine("", colorsUI.text))
-
-      if relay then
-        local info = getRelaySideInfo(relay, side)
-        table.insert(lines, makeLine("Digital In  : " .. short(info.digitalInput), colorsUI.text))
-        table.insert(lines, makeLine("Digital Out : " .. short(info.digitalOutput), colorsUI.text))
-        table.insert(lines, makeLine("Analog In   : " .. short(info.analogInput), colorsUI.text))
-        table.insert(lines, makeLine("Analog Out  : " .. short(info.analogOutput), colorsUI.text))
-      else
-        table.insert(lines, makeLine("Impossible to wrap selected relay", colorsUI.bad))
-      end
-
-      table.insert(lines, makeLine("", colorsUI.text))
-      table.insert(lines, makeLine("Controls:", colorsUI.section))
-      table.insert(lines, makeLine("A/D relay  | W/S side", colorsUI.info))
-      table.insert(lines, makeLine("O=15 | F=0 | P=pulse", colorsUI.info))
-      table.insert(lines, makeLine("0-9 analog | Backspace=0", colorsUI.warn))
-      table.insert(lines, makeLine("X=stop all relays", colorsUI.warn))
-      table.insert(lines, makeLine("Touch monitor buttons to run quick actions.", colorsUI.dim))
+    table.insert(lines, makeLine("FUSION ECOSYSTEM", colorsUI.title))
+    local function addList(title, arr)
+      table.insert(lines, makeLine(title .. " (" .. #arr .. ")", colorsUI.section))
+      for _, n in ipairs(arr) do table.insert(lines, makeLine(" - " .. getDisplayName(n) .. " <" .. n .. ">", colorsUI.text)) end
+      table.insert(lines, makeLine(""))
     end
-
+    addList("Fusion controllers", data.fusionControllers)
+    addList("Induction ports", data.inductionPorts)
+    addList("Laser amplifiers", data.laserAmplifiers)
+    table.insert(lines, makeLine("Reader roles useful for fusion:", colorsUI.section))
+    for _, r in ipairs(data.readerSummaries) do table.insert(lines, makeLine(" - " .. getDisplayName(r.name) .. " => " .. r.role, roleColor(r.role))) end
+  elseif currentPage == "relay_test" then
+    table.insert(lines, makeLine("RELAY TEST", colorsUI.title))
+    if #data.redstoneRelays == 0 then table.insert(lines, makeLine("No relay detected", colorsUI.bad)) else
+      local relayName = data.redstoneRelays[selectedRelayIndex] or data.redstoneRelays[1]
+      local side = SIDE_LIST[selectedSideIndex]
+      table.insert(lines, makeLine("Selected relay: " .. getDisplayName(relayName) .. " <" .. relayName .. ">", colorsUI.info))
+      table.insert(lines, makeLine("Selected side: " .. side, colorsUI.info))
+      table.insert(lines, makeLine("A/D relay | W/S side | O=15 F=0 P=pulse | 0-9 analog | Backspace or X off", colorsUI.section))
+    end
   elseif currentPage == "methods" then
     local categories = { "all", "monitors", "block_readers", "redstone_relays", "modems", "fusion", "induction", "lasers" }
-    if selectedMethodsCategory < 1 then selectedMethodsCategory = 1 end
-    if selectedMethodsCategory > #categories then selectedMethodsCategory = #categories end
-    local active = categories[selectedMethodsCategory]
-    table.insert(lines, makeLine("METHOD EXPLORER", colorsUI.title))
-    table.insert(lines, makeLine("Category (<-/->): " .. active, colorsUI.info))
-    table.insert(lines, makeLine("", colorsUI.text))
-
-    local methodLines = listMethodsForCategory(data, active)
-    for _, line in ipairs(methodLines) do table.insert(lines, line) end
-
+    local category = categories[selectedMethodsCategory]
+    table.insert(lines, makeLine("METHOD EXPLORER :: " .. category, colorsUI.title))
+    table.insert(lines, makeLine("Left/Right switch category", colorsUI.section))
+    local function addMethods(title, names)
+      table.insert(lines, makeLine("[" .. title .. "]", colorsUI.section))
+      if #names == 0 then table.insert(lines, makeLine("  - none", colorsUI.bad)); return end
+      for _, n in ipairs(names) do
+        local suffix = latestData.readerClassification.byName[n] and (" role=" .. latestData.readerClassification.byName[n]) or ""
+        table.insert(lines, makeLine("  " .. getDisplayName(n) .. " <" .. n .. ">" .. suffix, colorsUI.info))
+        local methods = getPeripheralMethods(n)
+        if #methods == 0 then table.insert(lines, makeLine("    (no methods)", colorsUI.bad)) else for _, m in ipairs(methods) do table.insert(lines, makeLine("    - " .. m)) end end
+      end
+    end
+    if category == "all" or category == "monitors" then addMethods("monitors", data.monitors) end
+    if category == "all" or category == "block_readers" then addMethods("block_readers", data.blockReaders) end
+    if category == "all" or category == "redstone_relays" then addMethods("redstone_relays", data.redstoneRelays) end
+    if category == "all" or category == "modems" then addMethods("modems", data.modems) end
+    if category == "all" or category == "fusion" then addMethods("fusion controllers", data.fusionControllers) end
+    if category == "all" or category == "induction" then addMethods("induction ports", data.inductionPorts) end
+    if category == "all" or category == "lasers" then addMethods("laser amplifiers", data.laserAmplifiers) end
   elseif currentPage == "monitors" then
     table.insert(lines, makeLine("MONITOR MANAGEMENT", colorsUI.title))
     table.insert(lines, makeLine("Detected monitors: " .. #data.monitorCandidates, colorsUI.info))
-    if selectedMonitorName then
-      table.insert(lines, makeLine("Active monitor: " .. selectedMonitorName, colorsUI.good))
-    else
-      table.insert(lines, makeLine("Active monitor: OFF", colorsUI.warn))
-    end
+    table.insert(lines, makeLine(selectedMonitorName and ("Active monitor: " .. getDisplayName(selectedMonitorName) .. " <" .. selectedMonitorName .. ">") or "Active monitor: OFF", selectedMonitorName and colorsUI.good or colorsUI.warn))
     table.insert(lines, makeLine("M: next monitor | N: disable output", colorsUI.section))
-    table.insert(lines, makeLine("", colorsUI.text))
-    if #data.monitorCandidates == 0 then
-      table.insert(lines, makeLine("No monitor detected", colorsUI.bad))
-    else
-      for i, info in ipairs(data.monitorCandidates) do
-        local flag = (info.name == selectedMonitorName) and "*" or " "
-        table.insert(lines, makeLine(string.format("%s [%d] %s | type=%s | %sx%s", flag, i, info.name, short(info.type), short(info.width), short(info.height)), (info.name == selectedMonitorName) and colorsUI.good or colorsUI.text))
-      end
+    for i, info in ipairs(data.monitorCandidates) do
+      local mark = info.name == selectedMonitorName and "*" or " "
+      table.insert(lines, makeLine(string.format("%s [%d] %s <%s> %sx%s", mark, i, getDisplayName(info.name), info.name, short(info.width), short(info.height)), info.name == selectedMonitorName and colorsUI.good or colorsUI.text))
     end
-
   elseif currentPage == "peripherals" then
     table.insert(lines, makeLine("PERIPHERAL INVENTORY", colorsUI.title))
-    for _, name in ipairs(data.peripherals) do
-      table.insert(lines, makeLine(string.format("- %s -> %s", name, tostring(peripheral.getType(name))), colorsUI.text))
+    for _, n in ipairs(data.peripherals) do
+      local alias = getAlias(n)
+      local sug = getSuggestedAlias(n)
+      local extra = alias and (" alias=" .. alias) or (sug and (" suggested=" .. sug) or "")
+      table.insert(lines, makeLine(string.format("- %s <%s> type=%s%s", getDisplayName(n), n, tostring(peripheral.getType(n)), extra), colorsUI.text))
     end
+  elseif currentPage == "aliases" then
+    table.insert(lines, makeLine("Use dedicated alias editor panel", colorsUI.dim))
   end
-
   return lines
+end
+
+local function drawRelayBlock(dev, relay, x, y, w, h)
+  drawBox(dev, x, y, w, h, getDisplayName(relay.name), colorsUI.dim)
+  writeClipped(dev, x + 1, y + 1, "<" .. relay.name .. ">", colorsUI.dim)
+  writeClipped(dev, x + 1, y + 2, "Active sides: " .. tostring(relay.activeSides or 0), (relay.activeSides or 0) > 0 and colorsUI.good or colorsUI.warn)
+  local faceLine = { "top", "bottom", "left", "right", "front", "back" }
+  for i, side in ipairs(faceLine) do
+    local info = relay.sides[side]
+    local out = info and info.analogOutput or "ERR"
+    local active = type(out) == "number" and out > 0
+    local line = string.format("%s:%s", string.sub(side, 1, 1), short(out))
+    writeClipped(dev, x + 1 + ((i - 1) % 3) * math.floor((w - 2) / 3), y + 3 + math.floor((i - 1) / 3), line, active and colorsUI.good or colorsUI.dim)
+  end
+end
+
+local function drawRelaysDashboard(dev, data)
+  local w, h = dev.getSize()
+  local top, bottom = config.ui.showTabBar and 5 or 4, h - 2
+  local areaH = bottom - top + 1
+  if #data.relaySummaries == 0 then writeClipped(dev, 2, top, "No redstone relay detected", colorsUI.bad); return end
+  local cols = computeLayout(w, areaH).columns
+  local blockW = math.max(20, math.floor((w - (cols + 1)) / cols))
+  local blockH = 7
+  local perPage = cols * math.max(1, math.floor(areaH / (blockH + 1)))
+  local offset = math.max(0, scrollOffset)
+  if offset > math.max(0, #data.relaySummaries - perPage) then offset = math.max(0, #data.relaySummaries - perPage); scrollOffset = offset end
+  for i = 1, perPage do
+    local idx = offset + i
+    local relay = data.relaySummaries[idx]
+    if not relay then break end
+    local col = ((i - 1) % cols) + 1
+    local row = math.floor((i - 1) / cols) + 1
+    drawRelayBlock(dev, relay, 1 + (col - 1) * (blockW + 1), top + (row - 1) * (blockH + 1), blockW, blockH)
+  end
+end
+
+local function buildAliasRows(data)
+  local rows = {}
+  for _, name in ipairs(data.peripherals or {}) do
+    local pType = tostring(peripheral.getType(name) or "?")
+    local role = data.readerClassification.byName[name]
+    table.insert(rows, { name = name, pType = pType, alias = getAlias(name), suggested = getSuggestedAlias(name), role = role })
+  end
+  return rows
+end
+
+local function drawAliasesPage(dev, data)
+  local w, h = dev.getSize()
+  local top, bottom = config.ui.showTabBar and 5 or 4, h - 2
+  local rows = buildAliasRows(data)
+  if #rows == 0 then writeClipped(dev, 2, top, "No peripherals detected", colorsUI.bad); return end
+  if selectedAliasIndex < 1 then selectedAliasIndex = 1 end
+  if selectedAliasIndex > #rows then selectedAliasIndex = #rows end
+  local view = bottom - top + 1
+  if selectedAliasIndex - scrollOffset > view then scrollOffset = selectedAliasIndex - view end
+  if selectedAliasIndex <= scrollOffset then scrollOffset = selectedAliasIndex - 1 end
+  if scrollOffset < 0 then scrollOffset = 0 end
+
+  drawBox(dev, 1, top - 1, w, view + 2, "ALIASES (Enter/T rename, Del/Bksp clear, Esc cancel)", colorsUI.dim)
+  for i = 1, view do
+    local idx = scrollOffset + i
+    local row = rows[idx]
+    if not row then break end
+    local y = top + i - 1
+    local selected = idx == selectedAliasIndex
+    local aliasText = row.alias or "-"
+    local suggestText = (not row.alias and row.suggested) and (" sugg=" .. row.suggested) or ""
+    local roleText = row.role and (" role=" .. row.role) or ""
+    local line = string.format("%s %-18s type=%-14s alias=%s%s%s", selected and ">" or " ", ellipsis(row.name, 18), ellipsis(row.pType, 14), ellipsis(aliasText, 20), suggestText, roleText)
+    writeClipped(dev, 2, y, line, selected and colors.black or (row.role and roleColor(row.role) or colorsUI.text), selected and colorsUI.highlight or nil)
+  end
+  if aliasEditor.active then
+    drawBox(dev, 2, bottom - 3, w - 2, 4, "EDIT ALIAS", colorsUI.title)
+    writeClipped(dev, 4, bottom - 2, "Target: " .. aliasEditor.target, colorsUI.info)
+    writeClipped(dev, 4, bottom - 1, "> " .. aliasEditor.value .. "_", colorsUI.good)
+  end
 end
 
 local function relaySetAnalog(relayName, side, value)
   local relay = peripheral.wrap(relayName)
-  if not relay then
-    setStatus("Relay introuvable : " .. relayName, 3)
-    return
-  end
+  if not relay then setStatus("Relay introuvable : " .. relayName, 2.5); return end
   local ok, err = safeCall(function() relay.setAnalogOutput(side, value) end)
-  if ok then
-    setStatus("Sortie " .. relayName .. " / " .. side .. " = " .. tostring(value), 2)
-  else
-    setStatus("Erreur sortie : " .. tostring(err), 3)
-  end
+  setStatus(ok and ("Sortie " .. relayName .. " / " .. side .. " = " .. tostring(value)) or ("Erreur sortie : " .. tostring(err)), 2)
 end
 
-local function relayPulse(relayName, side, value, duration)
-  relaySetAnalog(relayName, side, value)
-  sleep(duration or 1)
-  relaySetAnalog(relayName, side, 0)
-end
-
+local function relayPulse(relayName, side, value, duration) relaySetAnalog(relayName, side, value); sleep(duration or 1); relaySetAnalog(relayName, side, 0) end
 local function allRelaysOff(relays)
   for _, relayName in ipairs(relays or {}) do
     local relay = peripheral.wrap(relayName)
-    if relay then
-      for _, side in ipairs(SIDE_LIST) do
-        pcall(function() relay.setAnalogOutput(side, 0) end)
-      end
-    end
+    if relay then for _, side in ipairs(SIDE_LIST) do pcall(function() relay.setAnalogOutput(side, 0) end) end end
   end
   setStatus("Toutes les sorties redstone ont ete coupees", 2.5)
 end
 
-local function renderPage(dev, data)
-  clearDevice(dev)
-  drawHeader(dev)
-  drawTabs(dev)
-  local lines = buildPageLines(data)
-  renderScrollable(dev, lines)
-  drawStatusBar(dev, data)
-  drawFooter(dev)
-end
-
 local function buildFormattedReport(data)
-  local out = {}
-  table.insert(out, "=== RAPPORT DIAGNOSTIC PREMIUM ===")
-  table.insert(out, "")
-
-  table.insert(out, "[SYNTHESIS]")
+  local out = { "=== RAPPORT DIAGNOSTIC PREMIUM ===", "", "[SYNTHESIS]" }
   table.insert(out, "total_peripherals = " .. #data.peripherals)
   table.insert(out, "block_readers = " .. #data.blockReaders)
   table.insert(out, "redstone_relays = " .. #data.redstoneRelays)
@@ -900,61 +776,31 @@ local function buildFormattedReport(data)
   table.insert(out, "induction_ports = " .. #data.inductionPorts)
   table.insert(out, "laser_amplifiers = " .. #data.laserAmplifiers)
   table.insert(out, "remote_peripherals = " .. (data.totalRemotePeripherals or 0))
+  table.insert(out, "reader_roles = " .. encodeRaw(data.readerClassification.counts, 0, {}, 0))
   table.insert(out, "")
 
-  table.insert(out, "[MONITORS]")
-  if #data.monitorCandidates == 0 then
-    table.insert(out, "none")
-  else
-    for i, info in ipairs(data.monitorCandidates) do
-      table.insert(out, string.format("[%d] %s | type=%s | %sx%s | selected=%s", i, info.name, short(info.type), short(info.width), short(info.height), tostring(selectedMonitorName == info.name)))
-    end
+  table.insert(out, "[ALIASES]")
+  for _, n in ipairs(data.peripherals) do
+    table.insert(out, string.format("%s | alias=%s | suggested=%s", n, short(getAlias(n)), short(getSuggestedAlias(n))))
   end
   table.insert(out, "")
 
   table.insert(out, "[BLOCK_READERS]")
-  for _, name in ipairs(data.blockReaders) do
-    table.insert(out, "----- " .. name .. " -----")
-    local reader = peripheral.wrap(name)
-    if reader then
-      local ok, blockData = safeGetBlockData(reader)
-      if ok and type(blockData) == "table" then
-        local dump = flattenTable(blockData, 0, nil, nil, { maxDepth = config.maxFlattenDepth, maxLines = config.maxFlattenLines })
-        for _, line in ipairs(dump) do table.insert(out, line) end
-      else
-        table.insert(out, "Erreur : " .. tostring(blockData))
-      end
-    else
-      table.insert(out, "Wrap impossible")
+  for _, r in ipairs(data.readerSummaries) do
+    table.insert(out, string.format("----- %s (%s) alias=%s role=%s -----", r.name, getDisplayName(r.name), short(getAlias(r.name)), short(r.role)))
+    if r.error then table.insert(out, "Erreur : " .. r.error) else
+      table.insert(out, "chemical_id=" .. short(r.chemical_id) .. " chemical_amount=" .. short(r.chemical_amount))
+      local dump = flattenTable(r.raw, 0, nil, nil, { maxDepth = config.maxFlattenDepth, maxLines = config.maxFlattenLines })
+      for _, line in ipairs(dump) do table.insert(out, line) end
     end
     table.insert(out, "")
   end
 
   table.insert(out, "[RELAYS]")
-  for _, relayData in ipairs(data.relaySummaries) do
-    table.insert(out, "----- " .. relayData.name .. " -----")
-    table.insert(out, "Methodes:")
-    for _, m in ipairs(relayData.methods or {}) do table.insert(out, "- " .. m) end
-    if relayData.error then
-      table.insert(out, relayData.error)
-    else
-      for _, side in ipairs(SIDE_LIST) do
-        local info = relayData.sides[side]
-        table.insert(out, side .. " | DIN=" .. short(info.digitalInput) .. " | DOUT=" .. short(info.digitalOutput) .. " | AIN=" .. short(info.analogInput) .. " | AOUT=" .. short(info.analogOutput))
-      end
-    end
-    table.insert(out, "")
-  end
-
-  table.insert(out, "[MODEMS]")
-  for _, modemData in ipairs(data.modemSummaries) do
-    table.insert(out, "----- " .. modemData.name .. " -----")
-    if modemData.error then
-      table.insert(out, modemData.error)
-    else
-      table.insert(out, "nameLocal = " .. short(modemData.info.nameLocal))
-      table.insert(out, "remote count = " .. #modemData.info.namesRemote)
-      for _, remoteName in ipairs(modemData.info.namesRemote) do table.insert(out, "- " .. remoteName) end
+  for _, relay in ipairs(data.relaySummaries) do
+    table.insert(out, string.format("----- %s (%s) activeSides=%d -----", relay.name, getDisplayName(relay.name), relay.activeSides or 0))
+    if relay.error then table.insert(out, relay.error) else
+      for _, side in ipairs(SIDE_LIST) do local i = relay.sides[side]; table.insert(out, side .. " | AOUT=" .. short(i.analogOutput) .. " | AIN=" .. short(i.analogInput)) end
     end
     table.insert(out, "")
   end
@@ -962,314 +808,186 @@ local function buildFormattedReport(data)
   return out
 end
 
-local function encodeRaw(value, indent, visited, depth)
-  indent = indent or 0
-  visited = visited or {}
-  depth = depth or 0
-
-  if type(value) ~= "table" then
-    if type(value) == "string" then
-      return string.format("%q", value)
-    end
-    return tostring(value)
-  end
-
-  if visited[value] then return "\"<circular>\"" end
-  if depth > config.maxFlattenDepth + 2 then return "\"<max depth>\"" end
-
-  visited[value] = true
-  local pad = string.rep(" ", indent)
-  local nextPad = string.rep(" ", indent + 2)
-  local parts = { "{" }
-
-  for _, key in ipairs(sortedKeys(value)) do
-    local v = value[key]
-    local keyRepr
-    if type(key) == "string" and key:match("^[%a_][%w_]*$") then
-      keyRepr = key
-    else
-      keyRepr = "[" .. encodeRaw(key, indent + 2, visited, depth + 1) .. "]"
-    end
-    table.insert(parts, nextPad .. keyRepr .. " = " .. encodeRaw(v, indent + 2, visited, depth + 1) .. ",")
-  end
-
-  table.insert(parts, pad .. "}")
-  visited[value] = nil
-  return table.concat(parts, "\n")
-end
-
 local function buildRawReport(data)
   local snapshot = {
     generatedAt = os.date and os.date("%Y-%m-%d %H:%M:%S") or "N/A",
     selectedMonitorName = selectedMonitorName,
     currentPage = currentPage,
+    aliases = aliases,
     latestData = data,
   }
-
-  return {
-    "-- blockreader_raw.txt",
-    "return " .. encodeRaw(snapshot, 0, {}, 0)
-  }
+  return { "-- blockreader_raw.txt", "return " .. encodeRaw(snapshot, 0, {}, 0) }
 end
 
 local function refreshMonitorSettings()
   local mon = getSelectedMonitor()
-  if mon then
-    pcall(function() mon.setTextScale(config.defaultMonitorScale) end)
-    pcall(function() mon.setBackgroundColor(colorsUI.bg) end)
-    pcall(function() mon.setTextColor(colorsUI.text) end)
-  end
+  if mon then pcall(function() mon.setTextScale(config.defaultMonitorScale) end); pcall(function() mon.setBackgroundColor(colorsUI.bg) end); pcall(function() mon.setTextColor(colorsUI.text) end) end
+end
+
+local function renderPage(dev, data)
+  clearDevice(dev)
+  drawHeader(dev)
+  drawTabs(dev)
+  if currentPage == "summary" then drawSummaryDashboard(dev, data)
+  elseif currentPage == "relays" then drawRelaysDashboard(dev, data)
+  elseif currentPage == "aliases" then drawAliasesPage(dev, data)
+  else renderScrollable(dev, buildPageLines(data)) end
+  drawStatusBar(dev, data)
+  drawFooter(dev)
 end
 
 local function redraw()
   renderPage(term, latestData)
-  local mon = getSelectedMonitor()
-  if mon then renderPage(mon, latestData) end
+  local mon = getSelectedMonitor(); if mon then renderPage(mon, latestData) end
 end
 
 local function refreshData(skipDefaultStatus)
   refreshSelectedMonitor()
   latestData = gatherAllData()
   if not skipDefaultStatus then
-    if selectedMonitorName then
-      setStatus("Moniteur actif : " .. selectedMonitorName)
-    elseif #latestData.monitors == 1 then
-      setStatus("1 moniteur detecte")
-    else
-      setStatus("Aucun moniteur selectionne")
-    end
+    if selectedMonitorName then setStatus("Moniteur actif : " .. getDisplayName(selectedMonitorName))
+    elseif #latestData.monitors == 1 then setStatus("1 moniteur detecte")
+    else setStatus("Aucun moniteur selectionne") end
   end
-  refreshMonitorSettings()
-  redraw()
+  refreshMonitorSettings(); redraw()
 end
 
 local function exportFormatted()
-  local content = buildFormattedReport(latestData)
-  local ok, err = writeLinesToFile("blockreader_report.txt", content)
-  if ok then
-    setStatus("Export OK : blockreader_report.txt", 3)
-  else
-    setStatus("Erreur export : " .. tostring(err), 4)
-  end
+  local ok, err = writeLinesToFile("blockreader_report.txt", buildFormattedReport(latestData))
+  setStatus(ok and "Export OK : blockreader_report.txt" or ("Erreur export : " .. tostring(err)), ok and 3 or 4)
   redraw()
 end
 
 local function exportRaw()
-  local content = buildRawReport(latestData)
-  local ok, err = writeLinesToFile("blockreader_raw.txt", content)
-  if ok then
-    setStatus("Export RAW OK : blockreader_raw.txt", 3)
-  else
-    setStatus("Erreur export RAW : " .. tostring(err), 4)
-  end
+  local ok, err = writeLinesToFile("blockreader_raw.txt", buildRawReport(latestData))
+  setStatus(ok and "Export RAW OK : blockreader_raw.txt" or ("Erreur export RAW : " .. tostring(err)), ok and 3 or 4)
   redraw()
 end
 
-local function changePage(nextPage)
-  currentPage = nextPage
-  scrollOffset = 0
-  setStatus("Page: " .. pageLabel(nextPage), 1.5)
-  redraw()
-end
-
+local function changePage(nextPage) currentPage = nextPage; scrollOffset = 0; setStatus("Page: " .. pageLabel(nextPage), 1.2); redraw() end
 local function cyclePage(step)
-  local idx = 1
-  for i, p in ipairs(PAGE_ORDER) do
-    if p == currentPage then idx = i break end
-  end
-  idx = idx + step
-  if idx < 1 then idx = #PAGE_ORDER end
-  if idx > #PAGE_ORDER then idx = 1 end
+  local idx = 1; for i, p in ipairs(PAGE_ORDER) do if p == currentPage then idx = i end end
+  idx = idx + step; if idx < 1 then idx = #PAGE_ORDER end; if idx > #PAGE_ORDER then idx = 1 end
   changePage(PAGE_ORDER[idx])
 end
+local function scrollBy(delta) scrollOffset = math.max(0, scrollOffset + delta); redraw() end
 
-local function scrollBy(delta)
-  scrollOffset = scrollOffset + delta
+local function startAliasEdit()
+  local rows = buildAliasRows(latestData)
+  local row = rows[selectedAliasIndex]
+  if not row then return end
+  aliasEditor.active = true
+  aliasEditor.target = row.name
+  aliasEditor.value = row.alias or ""
+  setStatus("Edition alias: " .. row.name, 2)
   redraw()
 end
 
-local function relayActionFromKey(key)
+local function commitAliasEdit()
+  if not aliasEditor.active then return end
+  setAlias(aliasEditor.target, aliasEditor.value)
+  aliasEditor.active = false
+  refreshData(true)
+  setStatus("Alias enregistre", 2)
+end
+
+local function cancelAliasEdit() aliasEditor.active = false; setStatus("Edition alias annulee", 1.5); redraw() end
+
+local function handleRelayTestKey(key)
   local relays = latestData.redstoneRelays or {}
   if #relays == 0 then return end
-
-  local relayName = relays[selectedRelayIndex]
+  local relayName = relays[selectedRelayIndex] or relays[1]
   local side = SIDE_LIST[selectedSideIndex]
+  if key == keys.a then selectedRelayIndex = selectedRelayIndex - 1; if selectedRelayIndex < 1 then selectedRelayIndex = #relays end; redraw()
+  elseif key == keys.d then selectedRelayIndex = selectedRelayIndex + 1; if selectedRelayIndex > #relays then selectedRelayIndex = 1 end; redraw()
+  elseif key == keys.w then selectedSideIndex = selectedSideIndex - 1; if selectedSideIndex < 1 then selectedSideIndex = #SIDE_LIST end; redraw()
+  elseif key == keys.s then selectedSideIndex = selectedSideIndex + 1; if selectedSideIndex > #SIDE_LIST then selectedSideIndex = 1 end; redraw()
+  elseif key == keys.o then relaySetAnalog(relayName, side, 15); refreshData(true)
+  elseif key == keys.f or key == keys.backspace then relaySetAnalog(relayName, side, 0); refreshData(true)
+  elseif key == keys.p then relayPulse(relayName, side, 15, 1); refreshData(true)
+  elseif key == keys.x then allRelaysOff(latestData.redstoneRelays); refreshData(true)
+  elseif key >= keys.zero and key <= keys.nine then relaySetAnalog(relayName, side, key - keys.zero); refreshData(true) end
+end
 
-  if key == keys.a then
-    selectedRelayIndex = selectedRelayIndex - 1
-    if selectedRelayIndex < 1 then selectedRelayIndex = #relays end
-    setStatus("Relay : " .. relays[selectedRelayIndex], 2)
-    redraw()
-  elseif key == keys.d then
-    selectedRelayIndex = selectedRelayIndex + 1
-    if selectedRelayIndex > #relays then selectedRelayIndex = 1 end
-    setStatus("Relay : " .. relays[selectedRelayIndex], 2)
-    redraw()
-  elseif key == keys.w then
-    selectedSideIndex = selectedSideIndex - 1
-    if selectedSideIndex < 1 then selectedSideIndex = #SIDE_LIST end
-    setStatus("Face : " .. SIDE_LIST[selectedSideIndex], 2)
-    redraw()
-  elseif key == keys.s then
-    selectedSideIndex = selectedSideIndex + 1
-    if selectedSideIndex > #SIDE_LIST then selectedSideIndex = 1 end
-    setStatus("Face : " .. SIDE_LIST[selectedSideIndex], 2)
-    redraw()
-  elseif key == keys.o then
-    relaySetAnalog(relayName, side, 15)
-    refreshData(true)
-  elseif key == keys.f then
-    relaySetAnalog(relayName, side, 0)
-    refreshData(true)
-  elseif key == keys.p then
-    setStatus("Pulse " .. relayName .. " / " .. side, 2)
-    redraw()
-    relayPulse(relayName, side, 15, 1)
-    refreshData(true)
-  elseif key == keys.backspace then
-    relaySetAnalog(relayName, side, 0)
-    refreshData(true)
-  elseif key == keys.x then
-    allRelaysOff(latestData.redstoneRelays)
-    refreshData(true)
-  elseif key == keys.zero then relaySetAnalog(relayName, side, 0); refreshData(true)
-  elseif key == keys.one then relaySetAnalog(relayName, side, 1); refreshData(true)
-  elseif key == keys.two then relaySetAnalog(relayName, side, 2); refreshData(true)
-  elseif key == keys.three then relaySetAnalog(relayName, side, 3); refreshData(true)
-  elseif key == keys.four then relaySetAnalog(relayName, side, 4); refreshData(true)
-  elseif key == keys.five then relaySetAnalog(relayName, side, 5); refreshData(true)
-  elseif key == keys.six then relaySetAnalog(relayName, side, 6); refreshData(true)
-  elseif key == keys.seven then relaySetAnalog(relayName, side, 7); refreshData(true)
-  elseif key == keys.eight then relaySetAnalog(relayName, side, 8); refreshData(true)
-  elseif key == keys.nine then relaySetAnalog(relayName, side, 9); refreshData(true)
+local function handleMonitorTouch(side, x, y)
+  if not selectedMonitorName or side ~= selectedMonitorName then return end
+  if y == 1 then cyclePage(1); return end
+  if y == 3 then
+    local slot = math.floor((x - 1) / 9) + 1
+    if PAGE_ORDER[slot] then changePage(PAGE_ORDER[slot]) end
+    return
+  end
+  if currentPage == "aliases" and y > 5 then
+    local top = config.ui.showTabBar and 5 or 4
+    local idx = scrollOffset + (y - top + 1)
+    local rows = buildAliasRows(latestData)
+    if rows[idx] then selectedAliasIndex = idx; redraw() end
+  elseif currentPage ~= "relay_test" then
+    if y > 10 then scrollBy(3) else scrollBy(-3) end
   end
 end
 
-local function handleMonitorTouch()
+local function handleInputEvents()
   while running do
-    local _, side, x, y = os.pullEvent("monitor_touch")
-    if not selectedMonitorName or side ~= selectedMonitorName then
-      -- allow touch only on active monitor
-    else
-      if y == 1 then
-        cyclePage(1)
-      elseif y == 3 then
-        local slot = math.floor((x - 1) / 5) + 1
-        if slot >= 1 and slot <= #PAGE_ORDER then
-          changePage(PAGE_ORDER[slot])
-        end
-      elseif y == 2 then
-        if x <= 6 then
-          scrollBy(-5)
-        elseif x >= 7 and x <= 12 then
-          scrollBy(5)
-        elseif x >= 13 and x <= 18 then
-          selectNextMonitor()
-          refreshMonitorSettings()
-          refreshData(true)
-        elseif x >= 19 and x <= 24 then
-          disableMonitorOutput()
-          refreshData(true)
-        elseif x >= 25 and x <= 30 then
-          exportFormatted()
-        elseif x >= 31 and x <= 36 then
-          exportRaw()
-        elseif x >= 37 then
-          if currentPage == "relay_test" then
-            allRelaysOff(latestData.redstoneRelays)
-            refreshData(true)
-          end
-        end
+    local ev = { os.pullEvent() }
+    local event = ev[1]
+    if event == "monitor_touch" then
+      handleMonitorTouch(ev[2], ev[3], ev[4])
+    elseif event == "char" then
+      if aliasEditor.active then aliasEditor.value = aliasEditor.value .. ev[2]; redraw() end
+    elseif event == "key" then
+      local key = ev[2]
+      if aliasEditor.active then
+        if key == keys.enter then commitAliasEdit()
+        elseif key == keys.backspace then aliasEditor.value = string.sub(aliasEditor.value, 1, math.max(0, #aliasEditor.value - 1)); redraw()
+        elseif key == keys.escape then cancelAliasEdit() end
       else
-        if currentPage == "relay_test" then
-          if y >= 6 and y <= 7 then
-            relayActionFromKey(keys.a)
-          elseif y >= 8 and y <= 9 then
-            relayActionFromKey(keys.d)
-          elseif y >= 10 and y <= 11 then
-            relayActionFromKey(keys.w)
-          elseif y >= 12 and y <= 13 then
-            relayActionFromKey(keys.s)
-          elseif y >= 14 and y <= 15 then
-            relayActionFromKey(keys.o)
-          elseif y >= 16 and y <= 17 then
-            relayActionFromKey(keys.f)
-          elseif y >= 18 and y <= 19 then
-            relayActionFromKey(keys.p)
-          end
-        else
-          if y > 10 then scrollBy(3) else scrollBy(-3) end
+        if key == keys.q then running = false
+        elseif key == keys.one then changePage("summary")
+        elseif key == keys.two then changePage("block_readers")
+        elseif key == keys.three then changePage("relays")
+        elseif key == keys.four then changePage("network")
+        elseif key == keys.five then changePage("fusion")
+        elseif key == keys.six then changePage("relay_test")
+        elseif key == keys.seven then changePage("methods")
+        elseif key == keys.eight then changePage("aliases")
+        elseif key == keys.nine then changePage("monitors")
+        elseif key == keys.zero then changePage("peripherals")
+        elseif key == keys.m then selectNextMonitor(); refreshMonitorSettings(); refreshData(true)
+        elseif key == keys.n then disableMonitorOutput(); refreshData(true)
+        elseif key == keys.r then setStatus("Rafraichissement...", 1); refreshData(true)
+        elseif key == keys.e then exportFormatted()
+        elseif key == keys.j then exportRaw()
+        elseif key == keys.x then allRelaysOff(latestData.redstoneRelays); refreshData(true)
+        elseif key == keys.up then
+          if currentPage == "aliases" then selectedAliasIndex = math.max(1, selectedAliasIndex - 1); redraw() else scrollBy(-1) end
+        elseif key == keys.down then
+          if currentPage == "aliases" then selectedAliasIndex = math.min(#(latestData.peripherals or {}), selectedAliasIndex + 1); redraw() else scrollBy(1) end
+        elseif key == keys.pageUp then scrollBy(-8)
+        elseif key == keys.pageDown then scrollBy(8)
+        elseif key == keys.home then scrollOffset = 0; redraw()
+        elseif key == keys.left then if currentPage == "methods" then selectedMethodsCategory = math.max(1, selectedMethodsCategory - 1); redraw() else cyclePage(-1) end
+        elseif key == keys.right then if currentPage == "methods" then selectedMethodsCategory = math.min(8, selectedMethodsCategory + 1); redraw() else cyclePage(1) end
+        elseif (key == keys.enter or key == keys.t) and currentPage == "aliases" then startAliasEdit()
+        elseif (key == keys.delete or key == keys.backspace) and currentPage == "aliases" then
+          local rows = buildAliasRows(latestData)
+          if rows[selectedAliasIndex] then removeAlias(rows[selectedAliasIndex].name); refreshData(true); setStatus("Alias supprime", 2) end
+        elseif currentPage == "relay_test" then handleRelayTestKey(key)
         end
       end
     end
   end
 end
 
-local function handleKeyboard()
-  while running do
-    local _, key = os.pullEvent("key")
+local function autoRefresh() while running do sleep(config.refreshDelay); if running and not aliasEditor.active then refreshData(true) end end end
 
-    if key == keys.q then
-      running = false
-    elseif key == keys.one then changePage("summary")
-    elseif key == keys.two then changePage("block_readers")
-    elseif key == keys.three then changePage("relays")
-    elseif key == keys.four then changePage("network")
-    elseif key == keys.five then changePage("fusion")
-    elseif key == keys.six then changePage("relay_test")
-    elseif key == keys.seven then changePage("methods")
-    elseif key == keys.eight then changePage("monitors")
-    elseif key == keys.nine then changePage("peripherals")
-    elseif key == keys.m then selectNextMonitor(); refreshMonitorSettings(); refreshData(true)
-    elseif key == keys.n then disableMonitorOutput(); refreshData(true)
-    elseif key == keys.r then setStatus("Rafraichissement...", 1.2); refreshData(true)
-    elseif key == keys.e then exportFormatted()
-    elseif key == keys.j then exportRaw()
-    elseif key == keys.x then allRelaysOff(latestData.redstoneRelays); refreshData(true)
-    elseif key == keys.up then scrollBy(-1)
-    elseif key == keys.down then scrollBy(1)
-    elseif key == keys.pageUp then scrollBy(-8)
-    elseif key == keys.pageDown then scrollBy(8)
-    elseif key == keys.home then scrollOffset = 0; redraw()
-    elseif key == keys.left then
-      if currentPage == "methods" then
-        selectedMethodsCategory = selectedMethodsCategory - 1
-        if selectedMethodsCategory < 1 then selectedMethodsCategory = 8 end
-        scrollOffset = 0
-        redraw()
-      else
-        cyclePage(-1)
-      end
-    elseif key == keys.right then
-      if currentPage == "methods" then
-        selectedMethodsCategory = selectedMethodsCategory + 1
-        if selectedMethodsCategory > 8 then selectedMethodsCategory = 1 end
-        scrollOffset = 0
-        redraw()
-      else
-        cyclePage(1)
-      end
-    else
-      if currentPage == "relay_test" then relayActionFromKey(key) end
-    end
-  end
-end
-
-local function autoRefresh()
-  while running do
-    sleep(config.refreshDelay)
-    if running then refreshData(true) end
-  end
-end
-
+loadAliases()
 refreshSelectedMonitor()
 refreshData(true)
 setStatus("Diagnostic console online")
-parallel.waitForAny(handleKeyboard, autoRefresh, handleMonitorTouch)
+parallel.waitForAny(handleInputEvents, autoRefresh)
 
-if config.killAllRelaysOnExit then
-  allRelaysOff(latestData.redstoneRelays)
-end
+if config.killAllRelaysOnExit then allRelaysOff(latestData.redstoneRelays) end
 
 term.setBackgroundColor(colors.black)
 term.setTextColor(colors.white)
@@ -1279,3 +997,4 @@ print("Programme termine.")
 print("Fichiers :")
 print("- blockreader_report.txt")
 print("- blockreader_raw.txt")
+print("- " .. config.aliasFile)
