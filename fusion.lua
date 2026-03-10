@@ -175,6 +175,10 @@ local C = {
   btnAction = colors.blue,
   btnWarn = colors.orange,
   btnText = colors.white,
+  tritium = colors.green,
+  deuterium = colors.red,
+  dtFuel = colors.purple,
+  inactive = colors.gray,
 }
 
 local function centerText(y, text, tc, bc)
@@ -549,17 +553,17 @@ local function drawReactorDiagram(x, y, w, h)
 
   local laserOn = state.laserChargeOn or state.laserLineOn or state.ignitionSequencePending
   local laserTone = laserOn and C.warn or C.dim
-  local dTone = state.dOpen and C.ok or C.dim
-  local tTone = state.tOpen and C.ok or C.dim
-  local dtTone = state.dtOpen and C.fuel or C.dim
+  local dTone = state.dOpen and C.deuterium or C.dim
+  local tTone = state.tOpen and C.tritium or C.dim
+  local dtTone = state.dtOpen and C.dtFuel or C.dim
 
   local conduitTone = C.borderDim
   if state.alert == "WARN" then conduitTone = C.warn end
   if state.alert == "DANGER" then conduitTone = C.bad end
 
   local laserPathTone = laserOn and C.warn or conduitTone
-  local tPathTone = state.tOpen and C.ok or conduitTone
-  local dPathTone = state.dOpen and C.ok or conduitTone
+  local tPathTone = state.tOpen and C.tritium or conduitTone
+  local dPathTone = state.dOpen and C.deuterium or conduitTone
 
   local moduleW = clamp(math.min(gw * cellW - 2, 12), 8, 12)
   if moduleW % 2 ~= 0 then moduleW = moduleW - 1 end
@@ -639,9 +643,9 @@ local function drawReactorDiagram(x, y, w, h)
         local tLockX = leftBranchX - math.floor((#tLock - 2) / 2)
         local dtLockX = centerBranchX - math.floor((#dtLock - 2) / 2)
         local dLockX = rightBranchX - math.floor((#dLock - 2) / 2)
-        writeAt(tLockX, lockY, tLock, C.text, state.tOpen and C.ok or C.panelMid)
-        writeAt(dtLockX, lockY, dtLock, C.text, state.dtOpen and C.fuel or C.panelMid)
-        writeAt(dLockX, lockY, dLock, C.text, state.dOpen and C.ok or C.panelMid)
+        writeAt(tLockX, lockY, tLock, C.text, state.tOpen and C.tritium or C.panelMid)
+        writeAt(dtLockX, lockY, dtLock, C.text, state.dtOpen and C.dtFuel or C.panelMid)
+        writeAt(dLockX, lockY, dLock, C.text, state.dOpen and C.deuterium or C.panelMid)
       end
     end
   end
@@ -650,8 +654,8 @@ local function drawReactorDiagram(x, y, w, h)
   if tdModuleY <= y + h - 2 then
     local tMx = rx
     local dMx = rx + gw * cellW - 6
-    writeAt(tMx, tdModuleY, " TANK T", state.tOpen and C.text or C.dim, state.tOpen and C.ok or C.panelMid)
-    writeAt(dMx, tdModuleY, " TANK D", state.dOpen and C.text or C.dim, state.dOpen and C.ok or C.panelMid)
+    writeAt(tMx, tdModuleY, " TANK T", state.tOpen and C.text or C.dim, state.tOpen and C.tritium or C.panelMid)
+    writeAt(dMx, tdModuleY, " TANK D", state.dOpen and C.text or C.dim, state.dOpen and C.deuterium or C.panelMid)
   end
 
 
@@ -1447,14 +1451,38 @@ local function buildButtons(layout)
     state.lastAction = "Toggle CHARGE"
   end)
 
-  addButton("ignite", bx, by + (bh + bGap) * 3, bw, bh, "IGNITE", C.btnAction, nil, function() triggerAutomaticIgnitionSequence() end)
+  addButton("demarrage", bx, by + (bh + bGap) * 3, bw, bh, "DEMARRAGE", C.btnAction, nil, function() triggerAutomaticIgnitionSequence() end)
   addButton("monitor", bx, by + (bh + bGap) * 4, bw, 2, "MONITOR", C.btnWarn, nil, function() startMonitorSelection() end)
-  addButton("stop", bx, by + (bh + bGap) * 5, bw, 2, "E-STOP", C.bad, nil, function() hardStop("EMERGENCY STOP") end)
+  addButton("arret", bx, by + (bh + bGap) * 5, bw, 2, "ARRET", C.bad, nil, function() hardStop("ARRET DEMANDE") end)
 
   if state.currentView == "manual" then
     addButton("manualLaser", bx, by + (bh + bGap) * 6, bw, 2, "LAS OUT " .. yesno(state.laserChargeOn), state.laserChargeOn and C.btnOn or C.btnOff, nil, function() setLaserCharge(not state.laserChargeOn) end)
-    addButton("manualT", bx, by + (bh + bGap) * 7, bw, 2, "T OUT " .. yesno(state.tOpen), state.tOpen and C.btnOn or C.btnOff, nil, function() openTritium(not state.tOpen) end)
-    addButton("manualD", bx, by + (bh + bGap) * 8, bw, 2, "D OUT " .. yesno(state.dOpen), state.dOpen and C.btnOn or C.btnOff, nil, function() openDeuterium(not state.dOpen) end)
+  end
+
+  local center = layout.center
+  if center and layout.mode ~= "compact" then
+    local innerX = center.x + 2
+    local innerW = center.w - 4
+    local barY = center.y + center.h - 4
+    local btnH = 3
+    local gap = 2
+    local btnW = math.max(8, math.floor((innerW - (gap * 2)) / 3))
+    local totalW = (btnW * 3) + (gap * 2)
+    local startX = innerX + math.max(0, math.floor((innerW - totalW) / 2))
+
+    addButton("lock_t", startX, barY, btnW, btnH, "T LOCK", state.tOpen and C.tritium or C.inactive, C.btnText, function()
+      openTritium(not state.tOpen)
+    end, { touchPadX = 1, touchPadY = 0 })
+
+    addButton("lock_dt", startX + btnW + gap, barY, btnW, btnH, "DT LOCK", state.dtOpen and C.dtFuel or C.inactive, C.btnText, function()
+      local nextState = not state.dtOpen
+      openDTFuel(nextState)
+      if nextState then openSeparatedGases(false) end
+    end, { touchPadX = 1, touchPadY = 0 })
+
+    addButton("lock_d", startX + (btnW + gap) * 2, barY, btnW, btnH, "D LOCK", state.dOpen and C.deuterium or C.inactive, C.btnText, function()
+      openDeuterium(not state.dOpen)
+    end, { touchPadX = 1, touchPadY = 0 })
   end
 end
 
@@ -1537,13 +1565,15 @@ local function drawIoPanel(x, y, w, h)
   local maxY = y + h - 2
   writeAt(rx, ry, "OUT", C.info, C.panelDark)
   if ry + 1 <= maxY then drawKeyValue(rx, ry + 1, "LAS", yesno(state.laserLineOn), C.dim, state.laserLineOn and C.ok or C.warn, w - 6) end
-  if ry + 2 <= maxY then drawKeyValue(rx, ry + 2, "T", yesno(state.tOpen), C.dim, state.tOpen and C.ok or C.warn, w - 6) end
-  if ry + 3 <= maxY then drawKeyValue(rx, ry + 3, "D", yesno(state.dOpen), C.dim, state.dOpen and C.ok or C.warn, w - 6) end
+  if ry + 2 <= maxY then drawKeyValue(rx, ry + 2, "T", yesno(state.tOpen), C.dim, state.tOpen and C.tritium or C.warn, w - 6) end
+  if ry + 3 <= maxY then drawKeyValue(rx, ry + 3, "D", yesno(state.dOpen), C.dim, state.dOpen and C.deuterium or C.warn, w - 6) end
+  if ry + 4 <= maxY then drawKeyValue(rx, ry + 4, "DT", yesno(state.dtOpen), C.dim, state.dtOpen and C.dtFuel or C.warn, w - 6) end
 
-  if ry + 4 <= maxY then writeAt(rx, ry + 4, "SENSE", C.info, C.panelDark) end
-  if ry + 5 <= maxY then drawKeyValue(rx, ry + 5, "R-T", hw.readerRoles.tritium and "OK" or "FAIL", C.dim, hw.readerRoles.tritium and C.ok or C.bad, w - 6) end
-  if ry + 6 <= maxY then drawKeyValue(rx, ry + 6, "R-D", hw.readerRoles.deuterium and "OK" or "FAIL", C.dim, hw.readerRoles.deuterium and C.ok or C.bad, w - 6) end
-  if ry + 7 <= maxY then drawKeyValue(rx, ry + 7, "R-AUX", hw.readerRoles.inventory and "OK" or "FAIL", C.dim, hw.readerRoles.inventory and C.ok or C.bad, w - 6) end
+  if ry + 5 <= maxY then writeAt(rx, ry + 5, "SENSE", C.info, C.panelDark) end
+  if ry + 6 <= maxY then drawKeyValue(rx, ry + 6, "R-T", hw.readerRoles.tritium and "OK" or "FAIL", C.dim, hw.readerRoles.tritium and C.ok or C.bad, w - 6) end
+  if ry + 7 <= maxY then drawKeyValue(rx, ry + 7, "R-D", hw.readerRoles.deuterium and "OK" or "FAIL", C.dim, hw.readerRoles.deuterium and C.ok or C.bad, w - 6) end
+  if ry + 8 <= maxY then drawKeyValue(rx, ry + 8, "R-AUX", hw.readerRoles.inventory and "OK" or "FAIL", C.dim, hw.readerRoles.inventory and C.ok or C.bad, w - 6) end
+
 end
 
 local function drawStatusPanel(panel)
