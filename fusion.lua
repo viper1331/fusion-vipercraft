@@ -32,7 +32,7 @@ local CFG = {
   },
 
   knownRelays = {
-    laser_charge = { relay = "redstone_relay_0", side = "top",   label = "Charge Laser" },
+    laser_charge = { relay = "redstone_relay_0", side = "top",   label = "LAS" },
     deuterium    = { relay = "redstone_relay_1", side = "front", label = "Tank Deuterium" },
     tritium      = { relay = "redstone_relay_2", side = "front", label = "Tank Tritium" },
   },
@@ -43,8 +43,7 @@ local CFG = {
     deuterium    = { relay = "redstone_relay_1", side = "front", analog = 15, pulse = false },
     tritium      = { relay = "redstone_relay_2", side = "front", analog = 15, pulse = false },
 
-    laser_fire   = nil,
-    hohlraum     = nil,
+    laser_fire   = { relay = "redstone_relay_0", side = "top",   analog = 15, pulse = true, pulseTime = 0.15 },
     dt_fuel      = nil,
   },
 }
@@ -1025,12 +1024,9 @@ local function readRelayOutputState(actionName, fallback)
 end
 
 local function setLaserCharge(on)
-  if relayWrite("laser_charge", on) then
-    state.laserChargeOn = on
-    state.lastAction = on and "Charge laser ON" or "Charge laser OFF"
-  else
-    state.laserChargeOn = false
-  end
+  relayWrite("laser_charge", false)
+  state.laserChargeOn = false
+  state.lastAction = on and "Charge laser (auto)" or "Charge laser (idle)"
 end
 
 local function fireLaser()
@@ -1038,14 +1034,6 @@ local function fireLaser()
     state.lastAction = "Pulse laser"
   else
     state.lastAction = "Laser pulse non cable"
-  end
-end
-
-local function injectHohlraum()
-  if CFG.actions.hohlraum and relayWrite("hohlraum", true) then
-    state.lastAction = "Injection hohlraum"
-  else
-    state.lastAction = "Ligne hohlraum non cablee"
   end
 end
 
@@ -1237,6 +1225,11 @@ local function triggerAutomaticIgnitionSequence()
     return
   end
 
+  if not state.reactorPresent then
+    state.status = "Reacteur absent"
+    return
+  end
+
   if not state.reactorFormed then
     state.status = "Reacteur non forme"
     return
@@ -1248,17 +1241,27 @@ local function triggerAutomaticIgnitionSequence()
     return
   end
 
+  if not state.dOpen then
+    state.status = "Ligne D fermee"
+    state.lastAction = "Ignition refusee"
+    return
+  end
+
+  if not state.tOpen then
+    state.status = "Ligne T fermee"
+    state.lastAction = "Ignition refusee"
+    return
+  end
+
   state.ignitionSequencePending = true
   state.lastIgnitionAttempt = os.clock()
 
   openDTFuel(false)
-  openSeparatedGases(true)
-  injectHohlraum()
   sleep(0.15)
   fireLaser()
 
   state.status = "Ignition auto"
-  state.lastAction = "Laser > 2.0G -> tanks + hohlraum + pulse"
+  state.lastAction = "Laser >= 2.0G + D/T ouverts -> pulse LAS"
 end
 
 local function autoChargeLaser()
