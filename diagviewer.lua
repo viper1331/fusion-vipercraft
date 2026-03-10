@@ -95,6 +95,19 @@ local colorsUI = {
 local latestData = {}
 local aliases = {}
 local statusState = { defaultMessage = "Ready", tempMessage = nil, tempUntil = 0 }
+local hitboxes = { terminal = {}, monitor = {} }
+
+local changePage
+local scrollBy
+local refreshData
+local exportFormatted
+local exportRaw
+local allRelaysOff
+local disableMonitorOutput
+local cycleMonitorSelection
+local selectMonitorByName
+local redraw
+local refreshMonitorSettings
 
 local function safeCall(fn, ...)
   local ok, result = pcall(fn, ...)
@@ -302,27 +315,73 @@ end
 local function getMonitors() local out = {}; for _, i in ipairs(getMonitorCandidates()) do table.insert(out, i.name) end; return out end
 local function getMonitorInfo(name) for _, i in ipairs(getMonitorCandidates()) do if i.name == name then return i end end; return { name = name, type = "?", width = "?", height = "?", ok = false } end
 
+selectMonitorByName = function(name, silent)
+  local monitors = getMonitors()
+  if type(name) ~= "string" or name == "" then return false end
+  for i, monitorName in ipairs(monitors) do
+    if monitorName == name then
+      selectedMonitorName = monitorName
+      selectedMonitorIndex = i
+      if not silent then
+        local info = getMonitorInfo(monitorName)
+        setStatus("Moniteur actif: " .. monitorName .. " (" .. tostring(info.width) .. "x" .. tostring(info.height) .. ")", 2.5)
+      end
+      return true
+    end
+  end
+  return false
+end
+
+local function selectMonitorByIndex(index)
+  local monitors = getMonitors()
+  if #monitors == 0 then selectedMonitorIndex = 0; selectedMonitorName = nil; setStatus("Aucun moniteur detecte", 2); return false end
+  if type(index) ~= "number" then return false end
+  local idx = math.floor(index)
+  if idx < 1 or idx > #monitors then return false end
+  return selectMonitorByName(monitors[idx])
+end
+
 local function refreshSelectedMonitor()
   local monitors = getMonitors()
-  if #monitors == 0 then selectedMonitorIndex = 0; selectedMonitorName = nil; return end
-  if selectedMonitorName then for i, n in ipairs(monitors) do if n == selectedMonitorName then selectedMonitorIndex = i; return end end end
-  if selectedMonitorIndex == 0 and #monitors == 1 then selectedMonitorIndex = 1 end
-  if selectedMonitorIndex < 0 then selectedMonitorIndex = 0 end
-  if selectedMonitorIndex > #monitors then selectedMonitorIndex = 1 end
-  selectedMonitorName = selectedMonitorIndex == 0 and nil or monitors[selectedMonitorIndex]
+  if #monitors == 0 then
+    selectedMonitorIndex = 0
+    selectedMonitorName = nil
+    return nil
+  end
+  if selectedMonitorName then
+    for i, monitorName in ipairs(monitors) do
+      if monitorName == selectedMonitorName then
+        selectedMonitorIndex = i
+        return selectedMonitorName
+      end
+    end
+    selectedMonitorName = nil
+    selectedMonitorIndex = 0
+    return nil
+  end
+  if selectedMonitorIndex >= 1 and selectedMonitorIndex <= #monitors then
+    selectedMonitorName = monitors[selectedMonitorIndex]
+    return selectedMonitorName
+  end
+  selectedMonitorIndex = 0
+  selectedMonitorName = nil
+  return nil
 end
 
-local function selectNextMonitor()
+cycleMonitorSelection = function()
   local monitors = getMonitors()
-  if #monitors == 0 then selectedMonitorIndex = 0; selectedMonitorName = nil; setStatus("Aucun moniteur detecte", 2); return end
-  if selectedMonitorName then for i, n in ipairs(monitors) do if n == selectedMonitorName then selectedMonitorIndex = i end end end
-  selectedMonitorIndex = selectedMonitorIndex == 0 and 1 or (selectedMonitorIndex % #monitors) + 1
-  selectedMonitorName = monitors[selectedMonitorIndex]
-  local info = getMonitorInfo(selectedMonitorName)
-  setStatus("Moniteur: " .. selectedMonitorName .. " (" .. tostring(info.width) .. "x" .. tostring(info.height) .. ")", 2.5)
+  if #monitors == 0 then selectedMonitorIndex = 0; selectedMonitorName = nil; setStatus("Aucun moniteur detecte", 2); return false end
+  refreshSelectedMonitor()
+  local idx = 0
+  if selectedMonitorName then
+    for i, monitorName in ipairs(monitors) do if monitorName == selectedMonitorName then idx = i break end end
+  end
+  idx = (idx % #monitors) + 1
+  return selectMonitorByName(monitors[idx])
 end
 
-local function disableMonitorOutput() selectedMonitorIndex = 0; selectedMonitorName = nil; setStatus("Affichage moniteur desactive", 2) end
+local function selectNextMonitor() return cycleMonitorSelection() end
+disableMonitorOutput = function() selectedMonitorIndex = 0; selectedMonitorName = nil; setStatus("Affichage moniteur desactive", 2) end
 local function getSelectedMonitor() refreshSelectedMonitor(); return selectedMonitorName and peripheral.wrap(selectedMonitorName) or nil end
 
 local function getReaderSummary(name)
@@ -459,6 +518,52 @@ local function drawBox(dev, x, y, width, height, title, borderColor)
   if title and #title > 0 and width > 6 then writeClipped(dev, x + 2, y, " " .. title .. " ", colorsUI.title) end
 end
 
+local function getHitboxBucket(source)
+  return source == "monitor" and hitboxes.monitor or hitboxes.terminal
+end
+
+local function clearHitboxes(source)
+  if source then
+    local bucket = getHitboxBucket(source)
+    for i = #bucket, 1, -1 do bucket[i] = nil end
+    return
+  end
+  clearHitboxes("terminal")
+  clearHitboxes("monitor")
+end
+
+local function addHitbox(source, id, x1, y1, x2, y2, action)
+  if type(action) ~= "function" then return end
+  local bx1, by1 = math.floor(math.min(x1, x2)), math.floor(math.min(y1, y2))
+  local bx2, by2 = math.floor(math.max(x1, x2)), math.floor(math.max(y1, y2))
+  table.insert(getHitboxBucket(source), { id = id, x1 = bx1, y1 = by1, x2 = bx2, y2 = by2, action = action })
+end
+
+local function handleClick(x, y, source)
+  local bucket = getHitboxBucket(source)
+  for i = #bucket, 1, -1 do
+    local hb = bucket[i]
+    if x >= hb.x1 and x <= hb.x2 and y >= hb.y1 and y <= hb.y2 then
+      hb.action(source, x, y, hb.id)
+      return true
+    end
+  end
+  return false
+end
+
+local function drawButton(dev, source, id, x, y, label, opts)
+  opts = opts or {}
+  local text = " " .. tostring(label or "") .. " "
+  local fg = opts.fg or colors.white
+  local bg = opts.bg or colors.gray
+  local active = opts.active and true or false
+  local activeBg = opts.activeBg or colorsUI.tabActiveBg
+  local activeFg = opts.activeFg or colors.white
+  writeAt(dev, x, y, text, active and activeFg or fg, active and activeBg or bg)
+  addHitbox(source, id, x, y, x + #text - 1, y, opts.onClick)
+  return #text
+end
+
 local function drawPanel(dev, panel)
   if config.ui.showBoxes then drawBox(dev, panel.x, panel.y, panel.w, panel.h, panel.title, colorsUI.dim) end
   local y = panel.y + 1
@@ -489,16 +594,34 @@ local function drawHeader(dev)
   drawHLine(dev, 2, colorsUI.dim)
 end
 
-local function drawTabs(dev)
+local function drawTabs(dev, source)
   if not config.ui.showTabBar then return end
   local w = ({ dev.getSize() })[1]
   local x = 1
-  for i, p in ipairs(PAGE_ORDER) do
-    local label = tostring(i) .. ":" .. string.sub(p, 1, 3):upper()
-    local text = " " .. label .. " "
-    if x + #text - 1 <= w then
-      writeAt(dev, x, 3, text, colors.white, p == currentPage and colorsUI.tabActiveBg or colorsUI.tabBg)
-      x = x + #text
+  local labels = {
+    summary = "Summary",
+    block_readers = "Readers",
+    relays = "Relays",
+    network = "Network",
+    fusion = "Fusion",
+    relay_test = "Relay Test",
+    methods = "Methods",
+    monitors = "Monitors",
+    aliases = "Aliases",
+    peripherals = "Devices",
+  }
+  for _, page in ipairs(PAGE_ORDER) do
+    local label = labels[page] or page
+    local width = #label + 2
+    if x + width - 1 <= w then
+      x = x + drawButton(dev, source, "tab:" .. page, x, 3, label, {
+        active = page == currentPage,
+        bg = colorsUI.tabBg,
+        activeBg = colorsUI.tabActiveBg,
+        onClick = function() changePage(page) end,
+      })
+    else
+      break
     end
   end
   drawHLine(dev, 4, colorsUI.dim)
@@ -510,11 +633,25 @@ local function drawStatusBar(dev, data)
   writeClipped(dev, 1, h - 1, ellipsis(getCurrentStatus() .. " | " .. monitorStateText(data), w), colors.yellow, colorsUI.statusBg)
 end
 
-local function drawFooter(dev)
+local function drawFooter(dev, source)
   local w, h = dev.getSize()
-  local help = "1-7 pages | 8 aliases | 9 monitors | 0 peripherals | arrows scroll | Enter/T alias | Del alias- | M/N monitor | R/E/J/X/Q"
   writeAt(dev, 1, h, string.rep(" ", w), colors.white, colorsUI.footerBg)
-  writeClipped(dev, 1, h, ellipsis(help, w), colors.white, colorsUI.footerBg)
+  local x = 1
+  local actions = {
+    { id = "refresh", label = "Refresh", onClick = function() setStatus("Rafraichissement...", 1); refreshData(true) end },
+    { id = "export_report", label = "Export Report", onClick = function() exportFormatted() end },
+    { id = "export_raw", label = "Export Raw", onClick = function() exportRaw() end },
+    { id = "stop_relays", label = "Stop Relays", onClick = function() allRelaysOff(latestData.redstoneRelays); refreshData(true) end },
+    { id = "scroll_up", label = "Up", onClick = function() scrollBy(-3) end },
+    { id = "scroll_down", label = "Down", onClick = function() scrollBy(3) end },
+    { id = "scroll_top", label = "Top", onClick = function() scrollOffset = 0; redraw() end },
+    { id = "scroll_bottom", label = "Bottom", onClick = function() scrollOffset = 99999; redraw() end },
+  }
+  for _, action in ipairs(actions) do
+    local width = #action.label + 2
+    if x + width - 1 > w then break end
+    x = x + drawButton(dev, source, "footer:" .. action.id, x, h, action.label, { bg = colorsUI.footerBg, onClick = action.onClick })
+  end
 end
 
 local function renderScrollable(dev, lines)
@@ -718,6 +855,48 @@ local function buildAliasRows(data)
   return rows
 end
 
+local function drawMonitorControls(dev, source, x, y, data)
+  local curX = x
+  for i, mon in ipairs(data.monitors or {}) do
+    local label = "Select M" .. tostring(i - 1)
+    curX = curX + drawButton(dev, source, "monitor:select:" .. mon, curX, y, label, {
+      active = selectedMonitorName == mon,
+      onClick = function() selectMonitorByName(mon); refreshMonitorSettings(); redraw() end,
+    })
+    if curX > ({ dev.getSize() })[1] - 8 then break end
+  end
+  curX = curX + drawButton(dev, source, "monitor:next", curX, y, "Next Monitor", { onClick = function() cycleMonitorSelection(); refreshMonitorSettings(); redraw() end })
+  drawButton(dev, source, "monitor:off", curX, y, "Monitor Off", { onClick = function() disableMonitorOutput(); redraw() end })
+end
+
+local function drawMonitorsPage(dev, source, data)
+  local w, h = dev.getSize()
+  local top = config.ui.showTabBar and 5 or 4
+  local bottom = h - 2
+  drawBox(dev, 1, top - 1, w, bottom - top + 2, "MONITOR MANAGEMENT", colorsUI.dim)
+  local active = selectedMonitorName and getMonitorInfo(selectedMonitorName) or nil
+  writeClipped(dev, 3, top, "Detected: " .. tostring(#data.monitorCandidates), colorsUI.info)
+  writeClipped(dev, 3, top + 1, selectedMonitorName and ("Active: " .. selectedMonitorName .. " (" .. tostring(active.width) .. "x" .. tostring(active.height) .. ")") or "Active: OFF", selectedMonitorName and colorsUI.good or colorsUI.warn)
+  writeClipped(dev, 3, top + 2, "Output mode: " .. (selectedMonitorName and "monitor" or "terminal-only"), colorsUI.section)
+  drawMonitorControls(dev, source, 3, top + 3, data)
+
+  local rowY = top + 5
+  for i, info in ipairs(data.monitorCandidates) do
+    if rowY > bottom - 1 then break end
+    local selected = info.name == selectedMonitorName
+    local line = string.format("[%d] %s <%s> size=%sx%s type=%s status=%s selected=%s", i, getDisplayName(info.name), info.name, short(info.width), short(info.height), tostring(info.type), info.ok and "OK" or "ERR", selected and "yes" or "no")
+    writeClipped(dev, 3, rowY, ellipsis(line, w - 6), selected and colorsUI.good or colorsUI.text)
+    addHitbox(source, "monitor:line:" .. info.name, 3, rowY, w - 3, rowY, function() selectMonitorByName(info.name); refreshMonitorSettings(); redraw() end)
+    local btnLabel = selected and "Using" or "Use"
+    local btnX = math.max(3, w - (#btnLabel + 4))
+    drawButton(dev, source, "monitor:use:" .. info.name, btnX, rowY, btnLabel, {
+      active = selected,
+      onClick = function() selectMonitorByName(info.name); refreshMonitorSettings(); redraw() end,
+    })
+    rowY = rowY + 1
+  end
+end
+
 local function drawAliasesPage(dev, data)
   local w, h = dev.getSize()
   local top, bottom = config.ui.showTabBar and 5 or 4, h - 2
@@ -758,7 +937,7 @@ local function relaySetAnalog(relayName, side, value)
 end
 
 local function relayPulse(relayName, side, value, duration) relaySetAnalog(relayName, side, value); sleep(duration or 1); relaySetAnalog(relayName, side, 0) end
-local function allRelaysOff(relays)
+allRelaysOff = function(relays)
   for _, relayName in ipairs(relays or {}) do
     local relay = peripheral.wrap(relayName)
     if relay then for _, side in ipairs(SIDE_LIST) do pcall(function() relay.setAnalogOutput(side, 0) end) end end
@@ -809,9 +988,23 @@ local function buildFormattedReport(data)
 end
 
 local function buildRawReport(data)
+  local monitorStates = {}
+  for i, info in ipairs(data.monitorCandidates or {}) do
+    table.insert(monitorStates, {
+      index = i,
+      name = info.name,
+      width = info.width,
+      height = info.height,
+      selected = info.name == selectedMonitorName,
+      ok = info.ok,
+    })
+  end
   local snapshot = {
     generatedAt = os.date and os.date("%Y-%m-%d %H:%M:%S") or "N/A",
     selectedMonitorName = selectedMonitorName,
+    selectedMonitorIndex = selectedMonitorIndex,
+    monitorSelectionActive = selectedMonitorName ~= nil,
+    monitorStates = monitorStates,
     currentPage = currentPage,
     aliases = aliases,
     latestData = data,
@@ -819,29 +1012,31 @@ local function buildRawReport(data)
   return { "-- blockreader_raw.txt", "return " .. encodeRaw(snapshot, 0, {}, 0) }
 end
 
-local function refreshMonitorSettings()
+refreshMonitorSettings = function()
   local mon = getSelectedMonitor()
   if mon then pcall(function() mon.setTextScale(config.defaultMonitorScale) end); pcall(function() mon.setBackgroundColor(colorsUI.bg) end); pcall(function() mon.setTextColor(colorsUI.text) end) end
 end
 
-local function renderPage(dev, data)
+local function renderPage(dev, data, source)
+  clearHitboxes(source)
   clearDevice(dev)
   drawHeader(dev)
-  drawTabs(dev)
+  drawTabs(dev, source)
   if currentPage == "summary" then drawSummaryDashboard(dev, data)
   elseif currentPage == "relays" then drawRelaysDashboard(dev, data)
   elseif currentPage == "aliases" then drawAliasesPage(dev, data)
+  elseif currentPage == "monitors" then drawMonitorsPage(dev, source, data)
   else renderScrollable(dev, buildPageLines(data)) end
   drawStatusBar(dev, data)
-  drawFooter(dev)
+  drawFooter(dev, source)
 end
 
-local function redraw()
-  renderPage(term, latestData)
-  local mon = getSelectedMonitor(); if mon then renderPage(mon, latestData) end
+redraw = function()
+  renderPage(term, latestData, "terminal")
+  local mon = getSelectedMonitor(); if mon then renderPage(mon, latestData, "monitor") else clearHitboxes("monitor") end
 end
 
-local function refreshData(skipDefaultStatus)
+refreshData = function(skipDefaultStatus)
   refreshSelectedMonitor()
   latestData = gatherAllData()
   if not skipDefaultStatus then
@@ -852,25 +1047,25 @@ local function refreshData(skipDefaultStatus)
   refreshMonitorSettings(); redraw()
 end
 
-local function exportFormatted()
+exportFormatted = function()
   local ok, err = writeLinesToFile("blockreader_report.txt", buildFormattedReport(latestData))
   setStatus(ok and "Export OK : blockreader_report.txt" or ("Erreur export : " .. tostring(err)), ok and 3 or 4)
   redraw()
 end
 
-local function exportRaw()
+exportRaw = function()
   local ok, err = writeLinesToFile("blockreader_raw.txt", buildRawReport(latestData))
   setStatus(ok and "Export RAW OK : blockreader_raw.txt" or ("Erreur export RAW : " .. tostring(err)), ok and 3 or 4)
   redraw()
 end
 
-local function changePage(nextPage) currentPage = nextPage; scrollOffset = 0; setStatus("Page: " .. pageLabel(nextPage), 1.2); redraw() end
+changePage = function(nextPage) currentPage = nextPage; scrollOffset = 0; setStatus("Page: " .. pageLabel(nextPage), 1.2); redraw() end
 local function cyclePage(step)
   local idx = 1; for i, p in ipairs(PAGE_ORDER) do if p == currentPage then idx = i end end
   idx = idx + step; if idx < 1 then idx = #PAGE_ORDER end; if idx > #PAGE_ORDER then idx = 1 end
   changePage(PAGE_ORDER[idx])
 end
-local function scrollBy(delta) scrollOffset = math.max(0, scrollOffset + delta); redraw() end
+scrollBy = function(delta) scrollOffset = math.max(0, scrollOffset + delta); redraw() end
 
 local function startAliasEdit()
   local rows = buildAliasRows(latestData)
@@ -911,20 +1106,11 @@ end
 
 local function handleMonitorTouch(side, x, y)
   if not selectedMonitorName or side ~= selectedMonitorName then return end
-  if y == 1 then cyclePage(1); return end
-  if y == 3 then
-    local slot = math.floor((x - 1) / 9) + 1
-    if PAGE_ORDER[slot] then changePage(PAGE_ORDER[slot]) end
-    return
-  end
-  if currentPage == "aliases" and y > 5 then
-    local top = config.ui.showTabBar and 5 or 4
-    local idx = scrollOffset + (y - top + 1)
-    local rows = buildAliasRows(latestData)
-    if rows[idx] then selectedAliasIndex = idx; redraw() end
-  elseif currentPage ~= "relay_test" then
-    if y > 10 then scrollBy(3) else scrollBy(-3) end
-  end
+  handleClick(x, y, "monitor")
+end
+
+local function handleTerminalClick(x, y)
+  handleClick(x, y, "terminal")
 end
 
 local function handleInputEvents()
@@ -933,6 +1119,8 @@ local function handleInputEvents()
     local event = ev[1]
     if event == "monitor_touch" then
       handleMonitorTouch(ev[2], ev[3], ev[4])
+    elseif event == "mouse_click" then
+      handleTerminalClick(ev[3], ev[4])
     elseif event == "char" then
       if aliasEditor.active then aliasEditor.value = aliasEditor.value .. ev[2]; redraw() end
     elseif event == "key" then
