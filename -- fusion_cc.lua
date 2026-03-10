@@ -125,15 +125,20 @@ local hw = {
 
 local C = {
   bg = colors.black,
+  panel = colors.gray,
+  panelDark = colors.black,
   text = colors.white,
   dim = colors.lightGray,
   ok = colors.lime,
   warn = colors.orange,
   bad = colors.red,
   info = colors.cyan,
+  border = colors.lightBlue,
+  borderDim = colors.gray,
   energy = colors.yellow,
   fuel = colors.orange,
   headerBg = colors.blue,
+  footerBg = colors.gray,
   headerText = colors.white,
   btnOn = colors.green,
   btnOff = colors.red,
@@ -243,13 +248,59 @@ local function fillLine(y, bg)
   term.write(string.rep(" ", w))
 end
 
-local function progressBar(x, y, w, pct, color)
+local function shortText(txt, maxLen)
+  txt = tostring(txt or "")
+  if #txt <= maxLen then return txt end
+  if maxLen <= 3 then return txt:sub(1, maxLen) end
+  return txt:sub(1, maxLen - 3) .. "..."
+end
+
+local function statusColor(status)
+  if status == "ONLINE" or status == "AUTO" or status == "OK" then return C.ok end
+  if status == "WARN" then return C.warn end
+  if status == "OFFLINE" or status == "MANUAL" or status == "DANGER" then return C.bad end
+  return C.info
+end
+
+local function drawBox(x, y, w, h, title, accent)
+  accent = accent or C.border
+  fillArea(x, y, w, h, C.panelDark)
+  writeAt(x, y, "+" .. string.rep("-", w - 2) .. "+", accent, C.panelDark)
+  for yy = y + 1, y + h - 2 do
+    writeAt(x, yy, "|", accent, C.panelDark)
+    writeAt(x + w - 1, yy, "|", accent, C.panelDark)
+  end
+  writeAt(x, y + h - 1, "+" .. string.rep("-", w - 2) .. "+", accent, C.panelDark)
+
+  if title and #title > 0 and w > 6 then
+    writeAt(x + 2, y, " " .. shortText(title, w - 6) .. " ", C.text, accent)
+  end
+end
+
+local function drawBadge(x, y, label, value, tone)
+  local badgeTxt = " " .. tostring(value) .. " "
+  writeAt(x, y, shortText(label, 9), C.dim, C.panelDark)
+  local bx = x + 10
+  writeAt(bx, y, badgeTxt, C.text, tone or statusColor(value))
+end
+
+local function drawBar(x, y, w, pct, color, label)
   pct = clamp(toNumber(pct, 0), 0, 100)
   local fill = math.floor((w * pct) / 100)
-  writeAt(x, y, string.rep("-", w), colors.gray, C.bg)
+  writeAt(x, y, string.rep(" ", w), C.text, C.panel)
   if fill > 0 then
-    writeAt(x, y, string.rep(" ", fill), colors.white, color or C.ok)
+    writeAt(x, y, string.rep(" ", fill), C.text, color or C.ok)
   end
+  if label and #label > 0 and w > 6 then
+    local txt = shortText(label, w - 1)
+    local lx = x + math.floor((w - #txt) / 2)
+    writeAt(lx, y, txt, C.text, C.panelDark)
+  end
+end
+
+local function drawKV(x, y, key, value, keyColor, valueColor)
+  writeAt(x, y, shortText(key, 11), keyColor or C.dim, C.panelDark)
+  writeAt(x + 11, y, shortText(value, 10), valueColor or C.text, C.panelDark)
 end
 
 local function loadSavedMonitorName()
@@ -817,8 +868,8 @@ local function fullAuto()
   updateAlerts()
 end
 
-local function addButton(id, x, y, w, label, bg, fg, action)
-  buttons[id] = { x = x, y = y, w = w, label = label, bg = bg, fg = fg or C.btnText, action = action }
+local function addButton(id, x, y, w, h, label, bg, fg, action)
+  buttons[id] = { x = x, y = y, w = w, h = h or 1, label = label, bg = bg, fg = fg or C.btnText, action = action }
 end
 
 local function startMonitorSelection()
@@ -847,15 +898,14 @@ local function buildButtons()
   buttons = {}
 
   if state.choosingMonitor then
-    addButton("m1", 1, 5, 39, "1", C.btnAction, nil, function() selectMonitorByIndex(1) end)
-    addButton("m2", 1, 7, 39, "2", C.btnAction, nil, function() selectMonitorByIndex(2) end)
-    addButton("m3", 1, 9, 39, "3", C.btnAction, nil, function() selectMonitorByIndex(3) end)
-    addButton("m4", 1, 11, 39, "4", C.btnAction, nil, function() selectMonitorByIndex(4) end)
-    addButton("cancelMon", 1, 17, 39, "ANNULER", C.bad, nil, function() stopMonitorSelection() end)
+    for i = 1, 4 do
+      addButton("m" .. i, 3, 4 + (i - 1) * 3, 33, 2, tostring(i), C.btnAction, nil, function() selectMonitorByIndex(i) end)
+    end
+    addButton("cancelMon", 3, 17, 33, 2, "ANNULER", C.bad, nil, function() stopMonitorSelection() end)
     return
   end
 
-  addButton("master", 26, 4, 12, "MASTER", state.autoMaster and C.btnOn or C.btnOff, nil, function()
+  addButton("master", 26, 6, 12, 2, "MASTER", state.autoMaster and C.btnOn or C.btnOff, nil, function()
     state.autoMaster = not state.autoMaster
     if not state.autoMaster then
       openDTFuel(false)
@@ -869,25 +919,25 @@ local function buildButtons()
     state.lastAction = "Toggle MASTER"
   end)
 
-  addButton("fusion", 26, 6, 12, "FUSION", state.fusionAuto and C.btnOn or C.btnOff, nil, function()
+  addButton("fusion", 26, 8, 12, 2, "FUSION", state.fusionAuto and C.btnOn or C.btnOff, nil, function()
     state.fusionAuto = not state.fusionAuto
     state.lastAction = "Toggle FUSION"
   end)
 
-  addButton("charge", 26, 8, 12, "CHARGE", state.chargeAuto and C.btnOn or C.btnOff, nil, function()
+  addButton("charge", 26, 10, 12, 2, "CHARGE", state.chargeAuto and C.btnOn or C.btnOff, nil, function()
     state.chargeAuto = not state.chargeAuto
     state.lastAction = "Toggle CHARGE"
   end)
 
-  addButton("ignite", 26, 10, 12, "IGNITE", C.btnAction, nil, function()
+  addButton("ignite", 26, 12, 12, 2, "IGNITE", C.btnAction, nil, function()
     triggerAutomaticIgnitionSequence()
   end)
 
-  addButton("monitor", 26, 12, 12, "MONITOR", C.btnWarn, nil, function()
+  addButton("monitor", 26, 14, 12, 1, "MONITOR", C.btnWarn, nil, function()
     startMonitorSelection()
   end)
 
-  addButton("stop", 26, 14, 12, "E-STOP", C.bad, nil, function()
+  addButton("stop", 26, 15, 12, 1, "E-STOP", C.bad, nil, function()
     hardStop("EMERGENCY STOP")
   end)
 end
@@ -895,15 +945,18 @@ end
 local function drawButtons()
   buildButtons()
   for _, b in pairs(buttons) do
-    writeAt(b.x, b.y, string.rep(" ", b.w), b.fg, b.bg)
+    for yy = b.y, b.y + b.h - 1 do
+      writeAt(b.x, yy, string.rep(" ", b.w), b.fg, b.bg)
+    end
     local lx = b.x + math.max(0, math.floor((b.w - #b.label) / 2))
-    writeAt(lx, b.y, b.label, b.fg, b.bg)
+    local ly = b.y + math.floor((b.h - 1) / 2)
+    writeAt(lx, ly, b.label, b.fg, b.bg)
   end
 end
 
 local function handleTouch(x, y)
   for _, b in pairs(buttons) do
-    if y == b.y and x >= b.x and x < b.x + b.w then
+    if y >= b.y and y < b.y + b.h and x >= b.x and x < b.x + b.w then
       b.action()
       return true
     end
@@ -916,22 +969,24 @@ local function drawMonitorSelection()
   term.setTextColor(C.text)
   term.clear()
 
+  local tw = term.getSize()
   fillLine(1, C.headerBg)
-  centerText(1, " Selection Moniteur ", C.headerText, C.headerBg)
+  writeAt(2, 1, "FUSION SUPERVISOR", C.headerText, C.headerBg)
+  writeAt(tw - 14, 1, "MONITOR LINK", C.info, C.headerBg)
 
-  writeAt(1, 2, "Choisissez un moniteur :", C.text)
-  writeAt(1, 3, "Index - Nom - Taille", C.dim)
+  drawBox(2, 3, 36, 15, "SELECTION MONITEUR", C.border)
+  writeAt(4, 4, "Choisissez une sortie d'affichage", C.dim, C.panelDark)
+  writeAt(4, 5, "IDX  NOM                TAILLE", C.info, C.panelDark)
 
   for i = 1, 4 do
-    local y = 4 + (i * 2 - 1)
+    local y = 6 + (i - 1) * 3
     local m = state.monitorList[i]
     if m then
-      local label = string.format("[%d] %s (%dx%d)", i, m.name, m.w or 0, m.h or 0)
-      writeAt(1, y, string.rep(" ", 39), C.text, C.bg)
-      writeAt(2, y, label:sub(1, 37), C.text, C.bg)
+      local row = string.format("[%d]  %-18s %2dx%-2d", i, shortText(m.name, 18), m.w or 0, m.h or 0)
+      writeAt(4, y, shortText(row, 30), C.text, C.panelDark)
+      writeAt(4, y + 1, "TAP / TOUCHE " .. i .. " pour selectionner", C.dim, C.panelDark)
     else
-      writeAt(1, y, string.rep(" ", 39), C.text, C.bg)
-      writeAt(2, y, string.format("[%d] --", i), C.dim, C.bg)
+      writeAt(4, y, "[" .. i .. "]  --", C.dim, C.panelDark)
     end
   end
 
@@ -957,37 +1012,46 @@ local function drawUI()
 
   term.setBackgroundColor(C.bg)
   term.setTextColor(C.text)
+  term.clear()
 
-  if not state.uiDrawn then
-    term.clear()
-    fillLine(1, C.headerBg)
-    centerText(1, " Fusion Control 39x19 ", C.headerText, C.headerBg)
-    state.uiDrawn = true
-  end
+  local heartbeat = (state.tick % 8 < 4) and "*" or "+"
+  fillLine(1, C.headerBg)
+  writeAt(2, 1, "FUSION SUPERVISOR", C.headerText, C.headerBg)
+  writeAt(21, 1, "STATUS", C.dim, C.headerBg)
+  writeAt(28, 1, shortText(state.status, 10), C.text, C.headerBg)
+  writeAt(39, 1, heartbeat, state.ignition and C.ok or C.warn, C.headerBg)
 
-  fillArea(1, 2, 39, 18, C.bg)
+  drawBox(1, 2, 24, 5, "REACTOR", C.border)
+  drawBadge(2, 3, "CORE", state.reactorPresent and "ONLINE" or "OFFLINE")
+  drawBadge(2, 4, "MODE", state.autoMaster and "AUTO" or "MANUAL")
+  drawBadge(2, 5, "ALERT", state.alert, statusColor(state.alert))
+  drawKV(2, 6, "IGNITION", state.ignition and "ACTIVE" or "IDLE", C.dim, state.ignition and C.ok or C.warn)
 
-  writeAt(1, 2, "STAT: " .. state.status, C.warn)
-  writeAt(1, 3, "ALRT: " .. state.alert, state.alert == "DANGER" and C.bad or (state.alert == "WARN" and C.warn or C.ok))
+  drawBox(1, 7, 24, 4, "LASER", C.borderDim)
+  drawKV(2, 8, "ENERGY", fmt(state.laserEnergy), C.dim, C.text)
+  drawBar(2, 9, 21, state.laserPct, C.ok, string.format("LASER %3.0f%%", state.laserPct))
+  drawKV(2, 10, "CHARGE", state.laserChargeOn and "ON" or "OFF", C.dim, state.laserChargeOn and C.ok or C.bad)
 
-  writeAt(1, 5, "Reactor: " .. yesno(state.reactorPresent), state.reactorPresent and C.ok or C.bad)
-  writeAt(1, 6, "Formed : " .. yesno(state.reactorFormed), state.reactorFormed and C.ok or C.bad)
-  writeAt(1, 7, "Ignite : " .. yesno(state.ignition), state.ignition and C.ok or C.bad)
+  drawBox(1, 11, 24, 4, "ENERGY", C.borderDim)
+  drawKV(2, 12, "BUFFER", state.energyKnown and fmt(state.energyStored) or "UNKNOWN", C.dim, C.energy)
+  drawBar(2, 13, 21, state.energyKnown and state.energyPct or 0, C.energy, state.energyKnown and string.format("GRID  %3.0f%%", state.energyPct) or "GRID N/A")
+  drawKV(2, 14, "CASE T", fmt(state.caseTemp), C.dim, C.info)
 
-  writeAt(1, 9,  "LaserE : " .. fmt(state.laserEnergy), C.text)
-  progressBar(1, 10, 18, state.laserPct, C.ok)
-  writeAt(1, 11, "L%     : " .. string.format("%5.1f", state.laserPct), C.dim)
+  drawBox(1, 15, 24, 3, "FUEL", C.fuel)
+  drawKV(2, 16, "DEUT", fmt(state.deuteriumAmount), C.dim, C.fuel)
+  drawKV(2, 17, "TRIT", fmt(state.tritiumAmount), C.dim, C.fuel)
 
-  writeAt(1, 13, "Energy : " .. (state.energyKnown and fmt(state.energyStored) or "N/A"), C.text)
-  writeAt(1, 14, "E%     : " .. (state.energyKnown and string.format("%5.1f", state.energyPct) or "N/A"), C.energy)
-
-  writeAt(1, 16, "D: " .. fmt(state.deuteriumAmount), C.fuel)
-  writeAt(1, 17, "T: " .. fmt(state.tritiumAmount), C.fuel)
-
-  local monText = tostring(hw.monitorName or "none")
-  writeAt(1, 18, "Mon: " .. monText:sub(1, 34), C.dim)
-
+  drawBox(25, 2, 15, 16, "CONTROL", C.border)
+  drawBadge(26, 3, "FUSION", state.fusionAuto and "AUTO" or "MANUAL")
+  drawBadge(26, 4, "CHARGE", state.chargeAuto and "AUTO" or "MANUAL")
+  drawBadge(26, 5, "GAS", state.gasAuto and "AUTO" or "MANUAL")
   drawButtons()
+
+  fillLine(19, C.footerBg)
+  writeAt(2, 19, "ACT: " .. shortText(state.lastAction, 17), C.text, C.footerBg)
+  writeAt(22, 19, "MON: " .. shortText(tostring(hw.monitorName or "none"), 17), C.text, C.footerBg)
+
+  state.uiDrawn = true
 end
 
 setupMonitor()
