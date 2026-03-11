@@ -166,32 +166,36 @@ function M.validateConfig(config)
     return false, errors
   end
 
-  local monitorName = config.monitor and config.monitor.name
-  if type(monitorName) ~= "string" or M.trimText(monitorName) == "" then
-    table.insert(errors, "monitor.name is missing")
-  end
-
-  local deviceKeys = { "reactorController", "logicAdapter", "laser", "induction" }
-  for _, key in ipairs(deviceKeys) do
-    local value = config.devices and config.devices[key]
+  local function requireNonEmptyString(value, path)
     if type(value) ~= "string" or M.trimText(value) == "" then
-      table.insert(errors, "devices." .. key .. " is missing")
+      table.insert(errors, path .. " is missing")
     end
   end
 
+  requireNonEmptyString(config.monitor and config.monitor.name, "monitor.name")
+  requireNonEmptyString(config.devices and config.devices.reactorController, "devices.reactorController")
+  requireNonEmptyString(config.devices and config.devices.logicAdapter, "devices.logicAdapter")
+  requireNonEmptyString(config.devices and config.devices.laser, "devices.laser")
+  requireNonEmptyString(config.devices and config.devices.induction, "devices.induction")
+  requireNonEmptyString(config.readers and config.readers.tritium, "readers.tritium")
+  requireNonEmptyString(config.readers and config.readers.deuterium, "readers.deuterium")
+  requireNonEmptyString(config.relays and config.relays.laser and config.relays.laser.name, "relays.laser.name")
+  requireNonEmptyString(config.relays and config.relays.tritium and config.relays.tritium.name, "relays.tritium.name")
+  requireNonEmptyString(config.relays and config.relays.deuterium and config.relays.deuterium.name, "relays.deuterium.name")
+
   local preferredView = config.ui and config.ui.preferredView
-  if preferredView ~= nil and not VALID_VIEWS[tostring(preferredView)] then
+  if type(preferredView) ~= "string" or not VALID_VIEWS[preferredView] then
     table.insert(errors, "ui.preferredView is invalid")
   end
 
-  local relayEntries = {
+  local relaySides = {
     { path = "relays.laser.side", value = config.relays and config.relays.laser and config.relays.laser.side },
     { path = "relays.tritium.side", value = config.relays and config.relays.tritium and config.relays.tritium.side },
     { path = "relays.deuterium.side", value = config.relays and config.relays.deuterium and config.relays.deuterium.side },
   }
 
-  for _, relay in ipairs(relayEntries) do
-    if relay.value ~= nil and not VALID_SIDES[tostring(relay.value)] then
+  for _, relay in ipairs(relaySides) do
+    if type(relay.value) ~= "string" or not VALID_SIDES[relay.value] then
       table.insert(errors, relay.path .. " is invalid")
     end
   end
