@@ -457,6 +457,188 @@ local function safeInvokeMethod(target, methodName, ...)
   end)
 end
 
+local DANGEROUS_PREFIXES = {
+  "set", "toggle", "write", "clear", "scroll", "turnOn", "turnOff", "open", "close",
+  "push", "pull", "eject", "start", "stop", "activate", "deactivate", "fire", "launch",
+}
+
+local SAFE_PREFIXES = { "get", "is", "list", "size", "has" }
+
+local EXPLICIT_SAFE_METHODS = {
+  size = true,
+  list = true,
+  getEnergy = true,
+  getEnergyStored = true,
+  getMaxEnergy = true,
+  getEnergyFilledPercentage = true,
+  getEnergyNeeded = true,
+  getLastInput = true,
+  getLastOutput = true,
+  getTransferCap = true,
+  getInstalledCells = true,
+  getInstalledProviders = true,
+  getLength = true,
+  getWidth = true,
+  getHeight = true,
+  isFormed = true,
+  getNameLocal = true,
+  getNamesRemote = true,
+  getTypeRemote = true,
+  getAnalogInput = true,
+  getAnalogOutput = true,
+  getInput = true,
+  getOutput = true,
+  getBlockData = true,
+  getItemDetail = true,
+  isColour = true,
+  isColor = true,
+  getTextScale = true,
+  getSize = true,
+}
+
+local METHODS_REQUIRING_PROFILES = {
+  getAnalogInput = true,
+  getAnalogOutput = true,
+  getInput = true,
+  getOutput = true,
+  getTypeRemote = true,
+  getItemDetail = true,
+}
+
+local function startsWith(text, prefix)
+  return string.sub(text, 1, #prefix) == prefix
+end
+
+local function shouldSkipMethod(methodName)
+  local low = string.lower(tostring(methodName or ""))
+  if startsWith(low, "setcursor") then return true, "dangerous_prefix" end
+  if low == "setmode" then return true, "dangerous_explicit" end
+  for _, prefix in ipairs(DANGEROUS_PREFIXES) do
+    if startsWith(low, string.lower(prefix)) then return true, "dangerous_prefix" end
+  end
+  return false
+end
+
+local function isSafeProbeMethod(methodName)
+  if EXPLICIT_SAFE_METHODS[methodName] then return true end
+  local low = string.lower(tostring(methodName or ""))
+  for _, prefix in ipairs(SAFE_PREFIXES) do
+    if startsWith(low, prefix) then return true end
+  end
+  return false
+end
+
+local function safeInvokeMethodMulti(target, methodName, ...)
+  if not target or type(target[methodName]) ~= "function" then
+    return false, nil, "method unavailable"
+  end
+  local args = { ... }
+  local packed = table.pack(pcall(function()
+    return target[methodName](table.unpack(args))
+  end))
+  if not packed[1] then return false, nil, tostring(packed[2]) end
+  local values = {}
+  for i = 2, packed.n do table.insert(values, packed[i]) end
+  return true, values
+end
+
+local function normalizeProbeValues(values)
+  local normalized = {}
+  for i = 1, #(values or {}) do normalized[i] = values[i] end
+  local returnType = (#normalized == 0) and "nil" or type(normalized[1])
+  return normalized, returnType
+end
+
+local function probeCall(wrapped, methodName, callKey, ...)
+  local ok, values, err = safeInvokeMethodMulti(wrapped, methodName, ...)
+  if not ok then return callKey, { ok = false, error = tostring(err or "unknown error") } end
+  local normalized, returnType = normalizeProbeValues(values)
+  return callKey, { ok = true, returnType = returnType, values = normalized }
+end
+
+local function probeDeviceMethods(name, pType, wrapped, methods)
+  local probes, skippedDangerous, skippedNeedsArgs = {}, {}, {}
+  local stats = { attempted = 0, ok = 0, failed = 0, skippedDangerous = 0, skippedNeedsArgs = 0 }
+  if not wrapped then
+    return probes, { skippedDangerous = skippedDangerous, skippedNeedsArgs = skippedNeedsArgs, wrapError = true }, stats
+  end
+
+  local methodSet = {}
+  for _, methodName in ipairs(methods or {}) do methodSet[methodName] = true end
+
+  local function register(callKey, result)
+    probes[callKey] = result
+    stats.attempted = stats.attempted + 1
+    if result.ok then stats.ok = stats.ok + 1 else stats.failed = stats.failed + 1 end
+  end
+
+  for _, methodName in ipairs(methods or {}) do
+    local skip, reason = shouldSkipMethod(methodName)
+    if skip then
+      skippedDangerous[methodName] = reason
+      stats.skippedDangerous = stats.skippedDangerous + 1
+    elseif isSafeProbeMethod(methodName) and not METHODS_REQUIRING_PROFILES[methodName] then
+      local callKey, result = probeCall(wrapped, methodName, methodName)
+      register(callKey, result)
+    elseif METHODS_REQUIRING_PROFILES[methodName] then
+      skippedNeedsArgs[methodName] = "profile_required"
+      stats.skippedNeedsArgs = stats.skippedNeedsArgs + 1
+    end
+  end
+
+  if methodSet.getAnalogInput then
+    skippedNeedsArgs.getAnalogInput = nil
+    for _, side in ipairs(SIDE_LIST) do register(probeCall(wrapped, "getAnalogInput", "getAnalogInput(" .. side .. ")", side)) end
+  end
+  if methodSet.getAnalogOutput then
+    skippedNeedsArgs.getAnalogOutput = nil
+    for _, side in ipairs(SIDE_LIST) do register(probeCall(wrapped, "getAnalogOutput", "getAnalogOutput(" .. side .. ")", side)) end
+  end
+  if methodSet.getInput then
+    skippedNeedsArgs.getInput = nil
+    for _, side in ipairs(SIDE_LIST) do register(probeCall(wrapped, "getInput", "getInput(" .. side .. ")", side)) end
+  end
+  if methodSet.getOutput then
+    skippedNeedsArgs.getOutput = nil
+    for _, side in ipairs(SIDE_LIST) do register(probeCall(wrapped, "getOutput", "getOutput(" .. side .. ")", side)) end
+  end
+  if methodSet.getTypeRemote and probes.getNamesRemote and probes.getNamesRemote.ok and type(probes.getNamesRemote.values[1]) == "table" then
+    skippedNeedsArgs.getTypeRemote = nil
+    for _, remoteName in ipairs(probes.getNamesRemote.values[1]) do
+      register(probeCall(wrapped, "getTypeRemote", "getTypeRemote(" .. tostring(remoteName) .. ")", remoteName))
+    end
+  end
+  if methodSet.getItemDetail and probes.list and probes.list.ok and type(probes.list.values[1]) == "table" then
+    skippedNeedsArgs.getItemDetail = nil
+    local slots, count = sortedKeys(probes.list.values[1]), 0
+    for _, slot in ipairs(slots) do
+      count = count + 1
+      if count > 12 then break end
+      register(probeCall(wrapped, "getItemDetail", "getItemDetail(" .. tostring(slot) .. ")", slot))
+    end
+  end
+
+  stats.skippedNeedsArgs = #sortedKeys(skippedNeedsArgs)
+  return probes, { skippedDangerous = skippedDangerous, skippedNeedsArgs = skippedNeedsArgs }, stats
+end
+
+local function summarizeProbeResult(probe)
+  if not probe then return "N/A" end
+  if not probe.ok then return "ERR -> " .. tostring(probe.error) end
+  if not probe.values or #probe.values == 0 then return "OK -> nil" end
+  local previews = {}
+  for i = 1, #probe.values do
+    local value = probe.values[i]
+    if type(value) == "table" then
+      local dump = flattenTable(value, 0, nil, nil, { maxDepth = 2, maxLines = 4 })
+      previews[i] = "{" .. table.concat(dump, "; ") .. "}"
+    else
+      previews[i] = ellipsis(tostring(value), 120)
+    end
+  end
+  return "OK -> " .. table.concat(previews, " | ")
+end
+
 local function getSuggestedRole(name, pType, methods, readerRole)
   local low = string.lower(tostring(name or "") .. " " .. tostring(pType or ""))
   if readerRole then return readerRole end
@@ -474,23 +656,6 @@ local function getSuggestedRole(name, pType, methods, readerRole)
   if hasMethods(methods, { "getNamesRemote", "getNameLocal" }) then return "modem" end
   if hasMethods(methods, { "getSize", "setTextScale" }) then return "monitor" end
   return "other"
-end
-
-local function probeNoArgMethods(wrapped, methods)
-  local probes = {}
-  local probeCandidates = {
-    "getStatus", "isActive", "getEnergy", "getEnergyFilledPercentage", "getTemperature", "getNameLocal",
-    "getNamesRemote", "getTransferCap", "getMode", "getLength", "getSize", "isWireless", "isOpen"
-  }
-  local set = {}
-  for _, m in ipairs(methods or {}) do set[m] = true end
-  for _, m in ipairs(probeCandidates) do
-    if set[m] and wrapped then
-      local ok, value = safeInvokeMethod(wrapped, m)
-      probes[m] = ok and value or "ERR"
-    end
-  end
-  return probes
 end
 
 local function getDeviceSummaryByType(name, pType, wrapped, methods, readerSummaryMap)
@@ -560,12 +725,9 @@ local function getDeviceSummaryByType(name, pType, wrapped, methods, readerSumma
   end
 
   if low:find("fusion", 1, true) or low:find("logic", 1, true) or low:find("induction", 1, true) or low:find("laser", 1, true) then
-    raw.probed = probeNoArgMethods(wrapped, methods)
-    summary.probeCount = #sortedKeys(raw.probed or {})
     return summary, raw
   end
 
-  raw.probed = probeNoArgMethods(wrapped, methods)
   summary.methodCount = #methods
   return summary, raw
 end
@@ -574,6 +736,7 @@ local function buildAllDevicesDetailed(data)
   local result = {}
   local typeCounts = {}
   local aliasCount, roleCount, wrapOkCount = 0, 0, 0
+  local probeTotals = { attempted = 0, ok = 0, failed = 0, skippedNeedsArgs = 0, skippedDangerous = 0 }
   local readerMap = {}
   for _, r in ipairs(data.readerSummaries or {}) do readerMap[r.name] = r end
 
@@ -584,6 +747,12 @@ local function buildAllDevicesDetailed(data)
     local alias = getAlias(name)
     local suggestedRole = getSuggestedRole(name, pType, methods, readerMap[name] and readerMap[name].role or nil)
     local summary, raw = getDeviceSummaryByType(name, pType, wrapped, methods, readerMap)
+    local probes, probeMeta, probeStats = probeDeviceMethods(name, pType, wrapped, methods)
+    summary.probeCalls = probeStats.attempted
+    summary.probeOk = probeStats.ok
+    summary.probeFailed = probeStats.failed
+    summary.probeSkippedNeedsArgs = probeStats.skippedNeedsArgs
+    summary.probeSkippedDangerous = probeStats.skippedDangerous
 
     result[name] = {
       name = name,
@@ -592,9 +761,18 @@ local function buildAllDevicesDetailed(data)
       suggestedRole = suggestedRole,
       methods = methods,
       wrapped = wrapped ~= nil,
+      probes = probes,
+      probeMeta = probeMeta,
+      probeStats = probeStats,
       summary = summary,
       raw = raw,
     }
+
+    probeTotals.attempted = probeTotals.attempted + (probeStats.attempted or 0)
+    probeTotals.ok = probeTotals.ok + (probeStats.ok or 0)
+    probeTotals.failed = probeTotals.failed + (probeStats.failed or 0)
+    probeTotals.skippedNeedsArgs = probeTotals.skippedNeedsArgs + (probeStats.skippedNeedsArgs or 0)
+    probeTotals.skippedDangerous = probeTotals.skippedDangerous + (probeStats.skippedDangerous or 0)
 
     typeCounts[pType] = (typeCounts[pType] or 0) + 1
     if alias then aliasCount = aliasCount + 1 end
@@ -608,6 +786,7 @@ local function buildAllDevicesDetailed(data)
     withAlias = aliasCount,
     withSuggestedRole = roleCount,
     wrapOk = wrapOkCount,
+    probeTotals = probeTotals,
   }
   return result
 end
@@ -1171,6 +1350,11 @@ local function buildFormattedReport(data)
   table.insert(out, "devices_with_alias = " .. short(stats.withAlias))
   table.insert(out, "devices_with_suggested_role = " .. short(stats.withSuggestedRole))
   table.insert(out, "devices_wrap_ok = " .. short(stats.wrapOk))
+  table.insert(out, "probe_attempted = " .. short(stats.probeTotals and stats.probeTotals.attempted))
+  table.insert(out, "probe_ok = " .. short(stats.probeTotals and stats.probeTotals.ok))
+  table.insert(out, "probe_failed = " .. short(stats.probeTotals and stats.probeTotals.failed))
+  table.insert(out, "probe_skipped_requires_args = " .. short(stats.probeTotals and stats.probeTotals.skippedNeedsArgs))
+  table.insert(out, "probe_skipped_dangerous = " .. short(stats.probeTotals and stats.probeTotals.skippedDangerous))
   table.insert(out, "devices_by_type = " .. encodeRaw(stats.byType or {}, 0, {}, 0))
   table.insert(out, "")
 
@@ -1190,6 +1374,19 @@ local function buildFormattedReport(data)
         table.insert(out, "Summary:")
         local summaryDump = flattenTable(d.summary, 0, nil, nil, { maxDepth = config.maxFlattenDepth, maxLines = 60 })
         if #summaryDump == 0 then table.insert(out, "- (none)") else for _, line in ipairs(summaryDump) do table.insert(out, "- " .. line) end end
+        table.insert(out, "Probes:")
+        local probeKeys = sortedKeys(d.probes or {})
+        if #probeKeys == 0 then
+          table.insert(out, "- (none)")
+        else
+          for _, callKey in ipairs(probeKeys) do
+            table.insert(out, "- " .. callKey .. " -> " .. summarizeProbeResult(d.probes[callKey]))
+          end
+        end
+        local skippedDangerous = sortedKeys(d.probeMeta and d.probeMeta.skippedDangerous or {})
+        if #skippedDangerous > 0 then table.insert(out, "Skipped dangerous: " .. table.concat(skippedDangerous, ", ")) end
+        local skippedNeedsArgs = sortedKeys(d.probeMeta and d.probeMeta.skippedNeedsArgs or {})
+        if #skippedNeedsArgs > 0 then table.insert(out, "Skipped requires args: " .. table.concat(skippedNeedsArgs, ", ")) end
         table.insert(out, "")
       end
     end
