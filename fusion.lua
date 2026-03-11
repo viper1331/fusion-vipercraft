@@ -331,14 +331,34 @@ local function drawBox(x, y, w, h, title, accent)
   end
 end
 
+local function getRuntimeFuelMode()
+  local dt = state.dtOpen == true
+  local d = state.dOpen == true
+  local t = state.tOpen == true
+
+  if dt and not d and not t then return "DT" end
+  if (not dt) and d and t then return "D+T" end
+  if dt and (d or t) then return "HYBRID" end
+  return "STARVED"
+end
+
+local function isRuntimeFuelOk()
+  return (state.dOpen and state.tOpen) or state.dtOpen
+end
+
 local function reactorPhase()
   if state.alert == "DANGER" then return "SAFE STOP" end
-  if #state.ignitionBlockers > 0 then return "BLOCKED" end
   if not state.reactorPresent then return "OFFLINE" end
   if not state.reactorFormed then return "UNFORMED" end
-  if state.ignition and state.dtOpen then return "RUNNING" end
+  if state.ignition then
+    if isRuntimeFuelOk() then
+      local mode = getRuntimeFuelMode()
+      return mode == "HYBRID" and "RUNNING / HYBRID" or ("RUNNING / " .. mode)
+    end
+    return "RUNNING / STARVED"
+  end
+  if #state.ignitionBlockers > 0 then return "BLOCKED" end
   if state.ignitionSequencePending then return "FIRING" end
-  if state.ignition then return "IGNITED" end
   if state.laserChargeOn or state.laserLineOn then return "CHARGING" end
 
   local threshold = toNumber(CFG and CFG.ignitionLaserEnergyThreshold, 0)
@@ -349,10 +369,11 @@ local function reactorPhase()
 end
 
 local function phaseColor(phase)
+  if contains(phase, "RUNNING") and not contains(phase, "STARVED") then return C.ok end
   if phase == "RUNNING" or phase == "IGNITED" then return C.ok end
   if phase == "READY" then return C.warn end
   if phase == "CHARGING" or phase == "FIRING" then return C.warn end
-  if phase == "SAFE STOP" or phase == "OFFLINE" or phase == "UNFORMED" or phase == "BLOCKED" then return C.bad end
+  if phase == "SAFE STOP" or phase == "OFFLINE" or phase == "UNFORMED" or phase == "BLOCKED" or contains(phase, "STARVED") then return C.bad end
   return C.dim
 end
 
@@ -401,11 +422,19 @@ local function computeSafetyWarnings()
     table.insert(warnings, "REACTOR UNFORMED")
   end
 
-  if state.laserEnergy < CFG.ignitionLaserEnergyThreshold then
+  if (not state.ignition) and state.laserEnergy < CFG.ignitionLaserEnergyThreshold then
     table.insert(warnings, "LAS BELOW 2 GFE")
   end
-  if not state.tOpen then table.insert(warnings, "TANK T CLOSED") end
-  if not state.dOpen then table.insert(warnings, "TANK D CLOSED") end
+  if state.ignition then
+    if not isRuntimeFuelOk() then
+      table.insert(warnings, "RUNTIME FUEL FAIL")
+      table.insert(warnings, "NO FUEL FLOW")
+      table.insert(warnings, "STARVED")
+    end
+  else
+    if not state.tOpen then table.insert(warnings, "TANK T CLOSED") end
+    if not state.dOpen then table.insert(warnings, "TANK D CLOSED") end
+  end
 
   if not hw.readerRoles.deuterium or not hw.readerRoles.tritium then
     table.insert(warnings, "FUEL SENSOR FAIL")
@@ -421,12 +450,7 @@ local function computeSafetyWarnings()
     critical = true
   end
 
-  if state.dtOpen and (state.dOpen or state.tOpen) then
-    table.insert(warnings, "UNSAFE STATE")
-    critical = true
-  end
-
-  if #state.ignitionBlockers > 0 then
+  if (not state.ignition) and #state.ignitionBlockers > 0 then
     table.insert(warnings, "IGNITION BLOCKED")
   end
 
@@ -1296,9 +1320,10 @@ local function updateAlerts()
   state.ignitionBlockers = getIgnitionBlockers()
   local warnings, critical = computeSafetyWarnings()
   state.safetyWarnings = warnings
+  local preStartBlocked = (not state.ignition) and (#state.ignitionBlockers > 0)
   if critical then
     state.alert = "DANGER"
-  elseif #warnings > 0 or #state.ignitionBlockers > 0 or (state.energyKnown and state.energyPct <= CFG.energyLowPct) then
+  elseif #warnings > 0 or preStartBlocked or (state.energyKnown and state.energyPct <= CFG.energyLowPct) then
     state.alert = "WARN"
   elseif state.ignition then
     state.alert = "OK"
@@ -1387,20 +1412,28 @@ local function autoFusionControl()
       openSeparatedGases(false)
       state.status = "Energie pleine : stop injection"
     else
-      state.status = state.ignition and "RUNNING" or "READY"
+      if state.ignition and not isRuntimeFuelOk() then
+        state.status = "RUNNING / STARVED"
+      else
+        state.status = state.ignition and ("RUNNING / " .. getRuntimeFuelMode()) or "READY"
+      end
     end
   else
     if not state.ignition and not state.ignitionSequencePending and state.laserEnergy >= CFG.ignitionLaserEnergyThreshold then
       triggerAutomaticIgnitionSequence()
     else
-      state.status = state.ignition and "RUNNING" or (state.ignitionSequencePending and "FIRING" or "READY")
+      if state.ignition and not isRuntimeFuelOk() then
+        state.status = "RUNNING / STARVED"
+      else
+        state.status = state.ignition and ("RUNNING / " .. getRuntimeFuelMode()) or (state.ignitionSequencePending and "FIRING" or "READY")
+      end
     end
   end
 end
 
 local function autoGasSanity()
   if not state.gasAuto then return end
-  if state.dtOpen and (state.dOpen or state.tOpen) then
+  if (not state.ignition) and state.dtOpen and (state.dOpen or state.tOpen) then
     openSeparatedGases(false)
   end
 end
@@ -1685,13 +1718,30 @@ local function drawStatusPanel(panel)
   if b1h > 5 then drawKeyValue(x + 2, y + 3, "Temp P", fmt(state.plasmaTemp), C.dim, C.info, w - 6) end
 
   local y2 = y + b1h
-  drawBox(x, y2, w, b2h, "IGNITION CHECK", C.borderDim)
-  local checklist = state.ignitionChecklist or {}
-  for i = 1, math.min(#checklist, b2h - 2) do
-    local item = checklist[i]
-    local tone = item.ok and C.ok or (item.wait and C.warn or C.bad)
-    local mark = item.ok and "[OK]" or (item.wait and "[...]" or "[NO]")
-    writeAt(x + 2, y2 + i, shortText(mark .. " " .. item.key, w - 4), tone, C.panelDark)
+  if state.ignition then
+    drawBox(x, y2, w, b2h, "RUNTIME FUEL", C.borderDim)
+    local mode = getRuntimeFuelMode()
+    local flowOk = isRuntimeFuelOk()
+    local rows = {
+      { "Fuel Mode", mode, mode == "STARVED" and C.bad or C.ok },
+      { "Fuel Flow", flowOk and "OK" or "NO FLOW", flowOk and C.ok or C.bad },
+      { "D Line", state.dOpen and "OPEN" or "CLOSED", state.dOpen and C.deuterium or C.warn },
+      { "T Line", state.tOpen and "OPEN" or "CLOSED", state.tOpen and C.tritium or C.warn },
+      { "DT Line", state.dtOpen and "OPEN" or "CLOSED", state.dtOpen and C.dtFuel or C.warn },
+    }
+    for i = 1, math.min(#rows, b2h - 2) do
+      local r = rows[i]
+      drawKeyValue(x + 2, y2 + i, r[1], r[2], C.dim, r[3], w - 6)
+    end
+  else
+    drawBox(x, y2, w, b2h, "IGNITION CHECK", C.borderDim)
+    local checklist = state.ignitionChecklist or {}
+    for i = 1, math.min(#checklist, b2h - 2) do
+      local item = checklist[i]
+      local tone = item.ok and C.ok or (item.wait and C.warn or C.bad)
+      local mark = item.ok and "[OK]" or (item.wait and "[...]" or "[NO]")
+      writeAt(x + 2, y2 + i, shortText(mark .. " " .. item.key, w - 4), tone, C.panelDark)
+    end
   end
 
   local y3 = y2 + b2h
