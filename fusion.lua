@@ -218,7 +218,7 @@ local C = {
   panel = colors.gray,
   panelDark = colors.black,
   panelMid = colors.lightGray,
-  panelInner = colors.blue,
+  panelInner = colors.gray,
   panelShadow = colors.black,
   text = colors.white,
   dim = colors.lightGray,
@@ -226,11 +226,11 @@ local C = {
   warn = colors.orange,
   bad = colors.red,
   info = colors.cyan,
-  border = colors.lightBlue,
+  border = colors.cyan,
   borderDim = colors.gray,
   energy = colors.yellow,
   fuel = colors.orange,
-  headerBg = colors.blue,
+  headerBg = colors.gray,
   footerBg = colors.gray,
   headerText = colors.white,
   btnOn = colors.green,
@@ -436,29 +436,19 @@ local function drawBox(x, y, w, h, title, accent)
   if w < 2 or h < 2 then return end
 
   writeAt(x, y, string.rep(" ", w), C.text, C.panel)
-  if w > 2 then
-    writeAt(x + 1, y, string.rep(" ", w - 2), C.text, accent)
-  end
-  writeAt(x, y + h - 1, string.rep(" ", w), C.text, C.panelShadow)
+  writeAt(x, y + h - 1, string.rep(" ", w), C.text, C.panel)
 
   for yy = y + 1, y + h - 2 do
     writeAt(x, yy, " ", C.text, C.panel)
-    writeAt(x + w - 1, yy, " ", C.text, C.panelShadow)
+    writeAt(x + w - 1, yy, " ", C.text, C.panel)
     if w > 2 then
       writeAt(x + 1, yy, string.rep(" ", w - 2), C.text, C.panelDark)
     end
   end
 
-  if w > 4 and h > 4 then
-    writeAt(x + 1, y + 1, string.rep(" ", w - 2), C.text, C.panelInner)
-    for yy = y + 2, y + h - 2 do
-      writeAt(x + 1, yy, " ", C.text, C.panelInner)
-    end
-  end
-
   if title and #title > 0 and w > 8 then
-    local t = " « " .. shortText(title, w - 8) .. " » "
-    writeAt(x + 2, y, shortText(t, w - 4), C.text, accent)
+    local t = " " .. shortText(title, w - 4) .. " "
+    writeAt(x + 1, y, shortText(t, w - 2), C.headerText, accent)
   end
 end
 
@@ -591,23 +581,22 @@ end
 
 local function drawHeader(title, status)
   local tw = term.getSize()
-  local heartbeat = (state.tick % 8 < 4) and "●" or "○"
+  local heartbeat = (state.tick % 8 < 4) and "•" or " "
   local phase = reactorPhase()
-  fillLine(1, C.panel)
-  writeAt(1, 1, " ", C.text, C.border)
-  writeAt(2, 1, shortText(title .. " // " .. string.upper(state.currentView), math.max(10, tw - 46)), C.headerText, C.panel)
-  local centerTxt = "PHASE · " .. shortText(phase, 18)
+  fillLine(1, C.headerBg)
+  writeAt(2, 1, shortText(title .. " | " .. string.upper(state.currentView), math.max(10, tw - 42)), C.headerText, C.headerBg)
+  local centerTxt = "PHASE " .. shortText(phase, 18)
   local cx = math.max(2, math.floor((tw - #centerTxt) / 2))
-  writeAt(cx, 1, centerTxt, phaseColor(phase), C.panel)
-  local statusTxt = shortText(status or "N/A", 18)
+  writeAt(cx, 1, centerTxt, phaseColor(phase), C.headerBg)
+  local statusTxt = shortText(status or "N/A", 16)
   local rightTxt = heartbeat .. " ALERT " .. statusTxt
   local sx = math.max(2, tw - #rightTxt - 1)
-  writeAt(sx, 1, rightTxt, statusColor(state.alert), C.panel)
+  writeAt(sx, 1, rightTxt, statusColor(state.alert), C.headerBg)
 end
 
 local function drawFooter(layout)
   local tw, th = term.getSize()
-  fillLine(th, C.panel)
+  fillLine(th, C.footerBg)
   local labels = {
     { "ACT", shortText(state.lastAction, 18), C.text },
     { "MON", tostring(hw.monitorName or "term"), C.info },
@@ -620,8 +609,8 @@ local function drawFooter(layout)
   for i, item in ipairs(labels) do
     local sx = ((i - 1) * segW) + 1
     local content = shortText(item[1] .. " " .. item[2], segW - 1)
-    writeAt(sx, th, content, item[3], C.panel)
-    if i < #labels and sx + segW - 1 <= tw then writeAt(sx + segW - 1, th, "┃", C.borderDim, C.panel) end
+    writeAt(sx, th, content, item[3], C.footerBg)
+    if i < #labels and sx + segW - 1 <= tw then writeAt(sx + segW - 1, th, " ", C.borderDim, C.borderDim) end
   end
 end
 
@@ -2236,28 +2225,16 @@ end
 
 local function drawButtonFrame(button, isPressed)
   local faceColor = isPressed and C.panelMid or button.bg
-  local rimLight = isPressed and C.panelDark or C.border
-  local rimDark = isPressed and C.panelShadow or C.panelDark
-  local innerLight = isPressed and faceColor or C.panelInner
+  local rimLight = isPressed and faceColor or C.panelInner
+  local rimDark = isPressed and C.panelDark or C.panelDark
 
   for yy = button.y, button.y + button.h - 1 do
     writeAt(button.x, yy, string.rep(" ", button.w), button.fg, faceColor)
   end
 
   if button.w >= 2 and button.h >= 2 then
-    writeAt(button.x, button.y, string.rep(" ", button.w - 1), button.fg, rimLight)
-    for yy = button.y, button.y + button.h - 2 do
-      writeAt(button.x, yy, " ", button.fg, rimLight)
-    end
-
-    writeAt(button.x + 1, button.y + button.h - 1, string.rep(" ", button.w - 1), button.fg, rimDark)
-    for yy = button.y + 1, button.y + button.h - 1 do
-      writeAt(button.x + button.w - 1, yy, " ", button.fg, rimDark)
-    end
-  end
-
-  if (not isPressed) and button.w >= 4 and button.h >= 3 then
-    writeAt(button.x + 1, button.y + 1, string.rep(" ", button.w - 3), button.fg, innerLight)
+    writeAt(button.x, button.y, string.rep(" ", button.w), button.fg, rimLight)
+    writeAt(button.x, button.y + button.h - 1, string.rep(" ", button.w), button.fg, rimDark)
   end
 
   return faceColor
