@@ -1332,7 +1332,11 @@ local function readInductionStatus()
   state.inductionWidth = toNumber(width, 0)
 
   if okPct then
-    state.inductionPct = clamp(toNumber(pct, 0), 0, 100)
+    local rawPct = toNumber(pct, 0)
+    if rawPct <= 1.0 then
+      rawPct = rawPct * 100
+    end
+    state.inductionPct = clamp(rawPct, 0, 100)
   else
     state.inductionPct = clamp((state.inductionEnergy * 100) / state.inductionMax, 0, 100)
   end
@@ -1728,9 +1732,10 @@ local function inductionStatus()
   if pct <= 0.2 then return "EMPTY", C.bad end
   if pct <= 10 then return "LOW", C.warn end
   if pct >= 99.9 then return "FULL", C.ok end
+  if inp > 0 and out <= 0 then return "CHARGING", C.ok end
   if inp > out then return "CHARGING", C.ok end
   if out > inp then return "DISCHARGING", C.warn end
-  return "IDLE", C.info
+  return "ONLINE", C.info
 end
 
 local function getInductionFillRatio()
@@ -1977,8 +1982,8 @@ local function drawInductionDiagram(x, y, w, h)
     end
   end
 
-  local cellDensity = clamp(math.floor(state.inductionCells / 24), 1, 6)
-  local providerDensity = clamp(math.floor(state.inductionProviders / 12), 1, 4)
+  local cellDensity = clamp(math.floor((math.max(1, state.inductionCells) + 3) / 4), 1, 8)
+  local providerDensity = clamp(math.max(1, state.inductionProviders), 1, 6)
 
   for i = 0, cellDensity - 1 do
     local yy = sy + math.floor((i + 1) * profileH / (cellDensity + 1))
@@ -1997,12 +2002,18 @@ local function drawInductionDiagram(x, y, w, h)
     writeAt(sx + 1, levelY, string.rep(" ", profileW - 2), C.text, pulse and C.info or fillTone)
   end
 
+  local infoX = ix + profileW + capDepth + 3
   writeAt(x + 2, y + 1, string.format("STATE %s", status), tone, C.panelDark)
-  writeAt(ix + profileW + capDepth + 3, sy + 1, string.format("FILL %5.1f%%", state.inductionPct), C.energy, C.panelDark)
-  writeAt(ix + profileW + capDepth + 3, sy + 3, string.format("STORED %sFE", fmt(state.inductionEnergy)), C.text, C.panelDark)
-  writeAt(ix + profileW + capDepth + 3, sy + 4, string.format("MAX    %sFE", fmt(state.inductionMax)), C.dim, C.panelDark)
-  writeAt(ix + profileW + capDepth + 3, sy + 6, string.format("IN  %s", fmt(state.inductionInput)), C.ok, C.panelDark)
-  writeAt(ix + profileW + capDepth + 3, sy + 7, string.format("OUT %s", fmt(state.inductionOutput)), C.warn, C.panelDark)
+  writeAt(infoX, sy + 1, string.format("FILL  %5.1f%%", state.inductionPct), C.energy, C.panelDark)
+  writeAt(infoX, sy + 2, string.format("STORED %sFE", fmt(state.inductionEnergy)), C.text, C.panelDark)
+  writeAt(infoX, sy + 3, string.format("MAX    %sFE", fmt(state.inductionMax)), C.dim, C.panelDark)
+  writeAt(infoX, sy + 4, string.format("NEEDED %sFE", fmt(state.inductionNeeded)), C.dim, C.panelDark)
+  writeAt(infoX, sy + 6, string.format("IN   %s", fmt(state.inductionInput)), C.ok, C.panelDark)
+  writeAt(infoX, sy + 7, string.format("OUT  %s", fmt(state.inductionOutput)), C.warn, C.panelDark)
+  writeAt(infoX, sy + 8, string.format("CAP  %s", fmt(state.inductionTransferCap)), C.info, C.panelDark)
+  writeAt(infoX, sy + 10, string.format("CELLS %d", state.inductionCells), C.info, C.panelDark)
+  writeAt(infoX, sy + 11, string.format("PROV  %d", state.inductionProviders), C.info, C.panelDark)
+  writeAt(infoX, sy + 12, string.format("DIM   %dx%dx%d", state.inductionLength, state.inductionWidth, state.inductionHeight), C.text, C.panelDark)
   writeAt(x + 2, y + h - 2, shortText(string.format("CELLS %d | PROVIDERS %d | %dx%dx%d", state.inductionCells, state.inductionProviders, state.inductionLength, state.inductionWidth, state.inductionHeight), w - 4), C.dim, C.panelDark)
 end
 
