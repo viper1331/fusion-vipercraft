@@ -87,6 +87,21 @@ local state = {
   energyMax = 1,
   energyPct = 0,
 
+  inductionPresent = false,
+  inductionFormed = false,
+  inductionEnergy = 0,
+  inductionMax = 1,
+  inductionPct = 0,
+  inductionNeeded = 0,
+  inductionInput = 0,
+  inductionOutput = 0,
+  inductionTransferCap = 0,
+  inductionCells = 0,
+  inductionProviders = 0,
+  inductionLength = 0,
+  inductionHeight = 0,
+  inductionWidth = 0,
+
   deuteriumName = "N/A",
   deuteriumAmount = 0,
   tritiumName = "N/A",
@@ -224,15 +239,20 @@ end
 
 local function fmt(n)
   if type(n) ~= "number" then return tostring(n) end
-  if n >= 1000000000 then
-    return string.format("%.2fG", n / 1000000000)
-  elseif n >= 1000000 then
-    return string.format("%.2fM", n / 1000000)
-  elseif n >= 1000 then
-    return string.format("%.2fk", n / 1000)
-  else
-    return tostring(math.floor(n))
+  local absn = math.abs(n)
+  local units = {
+    { 1e15, "P" },
+    { 1e12, "T" },
+    { 1e9, "G" },
+    { 1e6, "M" },
+    { 1e3, "k" },
+  }
+  for _, u in ipairs(units) do
+    if absn >= u[1] then
+      return string.format("%.2f%s", n / u[1], u[2])
+    end
   end
+  return tostring(math.floor(n))
 end
 
 local function formatFuelLevel(n)
@@ -1260,24 +1280,67 @@ local function readReactor()
   end
 end
 
-local function readEnergy()
-  state.energyPresent = hw.induction ~= nil
+local function readInductionStatus()
+  state.inductionPresent = hw.induction ~= nil
+  state.inductionFormed = false
+  state.inductionEnergy = 0
+  state.inductionMax = 1
+  state.inductionPct = 0
+  state.inductionNeeded = 0
+  state.inductionInput = 0
+  state.inductionOutput = 0
+  state.inductionTransferCap = 0
+  state.inductionCells = 0
+  state.inductionProviders = 0
+  state.inductionLength = 0
+  state.inductionHeight = 0
+  state.inductionWidth = 0
+
+  state.energyPresent = state.inductionPresent
   state.energyKnown = false
   state.energyStored = 0
   state.energyMax = 1
   state.energyPct = 0
 
-  if hw.induction then
-    local okS, s = tryMethods(hw.induction, { "getEnergy", "getEnergyStored", "getStoredEnergy" })
-    local okM, m = tryMethods(hw.induction, { "getMaxEnergy", "getMaxEnergyStored", "getEnergyCapacity" })
+  if not hw.induction then return end
 
-    if okS or okM then
-      state.energyKnown = true
-      state.energyStored = toNumber(s, 0)
-      state.energyMax = math.max(1, toNumber(m, 1))
-      state.energyPct = clamp((state.energyStored * 100) / state.energyMax, 0, 100)
-    end
+  local okFormed, formed = safeCall(hw.induction, "isFormed")
+  local okEnergy, energy = safeCall(hw.induction, "getEnergy")
+  local okMax, maxEnergy = safeCall(hw.induction, "getMaxEnergy")
+  local okPct, pct = safeCall(hw.induction, "getEnergyFilledPercentage")
+  local okNeed, needed = safeCall(hw.induction, "getEnergyNeeded")
+  local okIn, lastInput = safeCall(hw.induction, "getLastInput")
+  local okOut, lastOutput = safeCall(hw.induction, "getLastOutput")
+  local okCap, transferCap = safeCall(hw.induction, "getTransferCap")
+  local okCells, cells = safeCall(hw.induction, "getInstalledCells")
+  local okProv, providers = safeCall(hw.induction, "getInstalledProviders")
+  local okLen, length = safeCall(hw.induction, "getLength")
+  local okHeight, height = safeCall(hw.induction, "getHeight")
+  local okWidth, width = safeCall(hw.induction, "getWidth")
+
+  state.inductionFormed = okFormed and formed == true or false
+  state.inductionEnergy = toNumber(energy, 0)
+  state.inductionMax = math.max(1, toNumber(maxEnergy, 1))
+  state.inductionNeeded = toNumber(needed, math.max(0, state.inductionMax - state.inductionEnergy))
+  state.inductionInput = toNumber(lastInput, 0)
+  state.inductionOutput = toNumber(lastOutput, 0)
+  state.inductionTransferCap = toNumber(transferCap, 0)
+  state.inductionCells = toNumber(cells, 0)
+  state.inductionProviders = toNumber(providers, 0)
+  state.inductionLength = toNumber(length, 0)
+  state.inductionHeight = toNumber(height, 0)
+  state.inductionWidth = toNumber(width, 0)
+
+  if okPct then
+    state.inductionPct = clamp(toNumber(pct, 0), 0, 100)
+  else
+    state.inductionPct = clamp((state.inductionEnergy * 100) / state.inductionMax, 0, 100)
   end
+
+  state.energyKnown = okEnergy or okMax or okPct
+  state.energyStored = state.inductionEnergy
+  state.energyMax = state.inductionMax
+  state.energyPct = state.inductionPct
 end
 
 local function readReaders()
@@ -1307,7 +1370,7 @@ local function refreshAll()
   scanBlockReaders()
   readLaser()
   readReactor()
-  readEnergy()
+  readInductionStatus()
   readReaders()
   if (not wasIgnited) and state.ignition then
     pushEvent("Reactor running")
@@ -1537,9 +1600,11 @@ local function buildButtons(layout)
   local bh = math.max(2, (layout.mode == "compact") and 2 or 2)
   local bGap = 1
 
-  addButton("viewSup", bx, ctrl.y + 1, math.max(8, math.floor(bw / 3)), 2, "SUP", state.currentView == "supervision" and C.btnOn or C.panelMid, nil, function() state.currentView = "supervision"; pushEvent("View supervision") end, { touchPadX = 1, touchPadY = 0 })
-  addButton("viewDiag", bx + math.max(8, math.floor(bw / 3)), ctrl.y + 1, math.max(8, math.floor(bw / 3)), 2, "DIAG", state.currentView == "diagnostic" and C.btnOn or C.panelMid, nil, function() state.currentView = "diagnostic"; pushEvent("View diagnostic") end, { touchPadX = 1, touchPadY = 0 })
-  addButton("viewMan", bx + (math.max(8, math.floor(bw / 3)) * 2), ctrl.y + 1, bw - (math.max(8, math.floor(bw / 3)) * 2), 2, "MAN", state.currentView == "manual" and C.btnOn or C.panelMid, nil, function() state.currentView = "manual"; pushEvent("View manual") end, { touchPadX = 1, touchPadY = 0 })
+  local navW = math.max(7, math.floor(bw / 4))
+  addButton("viewSup", bx, ctrl.y + 1, navW, 2, "SUP", state.currentView == "supervision" and C.btnOn or C.panelMid, nil, function() state.currentView = "supervision"; pushEvent("View supervision") end, { touchPadX = 1, touchPadY = 0 })
+  addButton("viewDiag", bx + navW, ctrl.y + 1, navW, 2, "DIAG", state.currentView == "diagnostic" and C.btnOn or C.panelMid, nil, function() state.currentView = "diagnostic"; pushEvent("View diagnostic") end, { touchPadX = 1, touchPadY = 0 })
+  addButton("viewMan", bx + (navW * 2), ctrl.y + 1, navW, 2, "MAN", state.currentView == "manual" and C.btnOn or C.panelMid, nil, function() state.currentView = "manual"; pushEvent("View manual") end, { touchPadX = 1, touchPadY = 0 })
+  addButton("viewInd", bx + (navW * 3), ctrl.y + 1, bw - (navW * 3), 2, "IND", state.currentView == "induction" and C.btnOn or C.panelMid, nil, function() state.currentView = "induction"; pushEvent("View induction") end, { touchPadX = 1, touchPadY = 0 })
 
   addButton("master", bx, by, bw, bh, "MASTER", state.autoMaster and C.btnOn or C.btnOff, nil, function()
     state.autoMaster = not state.autoMaster
@@ -1649,6 +1714,23 @@ local function handleTouch(x, y)
     end
   end
   return false
+end
+
+
+local function inductionStatus()
+  if not state.inductionPresent then return "OFFLINE", C.bad end
+  if not state.inductionFormed then return "UNFORMED", C.warn end
+
+  local pct = toNumber(state.inductionPct, 0)
+  local inp = toNumber(state.inductionInput, 0)
+  local out = toNumber(state.inductionOutput, 0)
+
+  if pct <= 0.2 then return "EMPTY", C.bad end
+  if pct <= 10 then return "LOW", C.warn end
+  if pct >= 99.9 then return "FULL", C.ok end
+  if inp > out then return "CHARGING", C.ok end
+  if out > inp then return "DISCHARGING", C.warn end
+  return "IDLE", C.info
 end
 
 local function drawMonitorSelection(layout)
@@ -1829,6 +1911,101 @@ local function drawDiagnosticView(layout)
 
   drawControlPanel(layout.right or layout.left, layout)
 end
+
+local function drawInductionDiagram(x, y, w, h)
+  drawBox(x, y, w, h, "INDUCTION MATRIX", C.border)
+  if w < 34 or h < 16 then
+    writeAt(x + 2, y + 2, "Schema matrix indisponible", C.dim, C.panelDark)
+    return
+  end
+
+  local status, tone = inductionStatus()
+  local dimsKnown = state.inductionLength > 0 and state.inductionWidth > 0 and state.inductionHeight > 0
+  local ix, iy = x + 2, y + 2
+  local iw, ih = w - 4, h - 4
+  local coreW = clamp(math.floor(iw * 0.45), 8, iw - 10)
+  local coreH = clamp(math.floor(ih * 0.45), 6, ih - 7)
+
+  if dimsKnown then
+    local ratio = clamp(state.inductionLength / math.max(1, state.inductionWidth), 0.4, 2.5)
+    coreW = clamp(math.floor((iw - 10) * ratio / 1.7), 8, iw - 10)
+    local vertBias = clamp(state.inductionHeight / math.max(1, math.max(state.inductionLength, state.inductionWidth)), 0.3, 1.0)
+    coreH = clamp(math.floor((ih - 7) * (0.45 + (vertBias * 0.35))), 6, ih - 7)
+  end
+
+  local cx = ix + math.floor((iw - coreW) / 2)
+  local cy = iy + math.floor((ih - coreH) / 2)
+
+  fillArea(ix, iy, iw, ih, C.panelDark)
+  drawBox(cx - 1, cy - 1, coreW + 2, coreH + 2, "CORE", C.borderDim)
+
+  local pulse = (state.tick % 6 < 3)
+  local coreTone = C.energy
+  if status == "CHARGING" then coreTone = pulse and C.ok or C.energy end
+  if status == "DISCHARGING" then coreTone = pulse and C.warn or C.energy end
+  if status == "LOW" or status == "EMPTY" then coreTone = pulse and C.bad or C.warn end
+  if status == "FULL" then coreTone = C.ok end
+
+  local fillPct = clamp(toNumber(state.inductionPct, 0), 0, 100)
+  local fy = math.floor((coreH * fillPct) / 100)
+  for yy = 0, coreH - 1 do
+    local bg = (coreH - yy <= fy) and coreTone or C.panel
+    writeAt(cx, cy + yy, string.rep(" ", coreW), C.text, bg)
+  end
+
+  local cellDensity = clamp(math.floor(state.inductionCells / 16), 1, 8)
+  local providerDensity = clamp(math.floor(state.inductionProviders / 8), 1, 6)
+
+  for i = 0, cellDensity - 1 do
+    local yy = cy + math.floor((i + 1) * coreH / (cellDensity + 1))
+    writeAt(cx + 1, yy, string.rep(" ", math.max(1, coreW - 2)), C.text, colors.lightBlue)
+  end
+
+  local providerColor = status == "DISCHARGING" and C.warn or C.info
+  for i = 0, providerDensity - 1 do
+    local px = cx - 3
+    local py = cy + math.floor((i + 1) * coreH / (providerDensity + 1))
+    writeAt(px, py, "  ", C.text, providerColor)
+    writeAt(cx + coreW + 1, py, "  ", C.text, providerColor)
+  end
+
+  writeAt(x + 2, y + 1, string.format("STATE %s", status), tone, C.panelDark)
+  writeAt(x + 2, y + h - 2, shortText(string.format("CELLS %d | PROVIDERS %d | %dx%dx%d", state.inductionCells, state.inductionProviders, state.inductionLength, state.inductionWidth, state.inductionHeight), w - 4), C.dim, C.panelDark)
+end
+
+local function drawInductionView(layout)
+  local statusTone = select(2, inductionStatus())
+  local left = layout.left
+  drawBox(left.x, left.y, left.w, left.h, "INDUCTION STATUS", C.border)
+  local x = left.x + 2
+  local y = left.y + 2
+
+  local istat = select(1, inductionStatus())
+  drawKeyValue(x, y, "Online", state.inductionPresent and "YES" or "NO", C.dim, state.inductionPresent and C.ok or C.bad, left.w - 6)
+  drawKeyValue(x, y + 1, "Formed", state.inductionFormed and "YES" or "NO", C.dim, state.inductionFormed and C.ok or C.warn, left.w - 6)
+  drawKeyValue(x, y + 2, "Status", istat, C.dim, statusTone, left.w - 6)
+  drawKeyValue(x, y + 3, "Energy", fmt(state.inductionEnergy), C.dim, C.energy, left.w - 6)
+  drawKeyValue(x, y + 4, "Capacity", fmt(state.inductionMax), C.dim, C.energy, left.w - 6)
+  drawKeyValue(x, y + 5, "Fill", string.format("%.1f%%", state.inductionPct), C.dim, C.energy, left.w - 6)
+  drawKeyValue(x, y + 6, "Needed", fmt(state.inductionNeeded), C.dim, C.dim, left.w - 6)
+  drawKeyValue(x, y + 7, "Input", fmt(state.inductionInput), C.dim, C.ok, left.w - 6)
+  drawKeyValue(x, y + 8, "Output", fmt(state.inductionOutput), C.dim, C.warn, left.w - 6)
+  drawKeyValue(x, y + 9, "Xfer Cap", fmt(state.inductionTransferCap), C.dim, C.info, left.w - 6)
+  drawKeyValue(x, y + 10, "Cells", tostring(state.inductionCells), C.dim, C.info, left.w - 6)
+  drawKeyValue(x, y + 11, "Providers", tostring(state.inductionProviders), C.dim, C.info, left.w - 6)
+  drawKeyValue(x, y + 12, "Length", tostring(state.inductionLength), C.dim, C.text, left.w - 6)
+  drawKeyValue(x, y + 13, "Width", tostring(state.inductionWidth), C.dim, C.text, left.w - 6)
+  drawKeyValue(x, y + 14, "Height", tostring(state.inductionHeight), C.dim, C.text, left.w - 6)
+
+  if layout.center then
+    drawInductionDiagram(layout.center.x, layout.center.y, layout.center.w, layout.center.h)
+    drawControlPanel(layout.right or layout.left, layout)
+  else
+    local right = layout.right
+    drawInductionDiagram(right.x, right.y, right.w, right.h)
+  end
+end
+
 local function drawManualView(layout)
   if layout.center then
     drawReactorDiagram(layout.center.x, layout.center.y, layout.center.w, layout.center.h)
@@ -1873,6 +2050,8 @@ local function drawUI()
     drawDiagnosticView(layout)
   elseif state.currentView == "manual" then
     drawManualView(layout)
+  elseif state.currentView == "induction" then
+    drawInductionView(layout)
   else
     drawSupervisionView(layout)
   end
@@ -1932,6 +2111,9 @@ while state.running do
       elseif ch == "3" then
         state.currentView = "manual"
         pushEvent("View manual")
+      elseif ch == "4" then
+        state.currentView = "induction"
+        pushEvent("View induction")
       elseif ch == "i" then
         triggerAutomaticIgnitionSequence()
       elseif ch == "l" then
