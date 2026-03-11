@@ -286,7 +286,7 @@ local C = {
 }
 
 local function colorHex(c)
-  return string.format("%x", colors.toBlit(c))
+  return colors.toBlit(c)
 end
 
 local function uiShortText(text, maxLen)
