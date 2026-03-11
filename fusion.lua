@@ -551,6 +551,12 @@ local function drawPanelSprite(x, y, w, h, title, style)
   ui.panel(x, y, w, h, title, style or styles.panel.default)
 end
 
+
+local reactorPhase
+local phaseColor
+local getRuntimeFuelMode
+local isRuntimeFuelOk
+
 local function drawHeaderBarSprite(title, status)
   local tw = term.getSize()
   local heartbeat = (state.tick % 8 < 4) and "•" or " "
@@ -586,7 +592,7 @@ local function drawFooterBarSprite()
   end
 end
 
-local function getRuntimeFuelMode()
+getRuntimeFuelMode = function()
   local dt = state.dtOpen == true
   local d = state.dOpen == true
   local t = state.tOpen == true
@@ -597,11 +603,11 @@ local function getRuntimeFuelMode()
   return "STARVED"
 end
 
-local function isRuntimeFuelOk()
+isRuntimeFuelOk = function()
   return (state.dOpen and state.tOpen) or state.dtOpen
 end
 
-local function reactorPhase()
+reactorPhase = function()
   if state.alert == "DANGER" then return "SAFE STOP" end
   if not state.reactorPresent then return "OFFLINE" end
   if not state.reactorFormed then return "UNFORMED" end
@@ -623,7 +629,7 @@ local function reactorPhase()
   return "READY"
 end
 
-local function phaseColor(phase)
+phaseColor = function(phase)
   if contains(phase, "RUNNING") and not contains(phase, "STARVED") then return C.ok end
   if phase == "RUNNING" or phase == "IGNITED" then return C.ok end
   if phase == "READY" then return C.warn end
