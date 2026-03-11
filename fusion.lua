@@ -218,6 +218,8 @@ local C = {
   panel = colors.gray,
   panelDark = colors.black,
   panelMid = colors.lightGray,
+  panelInner = colors.blue,
+  panelShadow = colors.black,
   text = colors.white,
   dim = colors.lightGray,
   ok = colors.lime,
@@ -241,6 +243,23 @@ local C = {
   dtFuel = colors.purple,
   inactive = colors.gray,
 }
+
+local function applyPremiumPalette()
+  if not term.isColor or not term.isColor() then return end
+  pcall(term.setPaletteColor, colors.black, 0.03, 0.05, 0.09)
+  pcall(term.setPaletteColor, colors.gray, 0.14, 0.19, 0.24)
+  pcall(term.setPaletteColor, colors.lightGray, 0.28, 0.35, 0.41)
+  pcall(term.setPaletteColor, colors.white, 0.84, 0.91, 0.98)
+  pcall(term.setPaletteColor, colors.blue, 0.08, 0.24, 0.42)
+  pcall(term.setPaletteColor, colors.lightBlue, 0.22, 0.68, 0.92)
+  pcall(term.setPaletteColor, colors.cyan, 0.19, 0.83, 0.86)
+  pcall(term.setPaletteColor, colors.green, 0.15, 0.55, 0.24)
+  pcall(term.setPaletteColor, colors.lime, 0.30, 0.95, 0.50)
+  pcall(term.setPaletteColor, colors.red, 0.93, 0.20, 0.23)
+  pcall(term.setPaletteColor, colors.orange, 0.94, 0.56, 0.15)
+  pcall(term.setPaletteColor, colors.yellow, 0.96, 0.78, 0.16)
+  pcall(term.setPaletteColor, colors.purple, 0.67, 0.34, 0.89)
+end
 
 local function centerText(y, text, tc, bc)
   local w, _ = term.getSize()
@@ -415,15 +434,31 @@ local function drawBox(x, y, w, h, title, accent)
   accent = accent or C.border
   fillArea(x, y, w, h, C.panelDark)
   if w < 2 or h < 2 then return end
-  writeAt(x, y, string.rep(" ", w), C.text, accent)
-  writeAt(x, y + h - 1, string.rep("-", w), accent, C.panelDark)
+
+  writeAt(x, y, string.rep(" ", w), C.text, C.panel)
+  if w > 2 then
+    writeAt(x + 1, y, string.rep(" ", w - 2), C.text, accent)
+  end
+  writeAt(x, y + h - 1, string.rep(" ", w), C.text, C.panelShadow)
+
   for yy = y + 1, y + h - 2 do
-    writeAt(x, yy, " ", C.text, accent)
-    writeAt(x + w - 1, yy, " ", C.text, accent)
+    writeAt(x, yy, " ", C.text, C.panel)
+    writeAt(x + w - 1, yy, " ", C.text, C.panelShadow)
+    if w > 2 then
+      writeAt(x + 1, yy, string.rep(" ", w - 2), C.text, C.panelDark)
+    end
   end
 
-  if title and #title > 0 and w > 6 then
-    writeAt(x + 2, y, shortText(title, w - 4), C.text, accent)
+  if w > 4 and h > 4 then
+    writeAt(x + 1, y + 1, string.rep(" ", w - 2), C.text, C.panelInner)
+    for yy = y + 2, y + h - 2 do
+      writeAt(x + 1, yy, " ", C.text, C.panelInner)
+    end
+  end
+
+  if title and #title > 0 and w > 8 then
+    local t = " « " .. shortText(title, w - 8) .. " » "
+    writeAt(x + 2, y, shortText(t, w - 4), C.text, accent)
   end
 end
 
@@ -558,20 +593,21 @@ local function drawHeader(title, status)
   local tw = term.getSize()
   local heartbeat = (state.tick % 8 < 4) and "●" or "○"
   local phase = reactorPhase()
-  fillLine(1, colors.gray)
-  writeAt(2, 1, shortText(title .. " [" .. string.upper(state.currentView:sub(1, 1)) .. "]", math.max(10, tw - 40)), C.headerText, colors.gray)
-  local centerTxt = "PHASE " .. shortText(phase, 16)
+  fillLine(1, C.panel)
+  writeAt(1, 1, " ", C.text, C.border)
+  writeAt(2, 1, shortText(title .. " // " .. string.upper(state.currentView), math.max(10, tw - 46)), C.headerText, C.panel)
+  local centerTxt = "PHASE · " .. shortText(phase, 18)
   local cx = math.max(2, math.floor((tw - #centerTxt) / 2))
-  writeAt(cx, 1, centerTxt, phaseColor(phase), colors.gray)
-  local statusTxt = shortText(status or "N/A", 16)
+  writeAt(cx, 1, centerTxt, phaseColor(phase), C.panel)
+  local statusTxt = shortText(status or "N/A", 18)
   local rightTxt = heartbeat .. " ALERT " .. statusTxt
-  local sx = math.max(2, tw - #rightTxt - 2)
-  writeAt(sx, 1, rightTxt, statusColor(state.alert), colors.gray)
+  local sx = math.max(2, tw - #rightTxt - 1)
+  writeAt(sx, 1, rightTxt, statusColor(state.alert), C.panel)
 end
 
 local function drawFooter(layout)
   local tw, th = term.getSize()
-  fillLine(th, colors.gray)
+  fillLine(th, C.panel)
   local labels = {
     { "ACT", shortText(state.lastAction, 18), C.text },
     { "MON", tostring(hw.monitorName or "term"), C.info },
@@ -584,8 +620,8 @@ local function drawFooter(layout)
   for i, item in ipairs(labels) do
     local sx = ((i - 1) * segW) + 1
     local content = shortText(item[1] .. " " .. item[2], segW - 1)
-    writeAt(sx, th, content, item[3], colors.gray)
-    if i < #labels and sx + segW - 1 <= tw then writeAt(sx + segW - 1, th, "|", C.panelMid, colors.gray) end
+    writeAt(sx, th, content, item[3], C.panel)
+    if i < #labels and sx + segW - 1 <= tw then writeAt(sx + segW - 1, th, "┃", C.borderDim, C.panel) end
   end
 end
 
@@ -737,6 +773,10 @@ local function drawReactorDiagram(x, y, w, h)
   end
 
   drawCell(gcx, gcy, coreColor, state.ignition and (pulse and "**" or "##") or (state.ignitionSequencePending and (blink and "!!" or "::") or "[]"), C.text)
+  drawCell(gcx - 1, gcy, ringColor, "[]", C.text)
+  drawCell(gcx + 1, gcy, ringColor, "[]", C.text)
+  drawCell(gcx, gcy - 1, ringColor, "[]", C.text)
+  drawCell(gcx, gcy + 1, ringColor, "[]", C.text)
 
   local laserOn = state.laserChargeOn or state.laserLineOn or state.ignitionSequencePending
   local laserTone = laserOn and C.warn or C.dim
@@ -2196,23 +2236,28 @@ end
 
 local function drawButtonFrame(button, isPressed)
   local faceColor = isPressed and C.panelMid or button.bg
-  local topLeft = isPressed and C.panelDark or C.panelMid
-  local bottomRight = isPressed and C.border or C.panelDark
+  local rimLight = isPressed and C.panelDark or C.border
+  local rimDark = isPressed and C.panelShadow or C.panelDark
+  local innerLight = isPressed and faceColor or C.panelInner
 
   for yy = button.y, button.y + button.h - 1 do
     writeAt(button.x, yy, string.rep(" ", button.w), button.fg, faceColor)
   end
 
   if button.w >= 2 and button.h >= 2 then
-    writeAt(button.x, button.y, string.rep(" ", button.w - 1), button.fg, topLeft)
+    writeAt(button.x, button.y, string.rep(" ", button.w - 1), button.fg, rimLight)
     for yy = button.y, button.y + button.h - 2 do
-      writeAt(button.x, yy, " ", button.fg, topLeft)
+      writeAt(button.x, yy, " ", button.fg, rimLight)
     end
 
-    writeAt(button.x + 1, button.y + button.h - 1, string.rep(" ", button.w - 1), button.fg, bottomRight)
+    writeAt(button.x + 1, button.y + button.h - 1, string.rep(" ", button.w - 1), button.fg, rimDark)
     for yy = button.y + 1, button.y + button.h - 1 do
-      writeAt(button.x + button.w - 1, yy, " ", button.fg, bottomRight)
+      writeAt(button.x + button.w - 1, yy, " ", button.fg, rimDark)
     end
+  end
+
+  if (not isPressed) and button.w >= 4 and button.h >= 3 then
+    writeAt(button.x + 1, button.y + 1, string.rep(" ", button.w - 3), button.fg, innerLight)
   end
 
   return faceColor
@@ -2548,7 +2593,7 @@ end
 
 local function drawIoPanel(x, y, w, h)
   if h < 4 then return end
-  drawBox(x, y, w, h, "REAL I/O", C.borderDim)
+  drawBox(x, y, w, h, "REAL I/O BUS", C.border)
   local rx = x + 2
   local ry = y + 1
   local maxY = y + h - 2
@@ -2566,7 +2611,7 @@ local function drawIoPanel(x, y, w, h)
 end
 
 local function drawStatusPanel(panel)
-  drawBox(panel.x, panel.y, panel.w, panel.h, "SUPERVISION", C.border)
+  drawBox(panel.x, panel.y, panel.w, panel.h, "SUPERVISION CORE", C.border)
   local x = panel.x + 1
   local y = panel.y + 1
   local w = panel.w - 2
@@ -2664,7 +2709,7 @@ local function drawDiagnosticView(layout)
     return
   end
 
-  drawBox(center.x, center.y, center.w, center.h, "DIAGNOSTIC", C.border)
+  drawBox(center.x, center.y, center.w, center.h, "DIAGNOSTIC GRID", C.border)
   local x = center.x + 2
   local y = center.y + 1
   local maxY = center.y + center.h - 2
@@ -2864,7 +2909,7 @@ local function drawUpdateView(layout)
     controlPanel = layout.right or layout.left
   end
 
-  drawBox(infoPanel.x, infoPanel.y, infoPanel.w, infoPanel.h, "UPDATE CENTER", C.border)
+  drawBox(infoPanel.x, infoPanel.y, infoPanel.w, infoPanel.h, "UPDATE CENTER", C.info)
   local x = infoPanel.x + 2
   local w = infoPanel.w - 4
 
@@ -2935,6 +2980,7 @@ if not configOk then
   return
 end
 
+applyPremiumPalette()
 state.update.localVersion = readLocalVersionFile()
 setupMonitor()
 refreshAll()
