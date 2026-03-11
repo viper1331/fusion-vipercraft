@@ -46,4 +46,33 @@ function M.detectBestPeripheral(peripheralApi, preferredName, safePeripheral, va
   return nil, nil
 end
 
+function M.scanPeripherals(peripheralApi, hw, cfg, safePeripheral, getTypeOf, contains)
+  hw.reactor, hw.reactorName = M.detectBestPeripheral(peripheralApi, cfg.preferredReactor, safePeripheral, function(obj)
+    return M.hasMethods(obj, { "isIgnited", "getPlasmaTemperature", "getPlasmaTemp", "getPlasmaHeat", "getCaseTemperature", "getCasingTemperature" }, 2)
+  end)
+
+  hw.logic, hw.logicName = M.detectBestPeripheral(peripheralApi, cfg.preferredLogicAdapter, safePeripheral, function(obj)
+    return M.hasMethods(obj, { "isFormed", "isIgnited", "getPlasmaTemperature", "getPlasmaTemp", "getPlasmaHeat", "getIgnitionTemperature", "getIgnitionTemp", "getCaseTemperature", "getCasingTemperature" }, 3)
+  end)
+
+  hw.laser, hw.laserName = M.detectBestPeripheral(peripheralApi, cfg.preferredLaser, safePeripheral, function(obj)
+    return M.hasMethods(obj, { "getEnergy", "getEnergyStored", "getStored", "getMaxEnergy", "getMaxEnergyStored", "getCapacity" }, 2)
+  end)
+
+  hw.induction, hw.inductionName = M.detectBestPeripheral(peripheralApi, cfg.preferredInduction, safePeripheral, function(obj)
+    return M.hasMethods(obj, { "isFormed", "getEnergy", "getMaxEnergy", "getEnergyFilledPercentage", "getEnergyNeeded", "getLastInput", "getLastOutput", "getTransferCap" }, 2)
+  end)
+
+  hw.relays = {}
+  hw.blockReaders = {}
+  for _, name in ipairs(peripheralApi.getNames()) do
+    local ptype = getTypeOf(name)
+    if ptype == "redstone_relay" then
+      hw.relays[name] = safePeripheral(name)
+    elseif ptype == "block_reader" or contains(name, "block_reader") then
+      table.insert(hw.blockReaders, { name = name, obj = safePeripheral(name), role = "unknown", data = nil })
+    end
+  end
+end
+
 return M
