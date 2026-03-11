@@ -1733,6 +1733,11 @@ local function inductionStatus()
   return "IDLE", C.info
 end
 
+local function getInductionFillRatio()
+  local pct = clamp(toNumber(state.inductionPct, 0), 0, 100)
+  return clamp(pct / 100, 0, 1)
+end
+
 local function drawMonitorSelection(layout)
   term.setBackgroundColor(C.bg)
   term.setTextColor(C.text)
@@ -1923,79 +1928,108 @@ local function drawInductionDiagram(x, y, w, h)
   local dimsKnown = state.inductionLength > 0 and state.inductionWidth > 0 and state.inductionHeight > 0
   local ix, iy = x + 2, y + 2
   local iw, ih = w - 4, h - 4
-  local coreW = clamp(math.floor(iw * 0.45), 8, iw - 10)
-  local coreH = clamp(math.floor(ih * 0.45), 6, ih - 7)
+  local profileW = clamp(math.floor(iw * 0.58), 12, iw - 14)
+  local profileH = clamp(math.floor(ih * 0.82), 8, ih - 3)
 
   if dimsKnown then
-    local ratio = clamp(state.inductionLength / math.max(1, state.inductionWidth), 0.4, 2.5)
-    coreW = clamp(math.floor((iw - 10) * ratio / 1.7), 8, iw - 10)
-    local vertBias = clamp(state.inductionHeight / math.max(1, math.max(state.inductionLength, state.inductionWidth)), 0.3, 1.0)
-    coreH = clamp(math.floor((ih - 7) * (0.45 + (vertBias * 0.35))), 6, ih - 7)
+    local footprint = clamp((state.inductionLength + state.inductionWidth) / 2, 3, 18)
+    local maxFootprint = math.max(footprint, state.inductionHeight, 3)
+    local footprintRatio = clamp(footprint / maxFootprint, 0.35, 1.0)
+    local verticalRatio = clamp(state.inductionHeight / maxFootprint, 0.35, 1.0)
+    profileW = clamp(math.floor((iw - 14) * (0.35 + footprintRatio * 0.65)), 12, iw - 14)
+    profileH = clamp(math.floor((ih - 3) * (0.45 + verticalRatio * 0.50)), 8, ih - 3)
   end
 
-  local cx = ix + math.floor((iw - coreW) / 2)
-  local cy = iy + math.floor((ih - coreH) / 2)
+  local sx = ix + 2
+  local sy = iy + math.floor((ih - profileH) / 2)
+  local ex = sx + profileW - 1
+  local ey = sy + profileH - 1
+  local capDepth = clamp(math.floor(profileW * 0.20), 2, 6)
+  local fillRatio = getInductionFillRatio()
+  local fillRows = clamp(math.floor(fillRatio * (profileH - 2) + 0.5), 0, profileH - 2)
 
   fillArea(ix, iy, iw, ih, C.panelDark)
-  drawBox(cx - 1, cy - 1, coreW + 2, coreH + 2, "CORE", C.borderDim)
+  drawBox(sx - 1, sy - 1, profileW + capDepth + 2, profileH + 2, "SIDE PROFILE", C.borderDim)
 
   local pulse = (state.tick % 6 < 3)
-  local coreTone = C.energy
-  if status == "CHARGING" then coreTone = pulse and C.ok or C.energy end
-  if status == "DISCHARGING" then coreTone = pulse and C.warn or C.energy end
-  if status == "LOW" or status == "EMPTY" then coreTone = pulse and C.bad or C.warn end
-  if status == "FULL" then coreTone = C.ok end
+  local fillTone = C.energy
+  if status == "CHARGING" then fillTone = pulse and C.info or C.energy end
+  if status == "DISCHARGING" then fillTone = pulse and C.warn or C.energy end
+  if status == "LOW" or status == "EMPTY" then fillTone = pulse and C.bad or C.warn end
+  if status == "FULL" then fillTone = pulse and C.ok or C.info end
 
-  local fillPct = clamp(toNumber(state.inductionPct, 0), 0, 100)
-  local fy = math.floor((coreH * fillPct) / 100)
-  for yy = 0, coreH - 1 do
-    local bg = (coreH - yy <= fy) and coreTone or C.panel
-    writeAt(cx, cy + yy, string.rep(" ", coreW), C.text, bg)
+  for yy = sy, ey do
+    local rowDepth = clamp(capDepth - math.floor((yy - sy) / math.max(1, profileH / math.max(1, capDepth))), 0, capDepth)
+    writeAt(sx, yy, string.rep(" ", profileW), C.text, C.panel)
+    if rowDepth > 0 then
+      writeAt(ex + 1, yy, string.rep(" ", rowDepth), C.text, C.panelMid)
+    end
   end
 
-  local cellDensity = clamp(math.floor(state.inductionCells / 16), 1, 8)
-  local providerDensity = clamp(math.floor(state.inductionProviders / 8), 1, 6)
+  local waveOffset = (status == "CHARGING" and pulse) and 1 or 0
+  for i = 0, fillRows - 1 do
+    local yy = ey - 1 - i
+    local waveCut = ((state.tick + yy) % 5 == 0) and waveOffset or 0
+    local fillWidth = clamp(profileW - 2 - waveCut, 1, profileW - 2)
+    writeAt(sx + 1, yy, string.rep(" ", fillWidth), C.text, fillTone)
+    if fillWidth < (profileW - 2) then
+      writeAt(sx + 1 + fillWidth, yy, string.rep(" ", (profileW - 2) - fillWidth), C.text, C.panel)
+    end
+  end
+
+  local cellDensity = clamp(math.floor(state.inductionCells / 24), 1, 6)
+  local providerDensity = clamp(math.floor(state.inductionProviders / 12), 1, 4)
 
   for i = 0, cellDensity - 1 do
-    local yy = cy + math.floor((i + 1) * coreH / (cellDensity + 1))
-    writeAt(cx + 1, yy, string.rep(" ", math.max(1, coreW - 2)), C.text, colors.lightBlue)
+    local yy = sy + math.floor((i + 1) * profileH / (cellDensity + 1))
+    writeAt(sx + 1, yy, string.rep(" ", math.max(1, profileW - 2)), C.text, C.borderDim)
   end
 
   local providerColor = status == "DISCHARGING" and C.warn or C.info
   for i = 0, providerDensity - 1 do
-    local px = cx - 3
-    local py = cy + math.floor((i + 1) * coreH / (providerDensity + 1))
-    writeAt(px, py, "  ", C.text, providerColor)
-    writeAt(cx + coreW + 1, py, "  ", C.text, providerColor)
+    local py = sy + math.floor((i + 1) * profileH / (providerDensity + 1))
+    writeAt(sx - 3, py, "  ", C.text, providerColor)
+    writeAt(ex + capDepth + 2, py, "  ", C.text, providerColor)
+  end
+
+  local levelY = ey - fillRows
+  if fillRows > 0 and levelY >= sy + 1 and levelY <= ey - 1 then
+    writeAt(sx + 1, levelY, string.rep(" ", profileW - 2), C.text, pulse and C.info or fillTone)
   end
 
   writeAt(x + 2, y + 1, string.format("STATE %s", status), tone, C.panelDark)
+  writeAt(ix + profileW + capDepth + 3, sy + 1, string.format("FILL %5.1f%%", state.inductionPct), C.energy, C.panelDark)
+  writeAt(ix + profileW + capDepth + 3, sy + 3, string.format("STORED %sFE", fmt(state.inductionEnergy)), C.text, C.panelDark)
+  writeAt(ix + profileW + capDepth + 3, sy + 4, string.format("MAX    %sFE", fmt(state.inductionMax)), C.dim, C.panelDark)
+  writeAt(ix + profileW + capDepth + 3, sy + 6, string.format("IN  %s", fmt(state.inductionInput)), C.ok, C.panelDark)
+  writeAt(ix + profileW + capDepth + 3, sy + 7, string.format("OUT %s", fmt(state.inductionOutput)), C.warn, C.panelDark)
   writeAt(x + 2, y + h - 2, shortText(string.format("CELLS %d | PROVIDERS %d | %dx%dx%d", state.inductionCells, state.inductionProviders, state.inductionLength, state.inductionWidth, state.inductionHeight), w - 4), C.dim, C.panelDark)
 end
 
 local function drawInductionView(layout)
-  local statusTone = select(2, inductionStatus())
+  local istat, statusTone = inductionStatus()
   local left = layout.left
-  drawBox(left.x, left.y, left.w, left.h, "INDUCTION STATUS", C.border)
+  drawBox(left.x, left.y, left.w, left.h, "INDUCTION MATRIX", C.border)
   local x = left.x + 2
   local y = left.y + 2
 
-  local istat = select(1, inductionStatus())
-  drawKeyValue(x, y, "Online", state.inductionPresent and "YES" or "NO", C.dim, state.inductionPresent and C.ok or C.bad, left.w - 6)
-  drawKeyValue(x, y + 1, "Formed", state.inductionFormed and "YES" or "NO", C.dim, state.inductionFormed and C.ok or C.warn, left.w - 6)
-  drawKeyValue(x, y + 2, "Status", istat, C.dim, statusTone, left.w - 6)
-  drawKeyValue(x, y + 3, "Energy", fmt(state.inductionEnergy), C.dim, C.energy, left.w - 6)
-  drawKeyValue(x, y + 4, "Capacity", fmt(state.inductionMax), C.dim, C.energy, left.w - 6)
-  drawKeyValue(x, y + 5, "Fill", string.format("%.1f%%", state.inductionPct), C.dim, C.energy, left.w - 6)
-  drawKeyValue(x, y + 6, "Needed", fmt(state.inductionNeeded), C.dim, C.dim, left.w - 6)
-  drawKeyValue(x, y + 7, "Input", fmt(state.inductionInput), C.dim, C.ok, left.w - 6)
-  drawKeyValue(x, y + 8, "Output", fmt(state.inductionOutput), C.dim, C.warn, left.w - 6)
-  drawKeyValue(x, y + 9, "Xfer Cap", fmt(state.inductionTransferCap), C.dim, C.info, left.w - 6)
-  drawKeyValue(x, y + 10, "Cells", tostring(state.inductionCells), C.dim, C.info, left.w - 6)
-  drawKeyValue(x, y + 11, "Providers", tostring(state.inductionProviders), C.dim, C.info, left.w - 6)
-  drawKeyValue(x, y + 12, "Length", tostring(state.inductionLength), C.dim, C.text, left.w - 6)
-  drawKeyValue(x, y + 13, "Width", tostring(state.inductionWidth), C.dim, C.text, left.w - 6)
-  drawKeyValue(x, y + 14, "Height", tostring(state.inductionHeight), C.dim, C.text, left.w - 6)
+  drawKeyValue(x, y, "Online", state.inductionPresent and "ONLINE" or "OFFLINE", C.dim, state.inductionPresent and C.ok or C.bad, left.w - 6)
+  drawKeyValue(x, y + 1, "Formed", state.inductionFormed and "FORMED" or "UNFORMED", C.dim, state.inductionFormed and C.ok or C.warn, left.w - 6)
+  drawKeyValue(x, y + 2, "Global", istat, C.dim, statusTone, left.w - 6)
+
+  drawBox(x - 1, y + 4, left.w - 4, 9, "TECHNICAL", C.borderDim)
+  drawKeyValue(x, y + 5, "Stored", fmt(state.inductionEnergy), C.dim, C.energy, left.w - 6)
+  drawKeyValue(x, y + 6, "Max", fmt(state.inductionMax), C.dim, C.energy, left.w - 6)
+  drawKeyValue(x, y + 7, "Fill %", string.format("%.1f%%", state.inductionPct), C.dim, C.energy, left.w - 6)
+  drawKeyValue(x, y + 8, "Needed", fmt(state.inductionNeeded), C.dim, C.dim, left.w - 6)
+  drawKeyValue(x, y + 9, "Transfer", fmt(state.inductionTransferCap), C.dim, C.info, left.w - 6)
+  drawKeyValue(x, y + 10, "Last In", fmt(state.inductionInput), C.dim, C.ok, left.w - 6)
+  drawKeyValue(x, y + 11, "Last Out", fmt(state.inductionOutput), C.dim, C.warn, left.w - 6)
+
+  drawBox(x - 1, y + 13, left.w - 4, 6, "STRUCTURE", C.borderDim)
+  drawKeyValue(x, y + 14, "Cells", tostring(state.inductionCells), C.dim, C.info, left.w - 6)
+  drawKeyValue(x, y + 15, "Providers", tostring(state.inductionProviders), C.dim, C.info, left.w - 6)
+  drawKeyValue(x, y + 16, "Dimensions", string.format("%dx%dx%d", state.inductionLength, state.inductionWidth, state.inductionHeight), C.dim, C.text, left.w - 6)
 
   if layout.center then
     drawInductionDiagram(layout.center.x, layout.center.y, layout.center.w, layout.center.h)
