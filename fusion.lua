@@ -1610,6 +1610,33 @@ local function buildButtons(layout)
   addButton("viewMan", bx + (navW * 2), ctrl.y + 1, navW, 2, "MAN", state.currentView == "manual" and C.btnOn or C.panelMid, nil, function() state.currentView = "manual"; pushEvent("View manual") end, { touchPadX = 1, touchPadY = 0 })
   addButton("viewInd", bx + (navW * 3), ctrl.y + 1, bw - (navW * 3), 2, "IND", state.currentView == "induction" and C.btnOn or C.panelMid, nil, function() state.currentView = "induction"; pushEvent("View induction") end, { touchPadX = 1, touchPadY = 0 })
 
+  addButton("refreshNow", bx, ctrl.y + 4, bw, 2, "REFRESH", C.btnAction, nil, function()
+    refreshAll()
+    state.lastAction = "Refresh"
+  end)
+
+  if state.currentView == "diagnostic" or state.currentView == "induction" then
+    addButton("monitor", bx, ctrl.y + 7, bw, 2, "MONITOR", C.btnWarn, nil, function() startMonitorSelection() end)
+    return
+  end
+
+  if state.currentView == "manual" then
+    local mY = by
+    addButton("manualStart", bx, mY, bw, 3, "DEMARRAGE", canIgnite() and C.warn or C.inactive, nil, function() startReactorSequence() end)
+    addButton("manualStop", bx, mY + 4, bw, 3, "ARRET", C.bad, nil, function() stopReactorSequence("ARRET DEMANDE") end)
+    addButton("manualT", bx, mY + 8, bw, 3, "T LOCK", state.tOpen and C.tritium or C.inactive, nil, function() openTritium(not state.tOpen) end)
+    addButton("manualDT", bx, mY + 12, bw, 3, "DT LOCK", state.dtOpen and C.dtFuel or C.inactive, nil, function()
+      local nextState = not state.dtOpen
+      openDTFuel(nextState)
+      if nextState then openSeparatedGases(false) end
+    end)
+    addButton("manualD", bx, mY + 16, bw, 3, "D LOCK", state.dOpen and C.deuterium or C.inactive, nil, function() openDeuterium(not state.dOpen) end)
+    addButton("manualPulse", bx, mY + 20, bw, 3, "PULSE LAS", C.warn, nil, function() fireLaser() end)
+    addButton("monitor", bx, mY + 24, bw, 2, "MONITOR", C.btnWarn, nil, function() startMonitorSelection() end)
+    addButton("manualBack", bx, mY + 27, bw, 2, "RETOUR SUP", C.btnAction, nil, function() state.currentView = "supervision"; pushEvent("View supervision") end)
+    return
+  end
+
   addButton("master", bx, by, bw, bh, "MASTER", state.autoMaster and C.btnOn or C.btnOff, nil, function()
     state.autoMaster = not state.autoMaster
     if not state.autoMaster then
@@ -1638,22 +1665,8 @@ local function buildButtons(layout)
   addButton("monitor", bx, by + (bh + bGap) * 4, bw, 2, "MONITOR", C.btnWarn, nil, function() startMonitorSelection() end)
   addButton("arret", bx, by + (bh + bGap) * 5, bw, 2, "ARRET", C.bad, nil, function() stopReactorSequence("ARRET DEMANDE") end)
 
-  if state.currentView == "manual" then
-    local mY = by + (bh + bGap) * 6
-    addButton("manualT", bx, mY, bw, 3, state.tOpen and "FERMER T" or "OUVRIR T", state.tOpen and C.tritium or C.inactive, nil, function() openTritium(not state.tOpen) end)
-    addButton("manualD", bx, mY + 4, bw, 3, state.dOpen and "FERMER D" or "OUVRIR D", state.dOpen and C.deuterium or C.inactive, nil, function() openDeuterium(not state.dOpen) end)
-    addButton("manualDT", bx, mY + 8, bw, 3, state.dtOpen and "FERMER DT" or "OUVRIR DT", state.dtOpen and C.dtFuel or C.inactive, nil, function()
-      local nextState = not state.dtOpen
-      openDTFuel(nextState)
-      if nextState then openSeparatedGases(false) end
-    end)
-    addButton("manualPulse", bx, mY + 12, bw, 3, "PULSE LAS", C.warn, nil, function() fireLaser() end)
-    addButton("manualEStop", bx, mY + 16, bw, 3, "ARRET URGENCE", C.bad, nil, function() hardStop("MANUAL E-STOP") end)
-    addButton("manualBack", bx, mY + 20, bw, 2, "RETOUR SUP", C.btnAction, nil, function() state.currentView = "supervision"; pushEvent("View supervision") end)
-  end
-
   local center = layout.center
-  if center and layout.mode ~= "compact" then
+  if center and layout.mode ~= "compact" and state.currentView == "supervision" then
     local innerX = center.x + 2
     local innerW = center.w - 4
     local barY = center.y + center.h - 4
@@ -1898,24 +1911,27 @@ local function drawDiagnosticView(layout)
   writeAt(x, y, "RESOLVED DEVICES", C.info, C.panelDark)
 
   local rows = {
-    {"Reactor", hw.reactorName or "MISSING", hw.reactor ~= nil},
-    {"Logic", hw.logicName or "MISSING", hw.logic ~= nil},
-    {"Laser", hw.laserName or "MISSING", hw.laser ~= nil},
-    {"Induction", hw.inductionName or "MISSING", hw.induction ~= nil},
-    {"Relay LAS", CFG.actions.laser_charge.relay .. "." .. CFG.actions.laser_charge.side, hw.relays[CFG.actions.laser_charge.relay] ~= nil},
-    {"Relay T", CFG.actions.tritium.relay .. "." .. CFG.actions.tritium.side, hw.relays[CFG.actions.tritium.relay] ~= nil},
-    {"Relay D", CFG.actions.deuterium.relay .. "." .. CFG.actions.deuterium.side, hw.relays[CFG.actions.deuterium.relay] ~= nil},
-    {"Reader T", hw.readerRoles.tritium and hw.readerRoles.tritium.name or "MISSING", hw.readerRoles.tritium ~= nil},
-    {"Reader D", hw.readerRoles.deuterium and hw.readerRoles.deuterium.name or "MISSING", hw.readerRoles.deuterium ~= nil},
-    {"Reader Aux", hw.readerRoles.inventory and hw.readerRoles.inventory.name or "MISSING", hw.readerRoles.inventory ~= nil},
-    {"Monitor", hw.monitorName or "term", hw.monitorName ~= nil},
+    {"Reactor", hw.reactorName or "FAIL", hw.reactor ~= nil, "Fusion core control"},
+    {"Logic Adapter", hw.logicName or "FAIL", hw.logic ~= nil, "Ignition and injection status"},
+    {"Laser", hw.laserName or "FAIL", hw.laser ~= nil, "Ignition beam source"},
+    {"Induction Matrix", hw.inductionName or "FAIL", hw.induction ~= nil, "Battery / power buffer"},
+    {"Relay LAS", CFG.actions.laser_charge.relay .. "." .. CFG.actions.laser_charge.side, hw.relays[CFG.actions.laser_charge.relay] ~= nil, "Laser charge and fire line"},
+    {"Relay T", CFG.actions.tritium.relay .. "." .. CFG.actions.tritium.side, hw.relays[CFG.actions.tritium.relay] ~= nil, "Tritium valve line"},
+    {"Relay D", CFG.actions.deuterium.relay .. "." .. CFG.actions.deuterium.side, hw.relays[CFG.actions.deuterium.relay] ~= nil, "Deuterium valve line"},
+    {"Reader T", hw.readerRoles.tritium and hw.readerRoles.tritium.name or "FAIL", hw.readerRoles.tritium ~= nil, "Tritium tank read"},
+    {"Reader D", hw.readerRoles.deuterium and hw.readerRoles.deuterium.name or "FAIL", hw.readerRoles.deuterium ~= nil, "Deuterium tank read"},
+    {"Reader Aux", hw.readerRoles.inventory and hw.readerRoles.inventory.name or "FAIL", hw.readerRoles.inventory ~= nil, "Auxiliary inventory / feed"},
+    {"Monitor", hw.monitorName or "term", hw.monitorName ~= nil, "Touch interface"},
   }
 
+  local rowStep = 2
   for i, row in ipairs(rows) do
-    local yy = y + i
-    if yy <= maxY then
+    local yy = y + ((i - 1) * rowStep) + 1
+    if yy + 1 <= maxY then
       local tone = row[3] and C.ok or C.bad
-      drawKeyValue(x, yy, row[1], shortText(row[2], 14) .. " " .. (row[3] and "OK" or "FAIL"), C.dim, tone, center.w - 6)
+      local head = string.format("%s | %s", row[2], row[3] and "OK" or "FAIL")
+      drawKeyValue(x, yy, row[1], shortText(head, 16), C.dim, tone, center.w - 6)
+      writeAt(x + 1, yy + 1, shortText("role: " .. row[4], center.w - 8), C.info, C.panelDark)
     end
   end
 
