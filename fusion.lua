@@ -2654,16 +2654,19 @@ local function drawInductionDiagram(x, y, w, h)
   local dimsKnown = state.inductionLength > 0 and state.inductionWidth > 0 and state.inductionHeight > 0
   local ix, iy = x + 2, y + 2
   local iw, ih = w - 4, h - 4
-  local profileW = clamp(math.floor(iw * 0.58), 12, iw - 14)
-  local profileH = clamp(math.floor(ih * 0.82), 8, ih - 3)
+  local infoMinW = 22
+  local gapRight = 4
+  local profileMaxW = math.max(12, iw - infoMinW - gapRight - 2)
+  local profileW = clamp(math.floor(iw * 0.52), 12, profileMaxW)
+  local profileH = clamp(math.floor(ih * 0.78), 8, ih - 3)
 
   if dimsKnown then
     local footprint = clamp((state.inductionLength + state.inductionWidth) / 2, 3, 18)
     local maxFootprint = math.max(footprint, state.inductionHeight, 3)
     local footprintRatio = clamp(footprint / maxFootprint, 0.35, 1.0)
     local verticalRatio = clamp(state.inductionHeight / maxFootprint, 0.35, 1.0)
-    profileW = clamp(math.floor((iw - 14) * (0.35 + footprintRatio * 0.65)), 12, iw - 14)
-    profileH = clamp(math.floor((ih - 3) * (0.45 + verticalRatio * 0.50)), 8, ih - 3)
+    profileW = clamp(math.floor(profileMaxW * (0.30 + footprintRatio * 0.55)), 12, profileMaxW)
+    profileH = clamp(math.floor((ih - 3) * (0.40 + verticalRatio * 0.46)), 8, ih - 3)
   end
 
   local sx = ix + 2
@@ -2723,7 +2726,7 @@ local function drawInductionDiagram(x, y, w, h)
     writeAt(sx + 1, levelY, string.rep(" ", profileW - 2), C.text, pulse and C.info or fillTone)
   end
 
-  local infoX = ix + profileW + capDepth + 3
+  local infoX = ix + profileW + capDepth + gapRight
   writeAt(x + 2, y + 1, string.format("STATE %s", status), tone, C.panelDark)
   writeAt(infoX, sy + 1, string.format("FILL  %5.1f%%", state.inductionPct), C.energy, C.panelDark)
   writeAt(infoX, sy + 2, string.format("STORED %sFE", fmt(state.inductionEnergy)), C.text, C.panelDark)
