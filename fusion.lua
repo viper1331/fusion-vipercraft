@@ -119,6 +119,10 @@ local state = {
 
   currentView = "supervision",
   safetyWarnings = {},
+  ignitionChecklist = {},
+  ignitionBlockers = {},
+  eventLog = {},
+  maxEventLog = 8,
 
   tick = 0,
 }
@@ -329,11 +333,12 @@ end
 
 local function reactorPhase()
   if state.alert == "DANGER" then return "SAFE STOP" end
+  if #state.ignitionBlockers > 0 then return "BLOCKED" end
   if not state.reactorPresent then return "OFFLINE" end
   if not state.reactorFormed then return "UNFORMED" end
   if state.ignition and state.dtOpen then return "RUNNING" end
+  if state.ignitionSequencePending then return "FIRING" end
   if state.ignition then return "IGNITED" end
-  if state.ignitionSequencePending then return "IGNITING" end
   if state.laserChargeOn or state.laserLineOn then return "CHARGING" end
 
   local threshold = toNumber(CFG and CFG.ignitionLaserEnergyThreshold, 0)
@@ -345,24 +350,86 @@ end
 
 local function phaseColor(phase)
   if phase == "RUNNING" or phase == "IGNITED" then return C.ok end
-  if phase == "READY" then return C.info end
-  if phase == "CHARGING" or phase == "IGNITING" then return C.warn end
-  if phase == "SAFE STOP" or phase == "OFFLINE" or phase == "UNFORMED" then return C.bad end
+  if phase == "READY" then return C.warn end
+  if phase == "CHARGING" or phase == "FIRING" then return C.warn end
+  if phase == "SAFE STOP" or phase == "OFFLINE" or phase == "UNFORMED" or phase == "BLOCKED" then return C.bad end
   return C.dim
+end
+
+local function pushEvent(message)
+  if not message or #message == 0 then return end
+  local stamp = string.format("%05.1f", os.clock() % 1000)
+  table.insert(state.eventLog, 1, stamp .. " " .. message)
+  while #state.eventLog > (state.maxEventLog or 8) do
+    table.remove(state.eventLog)
+  end
+end
+
+local function getIgnitionChecklist()
+  local list = {
+    { key = "LAS >= 2 GFE", ok = state.laserEnergy >= CFG.ignitionLaserEnergyThreshold, wait = state.laserPresent },
+    { key = "T OPEN", ok = state.tOpen },
+    { key = "D OPEN", ok = state.dOpen },
+    { key = "REACTOR FORMED", ok = state.reactorPresent and state.reactorFormed },
+    { key = "SAFETY OK", ok = #state.safetyWarnings == 0 and state.alert ~= "DANGER" },
+  }
+  return list
+end
+
+local function getIgnitionBlockers()
+  local blockers = {}
+  for _, item in ipairs(getIgnitionChecklist()) do
+    if not item.ok then
+      table.insert(blockers, item.key)
+    end
+  end
+  return blockers
+end
+
+local function canIgnite()
+  return #getIgnitionBlockers() == 0
 end
 
 local function computeSafetyWarnings()
   local warnings = {}
   local critical = false
-  if not state.reactorPresent then table.insert(warnings, "REACTOR ABSENT") critical = true end
-  if state.reactorPresent and not state.reactorFormed then table.insert(warnings, "UNFORMED") end
-  if not hw.readerRoles.deuterium or not hw.readerRoles.tritium then table.insert(warnings, "FUEL SENSOR FAIL") end
-  if not hw.relays[CFG.actions.laser_charge.relay] or not hw.relays[CFG.actions.deuterium.relay] or not hw.relays[CFG.actions.tritium.relay] then
+
+  if not state.reactorPresent then
+    table.insert(warnings, "REACTOR ABSENT")
+    critical = true
+  elseif not state.reactorFormed then
+    table.insert(warnings, "REACTOR UNFORMED")
+  end
+
+  if state.laserEnergy < CFG.ignitionLaserEnergyThreshold then
+    table.insert(warnings, "LAS BELOW 2 GFE")
+  end
+  if not state.tOpen then table.insert(warnings, "TANK T CLOSED") end
+  if not state.dOpen then table.insert(warnings, "TANK D CLOSED") end
+
+  if not hw.readerRoles.deuterium or not hw.readerRoles.tritium then
+    table.insert(warnings, "FUEL SENSOR FAIL")
+  end
+  if not hw.readerRoles.inventory then
+    table.insert(warnings, "READER AUX FAIL")
+  end
+
+  if not hw.relays[CFG.actions.laser_charge.relay]
+    or not hw.relays[CFG.actions.deuterium.relay]
+    or not hw.relays[CFG.actions.tritium.relay] then
     table.insert(warnings, "CONTROL LINE FAIL")
     critical = true
   end
-  if (state.laserChargeOn or state.laserLineOn) and (not state.reactorFormed or state.ignition) then table.insert(warnings, "SAFETY HOLD") end
-  if state.dOpen and state.tOpen and state.dtOpen then table.insert(warnings, "UNSAFE STATE") end
+
+  if state.dtOpen and (state.dOpen or state.tOpen) then
+    table.insert(warnings, "UNSAFE STATE")
+    critical = true
+  end
+
+  if #state.ignitionBlockers > 0 then
+    table.insert(warnings, "IGNITION BLOCKED")
+  end
+
   if #hw.readerRoles.unknown > 0 then table.insert(warnings, "FALLBACK DETECTION") end
   return warnings, critical
 end
@@ -1028,39 +1095,49 @@ local function readRelayOutputState(actionName, fallback)
 end
 
 local function setLaserCharge(on)
-  relayWrite("laser_charge", false)
-  state.laserChargeOn = false
-  state.lastAction = on and "Charge laser (auto)" or "Charge laser (idle)"
+  if state.laserChargeOn == on then return end
+  relayWrite("laser_charge", on)
+  state.laserChargeOn = on
+  state.lastAction = on and "Charge laser ON" or "Charge laser OFF"
+  pushEvent(state.lastAction)
 end
 
 local function fireLaser()
   if CFG.actions.laser_fire and relayWrite("laser_fire", true) then
-    state.lastAction = "Pulse laser"
+    state.lastAction = "Pulse LAS"
+    pushEvent("Pulse LAS")
   else
     state.lastAction = "Laser pulse non cable"
+    pushEvent("Pulse LAS FAIL")
   end
 end
 
 local function openDTFuel(on)
+  if state.dtOpen == on then return end
   if CFG.actions.dt_fuel then
     relayWrite("dt_fuel", on)
   end
   state.dtOpen = on
-  state.lastAction = on and "D-T Fuel ouvert" or "D-T Fuel ferme"
+  state.lastAction = on and "DT OPEN" or "DT CLOSED"
+  pushEvent(state.lastAction)
 end
 
 local function openDeuterium(on)
+  if state.dOpen == on then return end
   if CFG.actions.deuterium then
     relayWrite("deuterium", on)
   end
   state.dOpen = on
+  pushEvent(on and "D line OPEN" or "D line CLOSED")
 end
 
 local function openTritium(on)
+  if state.tOpen == on then return end
   if CFG.actions.tritium then
     relayWrite("tritium", on)
   end
   state.tOpen = on
+  pushEvent(on and "T line OPEN" or "T line CLOSED")
 end
 
 local function openSeparatedGases(on)
@@ -1077,6 +1154,7 @@ local function hardStop(reason)
   state.status = reason or "EMERGENCY STOP"
   state.alert = "DANGER"
   state.lastAction = "Arret securite"
+  pushEvent("Emergency stop")
 end
 
 local function detectReactorFormed()
@@ -1200,21 +1278,27 @@ local function readReaders()
 end
 
 local function refreshAll()
+  local wasIgnited = state.ignition
   scanPeripherals()
   scanBlockReaders()
   readLaser()
   readReactor()
   readEnergy()
   readReaders()
+  if (not wasIgnited) and state.ignition then
+    pushEvent("Reactor running")
+  end
   state.tick = (state.tick or 0) + 1
 end
 
 local function updateAlerts()
+  state.ignitionChecklist = getIgnitionChecklist()
+  state.ignitionBlockers = getIgnitionBlockers()
   local warnings, critical = computeSafetyWarnings()
   state.safetyWarnings = warnings
   if critical then
     state.alert = "DANGER"
-  elseif #warnings > 0 or (state.energyKnown and state.energyPct <= CFG.energyLowPct) then
+  elseif #warnings > 0 or #state.ignitionBlockers > 0 or (state.energyKnown and state.energyPct <= CFG.energyLowPct) then
     state.alert = "WARN"
   elseif state.ignition then
     state.alert = "OK"
@@ -1223,49 +1307,45 @@ local function updateAlerts()
   end
 end
 
-local function triggerAutomaticIgnitionSequence()
+local function startReactorSequence()
+  state.ignitionChecklist = getIgnitionChecklist()
+  state.ignitionBlockers = getIgnitionBlockers()
+
   if state.ignitionSequencePending then
-    state.status = "Ignition en attente"
-    return
+    state.status = "FIRING"
+    return false
   end
 
-  if not state.reactorPresent then
-    state.status = "Reacteur absent"
-    return
-  end
-
-  if not state.reactorFormed then
-    state.status = "Reacteur non forme"
-    return
-  end
-
-  if state.laserEnergy < CFG.ignitionLaserEnergyThreshold then
-    state.status = "Laser insuffisant"
-    state.lastAction = "Ignition refusee"
-    return
-  end
-
-  if not state.dOpen then
-    state.status = "Ligne D fermee"
-    state.lastAction = "Ignition refusee"
-    return
-  end
-
-  if not state.tOpen then
-    state.status = "Ligne T fermee"
-    state.lastAction = "Ignition refusee"
-    return
+  if not canIgnite() then
+    state.status = "BLOCKED"
+    state.lastAction = "Ignition refused"
+    pushEvent("Ignition refused")
+    return false
   end
 
   state.ignitionSequencePending = true
   state.lastIgnitionAttempt = os.clock()
-
   openDTFuel(false)
   sleep(0.15)
   fireLaser()
+  state.status = "FIRING"
+  state.lastAction = "Start sequence"
+  pushEvent("Ignition start sequence")
+  return true
+end
 
-  state.status = "Ignition auto"
-  state.lastAction = "Laser >= 2.0G + D/T ouverts -> pulse LAS"
+local function stopReactorSequence(reason)
+  openDTFuel(false)
+  openSeparatedGases(false)
+  setLaserCharge(false)
+  state.ignitionSequencePending = false
+  state.status = reason or "ARRET"
+  state.lastAction = "Arret commande"
+  pushEvent("Reactor stop sequence")
+end
+
+local function triggerAutomaticIgnitionSequence()
+  return startReactorSequence()
 end
 
 local function autoChargeLaser()
@@ -1282,7 +1362,7 @@ local function autoFusionControl()
   if not state.fusionAuto then return end
 
   if not state.reactorFormed then
-    state.status = "Reacteur non forme"
+    state.status = "BLOCKED"
     openDTFuel(false)
     openSeparatedGases(false)
     return
@@ -1307,13 +1387,13 @@ local function autoFusionControl()
       openSeparatedGases(false)
       state.status = "Energie pleine : stop injection"
     else
-      state.status = "Regime nominal"
+      state.status = state.ignition and "RUNNING" or "READY"
     end
   else
     if not state.ignition and not state.ignitionSequencePending and state.laserEnergy >= CFG.ignitionLaserEnergyThreshold then
       triggerAutomaticIgnitionSequence()
     else
-      state.status = state.ignitionSequencePending and "Ignition en attente" or "Mode auto"
+      state.status = state.ignition and "RUNNING" or (state.ignitionSequencePending and "FIRING" or "READY")
     end
   end
 end
@@ -1399,6 +1479,7 @@ local function selectMonitorByIndex(index)
   setupMonitor()
   stopMonitorSelection()
   state.lastAction = "Moniteur: " .. m.name
+  pushEvent("Monitor changed")
 end
 
 local function buildButtons(layout)
@@ -1423,9 +1504,9 @@ local function buildButtons(layout)
   local bh = math.max(2, (layout.mode == "compact") and 2 or 2)
   local bGap = 1
 
-  addButton("viewSup", bx, ctrl.y + 1, math.max(8, math.floor(bw / 3)), 2, "SUP", state.currentView == "supervision" and C.btnOn or C.panelMid, nil, function() state.currentView = "supervision" end, { touchPadX = 1, touchPadY = 0 })
-  addButton("viewDiag", bx + math.max(8, math.floor(bw / 3)), ctrl.y + 1, math.max(8, math.floor(bw / 3)), 2, "DIAG", state.currentView == "diagnostic" and C.btnOn or C.panelMid, nil, function() state.currentView = "diagnostic" end, { touchPadX = 1, touchPadY = 0 })
-  addButton("viewMan", bx + (math.max(8, math.floor(bw / 3)) * 2), ctrl.y + 1, bw - (math.max(8, math.floor(bw / 3)) * 2), 2, "MAN", state.currentView == "manual" and C.btnOn or C.panelMid, nil, function() state.currentView = "manual" end, { touchPadX = 1, touchPadY = 0 })
+  addButton("viewSup", bx, ctrl.y + 1, math.max(8, math.floor(bw / 3)), 2, "SUP", state.currentView == "supervision" and C.btnOn or C.panelMid, nil, function() state.currentView = "supervision"; pushEvent("View supervision") end, { touchPadX = 1, touchPadY = 0 })
+  addButton("viewDiag", bx + math.max(8, math.floor(bw / 3)), ctrl.y + 1, math.max(8, math.floor(bw / 3)), 2, "DIAG", state.currentView == "diagnostic" and C.btnOn or C.panelMid, nil, function() state.currentView = "diagnostic"; pushEvent("View diagnostic") end, { touchPadX = 1, touchPadY = 0 })
+  addButton("viewMan", bx + (math.max(8, math.floor(bw / 3)) * 2), ctrl.y + 1, bw - (math.max(8, math.floor(bw / 3)) * 2), 2, "MAN", state.currentView == "manual" and C.btnOn or C.panelMid, nil, function() state.currentView = "manual"; pushEvent("View manual") end, { touchPadX = 1, touchPadY = 0 })
 
   addButton("master", bx, by, bw, bh, "MASTER", state.autoMaster and C.btnOn or C.btnOff, nil, function()
     state.autoMaster = not state.autoMaster
@@ -1451,12 +1532,22 @@ local function buildButtons(layout)
     state.lastAction = "Toggle CHARGE"
   end)
 
-  addButton("demarrage", bx, by + (bh + bGap) * 3, bw, bh, "DEMARRAGE", C.btnAction, nil, function() triggerAutomaticIgnitionSequence() end)
+  addButton("demarrage", bx, by + (bh + bGap) * 3, bw, bh, "DEMARRAGE", canIgnite() and C.warn or C.inactive, nil, function() startReactorSequence() end)
   addButton("monitor", bx, by + (bh + bGap) * 4, bw, 2, "MONITOR", C.btnWarn, nil, function() startMonitorSelection() end)
-  addButton("arret", bx, by + (bh + bGap) * 5, bw, 2, "ARRET", C.bad, nil, function() hardStop("ARRET DEMANDE") end)
+  addButton("arret", bx, by + (bh + bGap) * 5, bw, 2, "ARRET", C.bad, nil, function() stopReactorSequence("ARRET DEMANDE") end)
 
   if state.currentView == "manual" then
-    addButton("manualLaser", bx, by + (bh + bGap) * 6, bw, 2, "LAS OUT " .. yesno(state.laserChargeOn), state.laserChargeOn and C.btnOn or C.btnOff, nil, function() setLaserCharge(not state.laserChargeOn) end)
+    local mY = by + (bh + bGap) * 6
+    addButton("manualT", bx, mY, bw, 3, state.tOpen and "FERMER T" or "OUVRIR T", state.tOpen and C.tritium or C.inactive, nil, function() openTritium(not state.tOpen) end)
+    addButton("manualD", bx, mY + 4, bw, 3, state.dOpen and "FERMER D" or "OUVRIR D", state.dOpen and C.deuterium or C.inactive, nil, function() openDeuterium(not state.dOpen) end)
+    addButton("manualDT", bx, mY + 8, bw, 3, state.dtOpen and "FERMER DT" or "OUVRIR DT", state.dtOpen and C.dtFuel or C.inactive, nil, function()
+      local nextState = not state.dtOpen
+      openDTFuel(nextState)
+      if nextState then openSeparatedGases(false) end
+    end)
+    addButton("manualPulse", bx, mY + 12, bw, 3, "PULSE LAS", C.warn, nil, function() fireLaser() end)
+    addButton("manualEStop", bx, mY + 16, bw, 3, "ARRET URGENCE", C.bad, nil, function() hardStop("MANUAL E-STOP") end)
+    addButton("manualBack", bx, mY + 20, bw, 2, "RETOUR SUP", C.btnAction, nil, function() state.currentView = "supervision"; pushEvent("View supervision") end)
   end
 
   local center = layout.center
@@ -1582,24 +1673,25 @@ local function drawStatusPanel(panel)
   local y = panel.y + 1
   local w = panel.w - 2
 
-  local b1h = clamp(math.floor(panel.h * 0.28), 5, 8)
-  local b2h = clamp(math.floor(panel.h * 0.26), 5, 8)
-  local b3h = panel.h - b1h - b2h - 2
+  local b1h = clamp(math.floor(panel.h * 0.23), 5, 7)
+  local b2h = clamp(math.floor(panel.h * 0.22), 5, 7)
+  local b3h = clamp(math.floor(panel.h * 0.26), 6, 8)
+  local b4h = panel.h - b1h - b2h - b3h - 3
 
   drawBox(x, y, w, b1h, "PHASE", C.borderDim)
   local phase = reactorPhase()
   drawBadge(x + 2, y + 1, "STATE", phase, phaseColor(phase))
   drawBadge(x + 2, y + 2, "CORE", state.reactorPresent and (state.reactorFormed and "FORMED" or "UNFORMED") or "OFFLINE")
   if b1h > 5 then drawKeyValue(x + 2, y + 3, "Temp P", fmt(state.plasmaTemp), C.dim, C.info, w - 6) end
-  if b1h > 6 then drawKeyValue(x + 2, y + 4, "Temp C", fmt(state.caseTemp), C.dim, C.info, w - 6) end
 
   local y2 = y + b1h
-  drawBox(x, y2, w, b2h, "ENERGY/FUEL", C.borderDim)
-  drawBar(x + 2, y2 + 1, math.max(8, w - 4), state.laserPct, C.warn, string.format("LAS %3.0f%%", state.laserPct))
-  drawBar(x + 2, y2 + 2, math.max(8, w - 4), state.energyKnown and state.energyPct or 0, C.energy, state.energyKnown and string.format("GRID %3.0f%%", state.energyPct) or "GRID N/A")
-  if b2h > 5 then
-    drawKeyValue(x + 2, y2 + 3, "D Tank", formatFuelLevel(state.deuteriumAmount), C.dim, C.fuel, w - 6)
-    drawKeyValue(x + 2, y2 + 4, "T Tank", formatFuelLevel(state.tritiumAmount), C.dim, C.fuel, w - 6)
+  drawBox(x, y2, w, b2h, "IGNITION CHECK", C.borderDim)
+  local checklist = state.ignitionChecklist or {}
+  for i = 1, math.min(#checklist, b2h - 2) do
+    local item = checklist[i]
+    local tone = item.ok and C.ok or (item.wait and C.warn or C.bad)
+    local mark = item.ok and "[OK]" or (item.wait and "[...]" or "[NO]")
+    writeAt(x + 2, y2 + i, shortText(mark .. " " .. item.key, w - 4), tone, C.panelDark)
   end
 
   local y3 = y2 + b2h
@@ -1607,24 +1699,23 @@ local function drawStatusPanel(panel)
   local warnings = state.safetyWarnings or {}
   if #warnings == 0 then
     writeAt(x + 2, y3 + 1, "NO CRITICAL WARNING", C.ok, C.panelDark)
-    if y3 + 2 <= y3 + b3h - 2 then
-      drawKeyValue(x + 2, y3 + 2, "Relays", (hw.relays[CFG.actions.laser_charge.relay] and hw.relays[CFG.actions.deuterium.relay] and hw.relays[CFG.actions.tritium.relay]) and "READY" or "CHECK", C.dim, C.info, w - 6)
-    end
-    if y3 + 3 <= y3 + b3h - 2 then
-      drawKeyValue(x + 2, y3 + 3, "Readers", (hw.readerRoles.deuterium and hw.readerRoles.tritium and hw.readerRoles.inventory) and "SYNC" or "PARTIAL", C.dim, C.info, w - 6)
-    end
-    if y3 + 4 <= y3 + b3h - 2 then
-      drawKeyValue(x + 2, y3 + 4, "Locks", (state.dOpen or state.tOpen or state.dtOpen) and "OPEN" or "SEALED", C.dim, (state.dOpen or state.tOpen or state.dtOpen) and C.warn or C.ok, w - 6)
-    end
   else
     for i = 1, math.min(#warnings, b3h - 2) do
-      writeAt(x + 2, y3 + i, shortText("- " .. warnings[i], w - 4), C.warn, C.panelDark)
+      local blink = (state.tick % 6 < 3)
+      local tone = (i == 1 and blink) and C.bad or C.warn
+      writeAt(x + 2, y3 + i, shortText("- " .. warnings[i], w - 4), tone, C.panelDark)
     end
   end
-end
 
+  local y4 = y3 + b3h
+  drawBox(x, y4, w, b4h, "EVENT LOG", C.borderDim)
+  local logs = state.eventLog or {}
+  for i = 1, math.min(#logs, b4h - 2) do
+    writeAt(x + 2, y4 + i, shortText(logs[i], w - 4), C.info, C.panelDark)
+  end
+end
 local function drawControlPanel(panel, layout)
-  drawBox(panel.x, panel.y, panel.w, panel.h, "CONTROL COLUMN", C.border)
+  drawBox(panel.x, panel.y, panel.w, panel.h, state.currentView == "manual" and "MANUAL COMMAND" or "CONTROL COLUMN", C.border)
   local x = panel.x + 1
   local w = panel.w - 2
 
@@ -1657,28 +1748,37 @@ local function drawDiagnosticView(layout)
     drawControlPanel(layout.right, layout)
     return
   end
-  if center then
-    drawBox(center.x, center.y, center.w, center.h, "DIAGNOSTIC", C.border)
-    local x = center.x + 2
-    local y = center.y + 1
-    drawKeyValue(x, y, "Reactor", hw.reactorName or "MISSING", C.dim, hw.reactor and C.ok or C.bad, center.w - 6)
-    drawKeyValue(x, y + 1, "Logic", hw.logicName or "MISSING", C.dim, hw.logic and C.ok or C.bad, center.w - 6)
-    drawKeyValue(x, y + 2, "Laser", hw.laserName or "MISSING", C.dim, hw.laser and C.ok or C.bad, center.w - 6)
-    drawKeyValue(x, y + 3, "Induction", hw.inductionName or "MISSING", C.dim, hw.induction and C.ok or C.warn, center.w - 6)
-    drawKeyValue(x, y + 5, "Relay LAS", CFG.actions.laser_charge.relay .. "." .. CFG.actions.laser_charge.side, C.dim, hw.relays[CFG.actions.laser_charge.relay] and C.ok or C.bad, center.w - 6)
-    drawKeyValue(x, y + 6, "Relay D", CFG.actions.deuterium.relay .. "." .. CFG.actions.deuterium.side, C.dim, hw.relays[CFG.actions.deuterium.relay] and C.ok or C.bad, center.w - 6)
-    drawKeyValue(x, y + 7, "Relay T", CFG.actions.tritium.relay .. "." .. CFG.actions.tritium.side, C.dim, hw.relays[CFG.actions.tritium.relay] and C.ok or C.bad, center.w - 6)
-    drawKeyValue(x, y + 9, "Reader D", hw.readerRoles.deuterium and hw.readerRoles.deuterium.name or "MISSING", C.dim, hw.readerRoles.deuterium and C.ok or C.bad, center.w - 6)
-    drawKeyValue(x, y + 10, "Reader T", hw.readerRoles.tritium and hw.readerRoles.tritium.name or "MISSING", C.dim, hw.readerRoles.tritium and C.ok or C.bad, center.w - 6)
-    drawKeyValue(x, y + 11, "Reader Aux", hw.readerRoles.inventory and hw.readerRoles.inventory.name or "MISSING", C.dim, hw.readerRoles.inventory and C.ok or C.warn, center.w - 6)
-    if y + 13 <= center.y + center.h - 2 then
-      drawKeyValue(x, y + 13, "Fuel D raw", tostring(state.deuteriumAmount), C.dim, C.text, center.w - 6)
-      drawKeyValue(x, y + 14, "Fuel T raw", tostring(state.tritiumAmount), C.dim, C.text, center.w - 6)
+
+  drawBox(center.x, center.y, center.w, center.h, "DIAGNOSTIC", C.border)
+  local x = center.x + 2
+  local y = center.y + 1
+  local maxY = center.y + center.h - 2
+  writeAt(x, y, "RESOLVED DEVICES", C.info, C.panelDark)
+
+  local rows = {
+    {"Reactor", hw.reactorName or "MISSING", hw.reactor ~= nil},
+    {"Logic", hw.logicName or "MISSING", hw.logic ~= nil},
+    {"Laser", hw.laserName or "MISSING", hw.laser ~= nil},
+    {"Induction", hw.inductionName or "MISSING", hw.induction ~= nil},
+    {"Relay LAS", CFG.actions.laser_charge.relay .. "." .. CFG.actions.laser_charge.side, hw.relays[CFG.actions.laser_charge.relay] ~= nil},
+    {"Relay T", CFG.actions.tritium.relay .. "." .. CFG.actions.tritium.side, hw.relays[CFG.actions.tritium.relay] ~= nil},
+    {"Relay D", CFG.actions.deuterium.relay .. "." .. CFG.actions.deuterium.side, hw.relays[CFG.actions.deuterium.relay] ~= nil},
+    {"Reader T", hw.readerRoles.tritium and hw.readerRoles.tritium.name or "MISSING", hw.readerRoles.tritium ~= nil},
+    {"Reader D", hw.readerRoles.deuterium and hw.readerRoles.deuterium.name or "MISSING", hw.readerRoles.deuterium ~= nil},
+    {"Reader Aux", hw.readerRoles.inventory and hw.readerRoles.inventory.name or "MISSING", hw.readerRoles.inventory ~= nil},
+    {"Monitor", hw.monitorName or "term", hw.monitorName ~= nil},
+  }
+
+  for i, row in ipairs(rows) do
+    local yy = y + i
+    if yy <= maxY then
+      local tone = row[3] and C.ok or C.bad
+      drawKeyValue(x, yy, row[1], shortText(row[2], 14) .. " " .. (row[3] and "OK" or "FAIL"), C.dim, tone, center.w - 6)
     end
   end
+
   drawControlPanel(layout.right or layout.left, layout)
 end
-
 local function drawManualView(layout)
   if layout.center then
     drawReactorDiagram(layout.center.x, layout.center.y, layout.center.w, layout.center.h)
@@ -1733,7 +1833,8 @@ end
 
 setupMonitor()
 refreshAll()
-state.status = "Systeme pret"
+state.status = "READY"
+pushEvent("System ready")
 
 while state.running do
   refreshAll()
@@ -1774,10 +1875,13 @@ while state.running do
         startMonitorSelection()
       elseif ch == "1" then
         state.currentView = "supervision"
+        pushEvent("View supervision")
       elseif ch == "2" then
         state.currentView = "diagnostic"
+        pushEvent("View diagnostic")
       elseif ch == "3" then
         state.currentView = "manual"
+        pushEvent("View manual")
       elseif ch == "i" then
         triggerAutomaticIgnitionSequence()
       elseif ch == "l" then
