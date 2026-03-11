@@ -48,17 +48,22 @@ local CFG = {
   },
 }
 
-local CONFIG_FILE = "fusion_monitor.cfg"
+local CONFIG_FILE = "fusion_config.lua"
+local MONITOR_CACHE_FILE = "fusion_monitor.cfg"
+local VERSION_FILE = "fusion.version"
 
 -- Configuration update GitHub
-local LOCAL_VERSION = "1.0.0"
+local LOCAL_VERSION = "0.0.0"
 local UPDATE_ENABLED = true
 local UPDATE_REPO_RAW_BASE = "https://raw.githubusercontent.com/viper1331/fusion-vipercraft/main"
 local UPDATE_VERSION_URL = UPDATE_REPO_RAW_BASE .. "/fusion.version"
 local UPDATE_SCRIPT_URL = UPDATE_REPO_RAW_BASE .. "/fusion.lua"
 local UPDATE_SCRIPT_FILE = "fusion.lua"
+local UPDATE_VERSION_FILE = "fusion.version"
 local UPDATE_BACKUP_FILE = "fusion.bak"
+local UPDATE_VERSION_BACKUP_FILE = "fusion.version.bak"
 local UPDATE_TEMP_FILE = "fusion.new"
+local UPDATE_TEMP_VERSION_FILE = "fusion.version.new"
 
 local nativeTerm = term.current()
 local buttons = {}
@@ -831,8 +836,8 @@ local function drawKV(x, y, key, value, keyColor, valueColor)
 end
 
 local function loadSavedMonitorName()
-  if not fs.exists(CONFIG_FILE) then return nil end
-  local h = fs.open(CONFIG_FILE, "r")
+  if not fs.exists(MONITOR_CACHE_FILE) then return nil end
+  local h = fs.open(MONITOR_CACHE_FILE, "r")
   if not h then return nil end
   local name = h.readLine()
   h.close()
@@ -840,7 +845,7 @@ local function loadSavedMonitorName()
 end
 
 local function saveSelectedMonitorName(name)
-  local h = fs.open(CONFIG_FILE, "w")
+  local h = fs.open(MONITOR_CACHE_FILE, "w")
   if not h then return end
   h.writeLine(name or "")
   h.close()
@@ -849,6 +854,146 @@ end
 local function trimText(txt)
   txt = tostring(txt or "")
   return (txt:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+local function readLocalVersionFile()
+  local ok, content = pcall(function()
+    if not fs.exists(VERSION_FILE) then return nil end
+    local h = fs.open(VERSION_FILE, "r")
+    if not h then return nil end
+    local v = h.readAll()
+    h.close()
+    return trimText(v)
+  end)
+  if ok and content and #content > 0 then
+    return content
+  end
+  return LOCAL_VERSION
+end
+
+local function defaultFusionConfig()
+  return {
+    configVersion = 1,
+    setupName = "Fusion ViperCraft",
+    monitor = { name = CFG.preferredMonitor, scale = CFG.monitorScale },
+    devices = {
+      reactorController = CFG.preferredReactor,
+      logicAdapter = CFG.preferredLogicAdapter,
+      laser = CFG.preferredLaser,
+      induction = CFG.preferredInduction,
+    },
+    relays = {
+      laser = { name = CFG.knownRelays.laser_charge.relay, side = CFG.knownRelays.laser_charge.side },
+      tritium = { name = CFG.knownRelays.tritium.relay, side = CFG.knownRelays.tritium.side },
+      deuterium = { name = CFG.knownRelays.deuterium.relay, side = CFG.knownRelays.deuterium.side },
+    },
+    readers = {
+      tritium = CFG.knownReaders.tritium,
+      deuterium = CFG.knownReaders.deuterium,
+      aux = CFG.knownReaders.inventory,
+    },
+    ui = {
+      preferredView = "SUP",
+      touchEnabled = true,
+      refreshDelay = CFG.refreshDelay,
+    },
+    update = {
+      enabled = UPDATE_ENABLED,
+    },
+  }
+end
+
+local function mergeDefaults(target, defaults)
+  if type(target) ~= "table" then target = {} end
+  for k, v in pairs(defaults) do
+    if type(v) == "table" then
+      target[k] = mergeDefaults(type(target[k]) == "table" and target[k] or {}, v)
+    elseif target[k] == nil then
+      target[k] = v
+    end
+  end
+  return target
+end
+
+local function migrateConfig(config)
+  local cfg = type(config) == "table" and config or {}
+  local version = tonumber(cfg.configVersion) or 0
+
+  if version < 1 then
+    cfg = mergeDefaults(cfg, defaultFusionConfig())
+    cfg.configVersion = 1
+  end
+
+  cfg = mergeDefaults(cfg, defaultFusionConfig())
+  return cfg
+end
+
+local function loadFusionConfig()
+  if not fs.exists(CONFIG_FILE) then
+    return false, nil, "CONFIG_MISSING"
+  end
+
+  local ok, configOrErr = pcall(dofile, CONFIG_FILE)
+  if not ok then
+    return false, nil, "CONFIG_INVALID: " .. tostring(configOrErr)
+  end
+
+  if type(configOrErr) ~= "table" then
+    return false, nil, "CONFIG_INVALID: Not a table"
+  end
+
+  local migrated = migrateConfig(configOrErr)
+  return true, migrated, nil
+end
+
+local function applyConfigToRuntime(config)
+  if type(config) ~= "table" then return end
+
+  CFG.preferredMonitor = config.monitor and config.monitor.name or CFG.preferredMonitor
+  CFG.monitorScale = toNumber(config.monitor and config.monitor.scale, CFG.monitorScale)
+  CFG.refreshDelay = toNumber(config.ui and config.ui.refreshDelay, CFG.refreshDelay)
+
+  CFG.preferredReactor = config.devices and config.devices.reactorController or CFG.preferredReactor
+  CFG.preferredLogicAdapter = config.devices and config.devices.logicAdapter or CFG.preferredLogicAdapter
+  CFG.preferredLaser = config.devices and config.devices.laser or CFG.preferredLaser
+  CFG.preferredInduction = config.devices and config.devices.induction or CFG.preferredInduction
+
+  CFG.knownReaders.deuterium = config.readers and config.readers.deuterium or CFG.knownReaders.deuterium
+  CFG.knownReaders.tritium = config.readers and config.readers.tritium or CFG.knownReaders.tritium
+  CFG.knownReaders.inventory = config.readers and config.readers.aux or CFG.knownReaders.inventory
+
+  CFG.knownRelays.laser_charge.relay = config.relays and config.relays.laser and config.relays.laser.name or CFG.knownRelays.laser_charge.relay
+  CFG.knownRelays.laser_charge.side = config.relays and config.relays.laser and config.relays.laser.side or CFG.knownRelays.laser_charge.side
+  CFG.knownRelays.tritium.relay = config.relays and config.relays.tritium and config.relays.tritium.name or CFG.knownRelays.tritium.relay
+  CFG.knownRelays.tritium.side = config.relays and config.relays.tritium and config.relays.tritium.side or CFG.knownRelays.tritium.side
+  CFG.knownRelays.deuterium.relay = config.relays and config.relays.deuterium and config.relays.deuterium.name or CFG.knownRelays.deuterium.relay
+  CFG.knownRelays.deuterium.side = config.relays and config.relays.deuterium and config.relays.deuterium.side or CFG.knownRelays.deuterium.side
+
+  if type(config.update) == "table" and config.update.enabled ~= nil then
+    UPDATE_ENABLED = config.update.enabled and true or false
+  end
+end
+
+local function ensureConfigOrInstaller()
+  local ok, config, err = loadFusionConfig()
+  if not ok then
+    term.redirect(nativeTerm)
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.white)
+    term.clear()
+    term.setCursorPos(1, 1)
+    print("[FUSION] Configuration absente ou invalide: " .. tostring(err))
+    print("[FUSION] Lancez install.lua pour configurer ce setup.")
+    print("[FUSION] Appuyez sur I pour lancer l'installateur, ou une autre touche pour quitter.")
+    local _, key = os.pullEvent("key")
+    if key == keys.i and fs.exists("install.lua") then
+      shell.run("install.lua")
+    end
+    return false, nil
+  end
+
+  applyConfigToRuntime(config)
+  return true, config
 end
 
 local function isHttpReady()
@@ -994,91 +1139,156 @@ local function downloadUpdate()
   setUpdateState("DOWNLOADING", nil, "Download started")
   pushEvent("Download started")
 
-  local ok, body, err = httpGetText(UPDATE_SCRIPT_URL)
-  if not ok then
-    state.update.lastError = err or "Download failed"
-    setUpdateState("FAILED", nil, "Download failed: " .. state.update.lastError)
+  local okVersion, versionBody, versionErr = httpGetText(UPDATE_VERSION_URL)
+  if not okVersion then
+    state.update.lastError = versionErr or "Version download failed"
+    setUpdateState("FAILED", nil, "Version download failed: " .. state.update.lastError)
     pushEvent("Update failed")
     return false, state.update.lastError
   end
 
-  local valid, reason = validateLuaScript(body)
+  local remoteVersion = trimText(versionBody)
+  if #remoteVersion == 0 then
+    state.update.lastError = "Remote version is empty"
+    setUpdateState("FAILED", nil, "Invalid remote version")
+    pushEvent("Update failed")
+    return false, state.update.lastError
+  end
+
+  local okScript, scriptBody, scriptErr = httpGetText(UPDATE_SCRIPT_URL)
+  if not okScript then
+    state.update.lastError = scriptErr or "Script download failed"
+    setUpdateState("FAILED", nil, "Script download failed: " .. state.update.lastError)
+    pushEvent("Update failed")
+    return false, state.update.lastError
+  end
+
+  local valid, reason = validateLuaScript(scriptBody)
   if not valid then
-    state.update.lastError = reason or "Invalid update file"
+    state.update.lastError = reason or "Invalid update script"
     setUpdateState("FAILED", nil, "Validation failed: " .. state.update.lastError)
     pushEvent("Update failed")
     return false, state.update.lastError
   end
 
-  local writeOk, writeErr = writeTextFile(UPDATE_TEMP_FILE, body)
-  if not writeOk then
-    state.update.lastError = writeErr or "Temp write failed"
-    setUpdateState("FAILED", nil, "Temp file failed")
+  local writeVersionOk, writeVersionErr = writeTextFile(UPDATE_TEMP_VERSION_FILE, remoteVersion .. "\n")
+  if not writeVersionOk then
+    state.update.lastError = writeVersionErr or "Cannot write temp version"
+    setUpdateState("FAILED", nil, "Temp version write failed")
     pushEvent("Update failed")
     return false, state.update.lastError
   end
 
+  local writeScriptOk, writeScriptErr = writeTextFile(UPDATE_TEMP_FILE, scriptBody)
+  if not writeScriptOk then
+    state.update.lastError = writeScriptErr or "Cannot write temp script"
+    setUpdateState("FAILED", nil, "Temp script write failed")
+    pushEvent("Update failed")
+    return false, state.update.lastError
+  end
+
+  state.update.remoteVersion = remoteVersion
   state.update.downloaded = true
-  setUpdateState("DOWNLOADED", nil, "Download complete")
+  setUpdateState("DOWNLOADED", nil, "Version and script downloaded")
   pushEvent("Download complete")
   return true, nil
 end
 
 local function applyUpdate()
   state.update.lastError = ""
-  if not fs.exists(UPDATE_TEMP_FILE) then
-    setUpdateState("FAILED", nil, "No downloaded update")
-    return false, "No downloaded update"
+  if not fs.exists(UPDATE_TEMP_FILE) or not fs.exists(UPDATE_TEMP_VERSION_FILE) then
+    setUpdateState("FAILED", nil, "Missing downloaded files")
+    return false, "Missing downloaded files"
   end
 
   setUpdateState("APPLYING", nil, "Applying update")
 
-  local readNewOk, newText, readNewErr = readTextFile(UPDATE_TEMP_FILE)
-  if not readNewOk then
-    state.update.lastError = readNewErr or "Cannot read temp file"
+  local okNewScript, newScript, errNewScript = readTextFile(UPDATE_TEMP_FILE)
+  if not okNewScript then
+    state.update.lastError = errNewScript or "Cannot read temp script"
     setUpdateState("FAILED", nil, "Apply failed: " .. state.update.lastError)
     pushEvent("Update failed")
     return false, state.update.lastError
   end
 
-  local valid, reason = validateLuaScript(newText)
-  if not valid then
-    state.update.lastError = reason or "Invalid update file"
+  local scriptValid, scriptReason = validateLuaScript(newScript)
+  if not scriptValid then
+    state.update.lastError = scriptReason or "Invalid temp script"
     setUpdateState("FAILED", nil, "Apply failed: invalid script")
     pushEvent("Update failed")
     return false, state.update.lastError
   end
 
-  local readCurrentOk, currentText, readCurrentErr = readTextFile(UPDATE_SCRIPT_FILE)
-  if not readCurrentOk then
-    state.update.lastError = readCurrentErr or "Cannot read current script"
-    setUpdateState("FAILED", nil, "Apply failed: cannot backup")
+  local okNewVersion, newVersionText, errNewVersion = readTextFile(UPDATE_TEMP_VERSION_FILE)
+  if not okNewVersion then
+    state.update.lastError = errNewVersion or "Cannot read temp version"
+    setUpdateState("FAILED", nil, "Apply failed: invalid version")
     pushEvent("Update failed")
     return false, state.update.lastError
   end
 
-  local backupOk, backupErr = writeTextFile(UPDATE_BACKUP_FILE, currentText)
-  if not backupOk then
-    state.update.lastError = backupErr or "Backup failed"
+  local newVersion = trimText(newVersionText)
+  if #newVersion == 0 then
+    state.update.lastError = "Temp version is empty"
+    setUpdateState("FAILED", nil, "Apply failed: invalid version")
+    pushEvent("Update failed")
+    return false, state.update.lastError
+  end
+
+  local okCurrentScript, currentScript, errCurrentScript = readTextFile(UPDATE_SCRIPT_FILE)
+  if not okCurrentScript then
+    state.update.lastError = errCurrentScript or "Cannot read current script"
+    setUpdateState("FAILED", nil, "Apply failed: cannot backup script")
+    pushEvent("Update failed")
+    return false, state.update.lastError
+  end
+
+  local currentVersion = ""
+  if fs.exists(UPDATE_VERSION_FILE) then
+    local okCurrentVersion, currentVersionText = readTextFile(UPDATE_VERSION_FILE)
+    if okCurrentVersion then currentVersion = currentVersionText end
+  end
+
+  local okBackupScript, errBackupScript = writeTextFile(UPDATE_BACKUP_FILE, currentScript)
+  if not okBackupScript then
+    state.update.lastError = errBackupScript or "Script backup failed"
     setUpdateState("FAILED", nil, "Backup failed")
     pushEvent("Update failed")
     return false, state.update.lastError
   end
-  pushEvent("Backup created")
 
-  local replaceOk, replaceErr = writeTextFile(UPDATE_SCRIPT_FILE, newText)
-  if not replaceOk then
-    pcall(writeTextFile, UPDATE_SCRIPT_FILE, currentText)
-    state.update.lastError = replaceErr or "Replace failed"
-    setUpdateState("FAILED", nil, "Apply failed: replaced file invalid")
+  local okBackupVersion, errBackupVersion = writeTextFile(UPDATE_VERSION_BACKUP_FILE, currentVersion)
+  if not okBackupVersion then
+    state.update.lastError = errBackupVersion or "Version backup failed"
+    setUpdateState("FAILED", nil, "Backup failed")
+    pushEvent("Update failed")
+    return false, state.update.lastError
+  end
+
+  local okWriteScript, errWriteScript = writeTextFile(UPDATE_SCRIPT_FILE, newScript)
+  if not okWriteScript then
+    pcall(writeTextFile, UPDATE_SCRIPT_FILE, currentScript)
+    state.update.lastError = errWriteScript or "Cannot replace script"
+    setUpdateState("FAILED", nil, "Apply failed: script write")
+    pushEvent("Update failed")
+    return false, state.update.lastError
+  end
+
+  local okWriteVersion, errWriteVersion = writeTextFile(UPDATE_VERSION_FILE, newVersion .. "\n")
+  if not okWriteVersion then
+    pcall(writeTextFile, UPDATE_SCRIPT_FILE, currentScript)
+    pcall(writeTextFile, UPDATE_VERSION_FILE, currentVersion)
+    state.update.lastError = errWriteVersion or "Cannot replace version"
+    setUpdateState("FAILED", nil, "Apply failed: version write")
     pushEvent("Update failed")
     return false, state.update.lastError
   end
 
   pcall(fs.delete, UPDATE_TEMP_FILE)
+  pcall(fs.delete, UPDATE_TEMP_VERSION_FILE)
   state.update.downloaded = false
   state.update.restartRequired = true
-  state.update.localVersion = state.update.remoteVersion ~= "UNKNOWN" and state.update.remoteVersion or state.update.localVersion
+  state.update.localVersion = newVersion
   setUpdateState("RESTART REQUIRED", nil, "Update applied. Restart required")
   pushEvent("Update applied")
   pushEvent("Restart required")
@@ -1114,10 +1324,21 @@ local function rollbackUpdate()
     return false, errBackup
   end
 
+  local versionBackupText = nil
+  if fs.exists(UPDATE_VERSION_BACKUP_FILE) then
+    local okVersionBackup, versionText = readTextFile(UPDATE_VERSION_BACKUP_FILE)
+    if okVersionBackup then versionBackupText = versionText end
+  end
+
   local okWrite, errWrite = writeTextFile(UPDATE_SCRIPT_FILE, backupText)
   if not okWrite then
     setUpdateState("FAILED", nil, "Rollback failed")
     return false, errWrite
+  end
+
+  if versionBackupText ~= nil then
+    pcall(writeTextFile, UPDATE_VERSION_FILE, versionBackupText)
+    state.update.localVersion = trimText(versionBackupText)
   end
 
   state.update.restartRequired = true
@@ -2523,13 +2744,15 @@ local function drawUpdateView(layout)
   drawKeyValue(x, infoPanel.y + 10, "Error", state.update.lastError ~= "" and state.update.lastError or "None", C.dim, state.update.lastError ~= "" and C.bad or C.info, w - 4)
 
   local resultY = infoPanel.y + 13
-  local resultH = math.max(7, infoPanel.h - 14)
+  local resultH = math.max(9, infoPanel.h - 14)
   drawBox(x - 1, resultY, w, resultH, "RESULT", C.borderDim)
   writeAt(x, resultY + 1, shortText("Check: " .. tostring(state.update.lastCheckResult or "Never"), w - 3), C.info, C.panelDark)
   writeAt(x, resultY + 2, shortText("Apply: " .. tostring(state.update.lastApplyResult or "Never"), w - 3), C.info, C.panelDark)
-  writeAt(x, resultY + 3, shortText("Backup: " .. (fs.exists(UPDATE_BACKUP_FILE) and "AVAILABLE" or "MISSING"), w - 3), C.dim, C.panelDark)
-  writeAt(x, resultY + 4, shortText("Temp: " .. (fs.exists(UPDATE_TEMP_FILE) and "READY" or "EMPTY"), w - 3), C.dim, C.panelDark)
-  writeAt(x, resultY + 5, shortText("Restart: " .. (state.update.restartRequired and "REQUIRED" or "NOT REQUIRED"), w - 3), state.update.restartRequired and C.warn or C.ok, C.panelDark)
+  writeAt(x, resultY + 3, shortText("Backup LUA: " .. (fs.exists(UPDATE_BACKUP_FILE) and "AVAILABLE" or "MISSING"), w - 3), C.dim, C.panelDark)
+  writeAt(x, resultY + 4, shortText("Backup VER: " .. (fs.exists(UPDATE_VERSION_BACKUP_FILE) and "AVAILABLE" or "MISSING"), w - 3), C.dim, C.panelDark)
+  writeAt(x, resultY + 5, shortText("Temp LUA: " .. (fs.exists(UPDATE_TEMP_FILE) and "READY" or "EMPTY"), w - 3), C.dim, C.panelDark)
+  writeAt(x, resultY + 6, shortText("Temp VER: " .. (fs.exists(UPDATE_TEMP_VERSION_FILE) and "READY" or "EMPTY"), w - 3), C.dim, C.panelDark)
+  writeAt(x, resultY + 7, shortText("Restart: " .. (state.update.restartRequired and "REQUIRED" or "NOT REQUIRED"), w - 3), state.update.restartRequired and C.warn or C.ok, C.panelDark)
 
   drawControlPanel(controlPanel, layout)
 end
@@ -2571,6 +2794,13 @@ local function drawUI()
   state.uiDrawn = true
 end
 
+local configOk = ensureConfigOrInstaller()
+if not configOk then
+  restoreTerm()
+  return
+end
+
+state.update.localVersion = readLocalVersionFile()
 setupMonitor()
 refreshAll()
 state.status = "READY"
