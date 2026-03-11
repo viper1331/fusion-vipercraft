@@ -490,6 +490,8 @@ local EXPLICIT_SAFE_METHODS = {
   getOutput = true,
   getBlockData = true,
   getItemDetail = true,
+  getItemLimit = true,
+  tanks = true,
   isColour = true,
   isColor = true,
   getTextScale = true,
@@ -556,6 +558,114 @@ local function probeCall(wrapped, methodName, callKey, ...)
   return callKey, { ok = true, returnType = returnType, values = normalized }
 end
 
+local function makeMethodSet(methods)
+  local set = {}
+  for _, methodName in ipairs(methods or {}) do set[methodName] = true end
+  return set
+end
+
+local function registerProbeCall(targetTable, stats, wrapped, methodName, callKey, ...)
+  local key, result = probeCall(wrapped, methodName, callKey, ...)
+  targetTable[key] = result
+  stats.attempted = stats.attempted + 1
+  if result.ok then stats.ok = stats.ok + 1 else stats.failed = stats.failed + 1 end
+  return key, result
+end
+
+local function probeInductionPort(name, wrapped, methods)
+  local probes = {}
+  local stats = { attempted = 0, ok = 0, failed = 0, skippedDangerous = 0, skippedNeedsArgs = 0 }
+  if not wrapped then return probes, stats end
+  local methodSet = makeMethodSet(methods)
+  local orderedMethods = {
+    "getEnergy", "getMaxEnergy", "getEnergyFilledPercentage", "getEnergyNeeded",
+    "getLastInput", "getLastOutput", "getTransferCap", "getInstalledCells",
+    "getInstalledProviders", "getLength", "getWidth", "getHeight", "isFormed", "getMode"
+  }
+  for _, methodName in ipairs(orderedMethods) do
+    if methodSet[methodName] then registerProbeCall(probes, stats, wrapped, methodName, methodName) end
+  end
+  return probes, stats
+end
+
+local function probeFusionLogicAdapter(name, wrapped, methods)
+  local probes = {}
+  local stats = { attempted = 0, ok = 0, failed = 0, skippedDangerous = 0, skippedNeedsArgs = 0 }
+  if not wrapped then return probes, stats end
+  local methodSet = makeMethodSet(methods)
+  local orderedMethods = {
+    "isFormed", "isIgnited", "getCaseTemperature", "getPlasmaTemperature", "getPassiveGeneration",
+    "getProductionRate", "getInjectionRate", "getIgnitionTemperature",
+    "getEnvironmentalLoss", "getMinInjectionRate", "getMaxPlasmaTemperature", "getMaxCasingTemperature"
+  }
+  for _, methodName in ipairs(orderedMethods) do
+    if methodSet[methodName] then registerProbeCall(probes, stats, wrapped, methodName, methodName) end
+  end
+  return probes, stats
+end
+
+local function probeFusionControllerInventory(name, wrapped, methods)
+  local probes = {}
+  local stats = { attempted = 0, ok = 0, failed = 0, skippedDangerous = 0, skippedNeedsArgs = 0 }
+  if not wrapped then return probes, stats end
+  local methodSet = makeMethodSet(methods)
+  local occupiedSlots = {}
+
+  if methodSet.size then registerProbeCall(probes, stats, wrapped, "size", "size") end
+  if methodSet.list then
+    local _, listProbe = registerProbeCall(probes, stats, wrapped, "list", "list")
+    if listProbe.ok and type(listProbe.values[1]) == "table" then
+      occupiedSlots = sortedKeys(listProbe.values[1])
+    end
+  end
+
+  if methodSet.getItemDetail and #occupiedSlots > 0 then
+    local count = 0
+    for _, slot in ipairs(occupiedSlots) do
+      count = count + 1
+      if count > 72 then break end
+      registerProbeCall(probes, stats, wrapped, "getItemDetail", "getItemDetail(" .. tostring(slot) .. ")", slot)
+    end
+  end
+
+  if methodSet.getItemLimit and #occupiedSlots > 0 then
+    local count = 0
+    for _, slot in ipairs(occupiedSlots) do
+      count = count + 1
+      if count > 72 then break end
+      registerProbeCall(probes, stats, wrapped, "getItemLimit", "getItemLimit(" .. tostring(slot) .. ")", slot)
+    end
+  end
+
+  if methodSet.tanks then registerProbeCall(probes, stats, wrapped, "tanks", "tanks") end
+  return probes, stats
+end
+
+local function getSpecializedProbes(name, pType, wrapped, methods)
+  local lowName = string.lower(tostring(name or ""))
+  local lowType = string.lower(tostring(pType or ""))
+  if name == "inductionPort_1" or lowName:find("inductionport", 1, true) or lowType:find("induction", 1, true) then
+    return probeInductionPort(name, wrapped, methods)
+  end
+  if name == "fusionReactorLogicAdapter_0" or lowName:find("fusionreactorlogicadapter", 1, true) then
+    return probeFusionLogicAdapter(name, wrapped, methods)
+  end
+  if name == "mekanismgenerators:fusion_reactor_controller_3" then
+    return probeFusionControllerInventory(name, wrapped, methods)
+  end
+  return {}, { attempted = 0, ok = 0, failed = 0, skippedDangerous = 0, skippedNeedsArgs = 0 }
+end
+
+local function mergeProbeStats(base, extra)
+  return {
+    attempted = (base and base.attempted or 0) + (extra and extra.attempted or 0),
+    ok = (base and base.ok or 0) + (extra and extra.ok or 0),
+    failed = (base and base.failed or 0) + (extra and extra.failed or 0),
+    skippedDangerous = (base and base.skippedDangerous or 0) + (extra and extra.skippedDangerous or 0),
+    skippedNeedsArgs = (base and base.skippedNeedsArgs or 0) + (extra and extra.skippedNeedsArgs or 0),
+  }
+end
+
 local function probeDeviceMethods(name, pType, wrapped, methods)
   local probes, skippedDangerous, skippedNeedsArgs = {}, {}, {}
   local stats = { attempted = 0, ok = 0, failed = 0, skippedDangerous = 0, skippedNeedsArgs = 0 }
@@ -563,14 +673,7 @@ local function probeDeviceMethods(name, pType, wrapped, methods)
     return probes, { skippedDangerous = skippedDangerous, skippedNeedsArgs = skippedNeedsArgs, wrapError = true }, stats
   end
 
-  local methodSet = {}
-  for _, methodName in ipairs(methods or {}) do methodSet[methodName] = true end
-
-  local function register(callKey, result)
-    probes[callKey] = result
-    stats.attempted = stats.attempted + 1
-    if result.ok then stats.ok = stats.ok + 1 else stats.failed = stats.failed + 1 end
-  end
+  local methodSet = makeMethodSet(methods)
 
   for _, methodName in ipairs(methods or {}) do
     local skip, reason = shouldSkipMethod(methodName)
@@ -578,8 +681,7 @@ local function probeDeviceMethods(name, pType, wrapped, methods)
       skippedDangerous[methodName] = reason
       stats.skippedDangerous = stats.skippedDangerous + 1
     elseif isSafeProbeMethod(methodName) and not METHODS_REQUIRING_PROFILES[methodName] then
-      local callKey, result = probeCall(wrapped, methodName, methodName)
-      register(callKey, result)
+      registerProbeCall(probes, stats, wrapped, methodName, methodName)
     elseif METHODS_REQUIRING_PROFILES[methodName] then
       skippedNeedsArgs[methodName] = "profile_required"
       stats.skippedNeedsArgs = stats.skippedNeedsArgs + 1
@@ -588,24 +690,24 @@ local function probeDeviceMethods(name, pType, wrapped, methods)
 
   if methodSet.getAnalogInput then
     skippedNeedsArgs.getAnalogInput = nil
-    for _, side in ipairs(SIDE_LIST) do register(probeCall(wrapped, "getAnalogInput", "getAnalogInput(" .. side .. ")", side)) end
+    for _, side in ipairs(SIDE_LIST) do registerProbeCall(probes, stats, wrapped, "getAnalogInput", "getAnalogInput(" .. side .. ")", side) end
   end
   if methodSet.getAnalogOutput then
     skippedNeedsArgs.getAnalogOutput = nil
-    for _, side in ipairs(SIDE_LIST) do register(probeCall(wrapped, "getAnalogOutput", "getAnalogOutput(" .. side .. ")", side)) end
+    for _, side in ipairs(SIDE_LIST) do registerProbeCall(probes, stats, wrapped, "getAnalogOutput", "getAnalogOutput(" .. side .. ")", side) end
   end
   if methodSet.getInput then
     skippedNeedsArgs.getInput = nil
-    for _, side in ipairs(SIDE_LIST) do register(probeCall(wrapped, "getInput", "getInput(" .. side .. ")", side)) end
+    for _, side in ipairs(SIDE_LIST) do registerProbeCall(probes, stats, wrapped, "getInput", "getInput(" .. side .. ")", side) end
   end
   if methodSet.getOutput then
     skippedNeedsArgs.getOutput = nil
-    for _, side in ipairs(SIDE_LIST) do register(probeCall(wrapped, "getOutput", "getOutput(" .. side .. ")", side)) end
+    for _, side in ipairs(SIDE_LIST) do registerProbeCall(probes, stats, wrapped, "getOutput", "getOutput(" .. side .. ")", side) end
   end
   if methodSet.getTypeRemote and probes.getNamesRemote and probes.getNamesRemote.ok and type(probes.getNamesRemote.values[1]) == "table" then
     skippedNeedsArgs.getTypeRemote = nil
     for _, remoteName in ipairs(probes.getNamesRemote.values[1]) do
-      register(probeCall(wrapped, "getTypeRemote", "getTypeRemote(" .. tostring(remoteName) .. ")", remoteName))
+      registerProbeCall(probes, stats, wrapped, "getTypeRemote", "getTypeRemote(" .. tostring(remoteName) .. ")", remoteName)
     end
   end
   if methodSet.getItemDetail and probes.list and probes.list.ok and type(probes.list.values[1]) == "table" then
@@ -614,7 +716,7 @@ local function probeDeviceMethods(name, pType, wrapped, methods)
     for _, slot in ipairs(slots) do
       count = count + 1
       if count > 12 then break end
-      register(probeCall(wrapped, "getItemDetail", "getItemDetail(" .. tostring(slot) .. ")", slot))
+      registerProbeCall(probes, stats, wrapped, "getItemDetail", "getItemDetail(" .. tostring(slot) .. ")", slot)
     end
   end
 
@@ -747,7 +849,9 @@ local function buildAllDevicesDetailed(data)
     local alias = getAlias(name)
     local suggestedRole = getSuggestedRole(name, pType, methods, readerMap[name] and readerMap[name].role or nil)
     local summary, raw = getDeviceSummaryByType(name, pType, wrapped, methods, readerMap)
-    local probes, probeMeta, probeStats = probeDeviceMethods(name, pType, wrapped, methods)
+    local genericProbes, probeMeta, genericProbeStats = probeDeviceMethods(name, pType, wrapped, methods)
+    local specializedProbes, specializedProbeStats = getSpecializedProbes(name, pType, wrapped, methods)
+    local probeStats = mergeProbeStats(genericProbeStats, specializedProbeStats)
     summary.probeCalls = probeStats.attempted
     summary.probeOk = probeStats.ok
     summary.probeFailed = probeStats.failed
@@ -761,7 +865,10 @@ local function buildAllDevicesDetailed(data)
       suggestedRole = suggestedRole,
       methods = methods,
       wrapped = wrapped ~= nil,
-      probes = probes,
+      probes = {
+        generic = genericProbes,
+        specialized = specializedProbes,
+      },
       probeMeta = probeMeta,
       probeStats = probeStats,
       summary = summary,
@@ -1375,12 +1482,22 @@ local function buildFormattedReport(data)
         local summaryDump = flattenTable(d.summary, 0, nil, nil, { maxDepth = config.maxFlattenDepth, maxLines = 60 })
         if #summaryDump == 0 then table.insert(out, "- (none)") else for _, line in ipairs(summaryDump) do table.insert(out, "- " .. line) end end
         table.insert(out, "Probes:")
-        local probeKeys = sortedKeys(d.probes or {})
-        if #probeKeys == 0 then
-          table.insert(out, "- (none)")
+        local genericProbeKeys = sortedKeys(d.probes and d.probes.generic or {})
+        if #genericProbeKeys == 0 then
+          table.insert(out, "- Generic: (none)")
         else
-          for _, callKey in ipairs(probeKeys) do
-            table.insert(out, "- " .. callKey .. " -> " .. summarizeProbeResult(d.probes[callKey]))
+          table.insert(out, "- Generic:")
+          for _, callKey in ipairs(genericProbeKeys) do
+            table.insert(out, "  - " .. callKey .. " -> " .. summarizeProbeResult(d.probes.generic[callKey]))
+          end
+        end
+        local specializedProbeKeys = sortedKeys(d.probes and d.probes.specialized or {})
+        if #specializedProbeKeys == 0 then
+          table.insert(out, "- Specialized: (none)")
+        else
+          table.insert(out, "- Specialized:")
+          for _, callKey in ipairs(specializedProbeKeys) do
+            table.insert(out, "  - " .. callKey .. " -> " .. summarizeProbeResult(d.probes.specialized[callKey]))
           end
         end
         local skippedDangerous = sortedKeys(d.probeMeta and d.probeMeta.skippedDangerous or {})
