@@ -2269,11 +2269,11 @@ local function fullAuto()
   updateAlerts()
 end
 
-local function getHitboxBucket(source)
+function getHitboxBucket(source)
   return source == "monitor" and touchHitboxes.monitor or touchHitboxes.terminal
 end
 
-local function clearHitboxes(source)
+function clearHitboxes(source)
   if source then
     local bucket = getHitboxBucket(source)
     for i = #bucket, 1, -1 do bucket[i] = nil end
@@ -2283,7 +2283,7 @@ local function clearHitboxes(source)
   clearHitboxes("monitor")
 end
 
-local function addHitbox(source, id, x1, y1, x2, y2, action)
+function addHitbox(source, id, x1, y1, x2, y2, action)
   if type(action) ~= "function" then return end
   local bx1 = math.floor(math.min(x1, x2))
   local by1 = math.floor(math.min(y1, y2))
@@ -2300,15 +2300,15 @@ local function addHitbox(source, id, x1, y1, x2, y2, action)
   }
 end
 
-local function isInsideBox(x, y, box)
+function isInsideBox(x, y, box)
   return x >= box.x1 and x <= box.x2 and y >= box.y1 and y <= box.y2
 end
 
-local function setButtonPressed(source, id)
+function setButtonPressed(source, id)
   pressedButtons[source .. ":" .. id] = os.clock() + pressedEffectDuration
 end
 
-local function isButtonPressed(source, id)
+function isButtonPressed(source, id)
   local key = source .. ":" .. id
   local untilTs = pressedButtons[key]
   if not untilTs then return false end
@@ -2317,7 +2317,7 @@ local function isButtonPressed(source, id)
   return false
 end
 
-local function addButton(id, x, y, w, h, label, bg, fg, action, opts)
+function addButton(id, x, y, w, h, label, bg, fg, action, opts)
   opts = opts or {}
   local width = math.max(6, w)
   local height = math.max(3, h or (opts.big and 5 or 4))
@@ -2364,7 +2364,7 @@ local function addButton(id, x, y, w, h, label, bg, fg, action, opts)
   }
 end
 
-local function resolveButtonStyle(button)
+function resolveButtonStyle(button)
   if button.style and styles.button[button.style] then
     return styles.button[button.style]
   end
@@ -2378,11 +2378,11 @@ local function resolveButtonStyle(button)
   return styles.button.secondary
 end
 
-local function isTabButton(button)
+function isTabButton(button)
   return type(button.id) == "string" and string.sub(button.id, 1, 4) == "view"
 end
 
-local function drawButtonLabel(button, textColor, faceColor, isPressed)
+function drawButtonLabel(button, textColor, faceColor, isPressed)
   local textOffset = isPressed and 1 or 0
   local lx = button.x + math.max(1, math.floor((button.w - #button.label) / 2)) + textOffset
   local ly = button.y + math.floor((button.h - 1) / 2) + textOffset
@@ -2391,7 +2391,7 @@ local function drawButtonLabel(button, textColor, faceColor, isPressed)
   writeAt(lx, ly, button.label, textColor or button.fg, faceColor)
 end
 
-local function drawButtonSprite(button, style)
+function drawButtonSprite(button, style)
   local skin = style or resolveButtonStyle(button)
   local trim = skin.trim or skin.rimLight
   ui.fill(button.x, button.y, button.w, button.h, skin.face)
@@ -2408,21 +2408,21 @@ local function drawButtonSprite(button, style)
   return skin.face, skin.text
 end
 
-local function drawButtonPressedSprite(button, style)
+function drawButtonPressedSprite(button, style)
   local skin = style or resolveButtonStyle(button)
   local pressed = { face = UI_PALETTE.buttonPressed, rimLight = skin.rimLight, rimDark = skin.rimDark, trim = skin.face, text = skin.text }
   return drawButtonSprite(button, pressed)
 end
 
-local function drawButtonDisabledSprite(button)
+function drawButtonDisabledSprite(button)
   return drawButtonSprite(button, styles.button.disabled)
 end
 
-local function drawButtonActiveSprite(button, style)
+function drawButtonActiveSprite(button, style)
   return drawButtonSprite(button, style or resolveButtonStyle(button))
 end
 
-local function drawTabSprite(x, y, w, h, label, isActive, isPressed)
+function drawTabSprite(x, y, w, h, label, isActive, isPressed)
   local base = isActive and UI_PALETTE.buttonActive or UI_PALETTE.bgElevated
   local top = isPressed and UI_PALETTE.frameDim or (isActive and UI_PALETTE.textMain or UI_PALETTE.frameOuter)
   local bottom = isActive and UI_PALETTE.frameInner or UI_PALETTE.frameDim
@@ -2436,28 +2436,28 @@ local function drawTabSprite(x, y, w, h, label, isActive, isPressed)
   ui.write(x + 1, textY, shortText(label, math.max(1, w - 2)), C.text, base)
 end
 
-local function drawTabBar(button, isPressed)
+function drawTabBar(button, isPressed)
   local isActive = button.bg == C.btnOn
   drawTabSprite(button.x, button.y, button.w, button.h, button.label, isActive, isPressed)
   return button.bg, C.text
 end
 
-local function drawFuelButton(button, isPressed)
+function drawFuelButton(button, isPressed)
   local style = resolveButtonStyle(button)
   return isPressed and drawButtonPressedSprite(button, style) or drawButtonActiveSprite(button, style)
 end
 
-local function drawPrimaryButton(button, isPressed)
+function drawPrimaryButton(button, isPressed)
   local style = resolveButtonStyle(button)
   return isPressed and drawButtonPressedSprite(button, style) or drawButtonActiveSprite(button, style)
 end
 
-local function drawActionButton(button, isPressed)
+function drawActionButton(button, isPressed)
   local style = resolveButtonStyle(button)
   return isPressed and drawButtonPressedSprite(button, style) or drawButtonActiveSprite(button, style)
 end
 
-local function drawControlButton(button, isPressed)
+function drawControlButton(button, isPressed)
   if button.disabled then return drawButtonDisabledSprite(button) end
   if isTabButton(button) then return drawTabBar(button, isPressed) end
   if button.bg == C.tritium or button.bg == C.deuterium or button.bg == C.dtFuel then
@@ -2469,22 +2469,22 @@ local function drawControlButton(button, isPressed)
   return drawPrimaryButton(button, isPressed)
 end
 
-local function drawStatusBarSprite(x, y, w, title, value, tone)
+function drawStatusBarSprite(x, y, w, title, value, tone)
   ui.hline(x, y, w, UI_PALETTE.bgElevated)
   ui.write(x + 1, y, shortText(title .. ":", math.max(1, w - 2)), C.dim, UI_PALETTE.bgElevated)
   local txt = shortText(value, math.max(1, w - #title - 4))
   ui.write(x + math.max(2, w - #txt - 1), y, txt, tone or C.info, UI_PALETTE.bgElevated)
 end
 
-local function drawRaisedButton(button)
+function drawRaisedButton(button)
   return drawButtonActiveSprite(button)
 end
 
-local function drawPressedButton(button)
+function drawPressedButton(button)
   return drawButtonPressedSprite(button)
 end
 
-local function drawButton(source, button)
+function drawButton(source, button)
   local isPressed = (not button.disabled) and isButtonPressed(source, button.id)
   local faceColor, textColor = drawControlButton(button, isPressed)
   if not isTabButton(button) then
@@ -2511,18 +2511,18 @@ local function drawButton(source, button)
   end
 end
 
-local function drawBigButton(id, x, y, w, label, bg, action)
+function drawBigButton(id, x, y, w, label, bg, action)
   addButton(id, x, y, w, 5, label, bg, C.btnText, action, { big = true })
 end
 
-local function addRowButton(id, x, y, w, h, label, bg, fg, action)
+function addRowButton(id, x, y, w, h, label, bg, fg, action)
   addButton(id, x, y, w, h, label, bg, fg, action, {
     kind = "row",
     hitbox = { x1 = x, y1 = y, x2 = x + w - 1, y2 = y + h - 1 },
   })
 end
 
-local function drawHitboxBox(hit)
+function drawHitboxBox(hit)
   for xx = hit.x1, hit.x2 do
     writeAt(xx, hit.y1, " ", C.warn, colors.brown)
     writeAt(xx, hit.y2, " ", C.warn, colors.brown)
@@ -2533,12 +2533,12 @@ local function drawHitboxBox(hit)
   end
 end
 
-local function drawHitboxLabel(hit)
+function drawHitboxLabel(hit)
   local label = shortText(hit.id or "btn", math.max(3, hit.x2 - hit.x1 + 1))
   writeAt(hit.x1, hit.y1, label, C.text, colors.cyan)
 end
 
-local function drawHitboxDebugOverlay(source)
+function drawHitboxDebugOverlay(source)
   if not state.debugHitboxes then return end
   local bucket = getHitboxBucket(source)
   for _, hit in ipairs(bucket) do
@@ -2547,7 +2547,7 @@ local function drawHitboxDebugOverlay(source)
   end
 end
 
-local function startMonitorSelection()
+function startMonitorSelection()
   state.choosingMonitor = true
   state.monitorList = getMonitorCandidates()
   state.monitorPage = 1
@@ -2555,12 +2555,12 @@ local function startMonitorSelection()
   state.lastAction = "Selection moniteur"
 end
 
-local function stopMonitorSelection()
+function stopMonitorSelection()
   state.choosingMonitor = false
   state.uiDrawn = false
 end
 
-local function selectMonitorByIndex(index)
+function selectMonitorByIndex(index)
   local m = state.monitorList[index]
   if not m then return end
   saveSelectedMonitorName(m.name)
@@ -2570,104 +2570,93 @@ local function selectMonitorByIndex(index)
   pushEvent("Monitor changed")
 end
 
-local function buildButtons(layout)
-  buttons = {}
-
-  if state.choosingMonitor then
-    local boxW = clamp(layout.width - 6, 24, 60)
-    local x = math.floor((layout.width - boxW) / 2) + 1
-    local y0 = layout.top + 4
-    for i = 1, 4 do
-      local rowY = y0 + (i - 1) * 3
-      local rowAction = function() selectMonitorByIndex(i) end
-      addRowButton("mrow" .. i, x + 1, rowY, boxW - 2, 2, "", C.panelDark, C.text, rowAction)
-      addButton("m" .. i, x + boxW - 8, rowY, 6, 2, tostring(i), C.btnAction, nil, rowAction, { kind = "small" })
-    end
-    addButton("cancelMon", x + 1, layout.bottom - 4, boxW - 2, 4, "ANNULER", C.bad, nil, function() stopMonitorSelection() end)
-    return
+function buildMonitorSelectionButtons(layout)
+  local boxW = clamp(layout.width - 6, 24, 60)
+  local x = math.floor((layout.width - boxW) / 2) + 1
+  local y0 = layout.top + 4
+  for i = 1, 4 do
+    local rowY = y0 + (i - 1) * 3
+    local rowAction = function() selectMonitorByIndex(i) end
+    addRowButton("mrow" .. i, x + 1, rowY, boxW - 2, 2, "", C.panelDark, C.text, rowAction)
+    addButton("m" .. i, x + boxW - 8, rowY, 6, 2, tostring(i), C.btnAction, nil, rowAction, { kind = "small" })
   end
+  addButton("cancelMon", x + 1, layout.bottom - 4, boxW - 2, 4, "ANNULER", C.bad, nil, function() stopMonitorSelection() end)
+end
 
-  local ctrl = layout.right or layout.left
-  local bx = ctrl.x + 2
-  local bw = math.max(12, ctrl.w - 4)
-  local by = ctrl.y + 10
-  local bh = (layout.mode == "compact") and 4 or 5
-  local bGap = 2
-
+function buildNavigationButtons(ctrl, bx, bw)
   local navW = math.max(6, math.floor(bw / 5))
   addButton("viewSup", bx, ctrl.y + 1, navW, 4, "SUP", state.currentView == "supervision" and C.btnOn or C.panelMid, nil, function() state.currentView = "supervision"; pushEvent("View supervision") end)
   addButton("viewDiag", bx + navW, ctrl.y + 1, navW, 4, "DIAG", state.currentView == "diagnostic" and C.btnOn or C.panelMid, nil, function() state.currentView = "diagnostic"; pushEvent("View diagnostic") end)
   addButton("viewMan", bx + (navW * 2), ctrl.y + 1, navW, 4, "MAN", state.currentView == "manual" and C.btnOn or C.panelMid, nil, function() state.currentView = "manual"; pushEvent("View manual") end)
   addButton("viewInd", bx + (navW * 3), ctrl.y + 1, navW, 4, "IND", state.currentView == "induction" and C.btnOn or C.panelMid, nil, function() state.currentView = "induction"; pushEvent("View induction") end)
   addButton("viewUpd", bx + (navW * 4), ctrl.y + 1, bw - (navW * 4), 4, "UPD", state.currentView == "update" and C.btnOn or C.panelMid, nil, function() state.currentView = "update"; pushEvent("View update") end)
+end
 
+function buildRefreshButton(ctrl, bx, bw)
   addButton("refreshNow", bx, ctrl.y + 6, bw, 4, "REFRESH", C.btnAction, nil, function()
     refreshAll()
     state.lastAction = "Refresh"
   end)
+end
 
-  if state.currentView == "update" then
-    local uY = by
-    addButton("updCheck", bx, uY, bw, 4, "CHECK", C.btnAction, nil, function()
-      local ok, err = pcall(checkForUpdate)
-      if not ok then
-        state.update.lastError = tostring(err)
-        setUpdateState("FAILED", "Check crashed", "No apply")
-        pushEvent("Update failed")
-      end
-    end)
-    addButton("updApply", bx, uY + 5, bw, 4, "UPDATE", state.update.available and C.warn or C.inactive, nil, function()
-      local ok, result, err = pcall(performUpdate)
-      if not ok then
-        state.update.lastError = tostring(result)
-        setUpdateState("FAILED", nil, "Update crashed")
-        pushEvent("Update failed")
-      elseif result == false then
-        state.update.lastError = tostring(err or "No update available")
-        state.lastAction = "No update"
-      end
-    end)
-    addButton("updDebug", bx, uY + 10, bw, 4, state.debugHitboxes and "DEBUG ON" or "DEBUG OFF", state.debugHitboxes and C.info or C.panelMid, nil, function()
-      state.debugHitboxes = not state.debugHitboxes
-      state.lastAction = state.debugHitboxes and "Hitbox debug ON" or "Hitbox debug OFF"
-      pushEvent(state.lastAction)
-    end)
-    local splitGap = 1
-    local splitW = math.max(8, math.floor((bw - splitGap) / 2))
-    addButton("updRollback", bx, uY + 15, splitW, 4, "ROLLBACK", fs.exists(UPDATE_BACKUP_FILE) and C.bad or C.inactive, nil, function()
-      local ok, err = pcall(rollbackUpdate)
-      if not ok then
-        state.update.lastError = tostring(err)
-        setUpdateState("FAILED", nil, "Rollback crashed")
-        pushEvent("Update failed")
-      end
-    end)
-    addButton("monitor", bx + splitW + splitGap, uY + 15, bw - splitW - splitGap, 4, "MONITOR", C.btnWarn, nil, function() startMonitorSelection() end)
-    return
-  end
+function buildUpdateButtons(bx, bw, baseY)
+  addButton("updCheck", bx, baseY, bw, 4, "CHECK", C.btnAction, nil, function()
+    local ok, err = pcall(checkForUpdate)
+    if not ok then
+      state.update.lastError = tostring(err)
+      setUpdateState("FAILED", "Check crashed", "No apply")
+      pushEvent("Update failed")
+    end
+  end)
 
-  if state.currentView == "diagnostic" or state.currentView == "induction" then
-    drawBigButton("monitor", bx, ctrl.y + 12, bw, "MONITOR", C.btnWarn, function() startMonitorSelection() end)
-    return
-  end
+  addButton("updApply", bx, baseY + 5, bw, 4, "UPDATE", state.update.available and C.warn or C.inactive, nil, function()
+    local ok, result, err = pcall(performUpdate)
+    if not ok then
+      state.update.lastError = tostring(result)
+      setUpdateState("FAILED", nil, "Update crashed")
+      pushEvent("Update failed")
+    elseif result == false then
+      state.update.lastError = tostring(err or "No update available")
+      state.lastAction = "No update"
+    end
+  end)
 
-  if state.currentView == "manual" then
-    local mY = by
-    drawBigButton("manualStart", bx, mY, bw, "DEMARRAGE", canIgnite() and C.warn or C.inactive, function() startReactorSequence() end)
-    drawBigButton("manualStop", bx, mY + 7, bw, "ARRET", C.bad, function() stopReactorSequence("ARRET DEMANDE") end)
-    addButton("manualT", bx, mY + 14, bw, 5, "T LOCK", state.tOpen and C.tritium or C.inactive, nil, function() openTritium(not state.tOpen) end)
-    addButton("manualDT", bx, mY + 20, bw, 5, "DT LOCK", state.dtOpen and C.dtFuel or C.inactive, nil, function()
-      local nextState = not state.dtOpen
-      openDTFuel(nextState)
-      if nextState then openSeparatedGases(false) end
-    end)
-    addButton("manualD", bx, mY + 26, bw, 5, "D LOCK", state.dOpen and C.deuterium or C.inactive, nil, function() openDeuterium(not state.dOpen) end)
-    addButton("manualPulse", bx, mY + 32, bw, 5, "PULSE LAS", C.warn, nil, function() fireLaser() end)
-    addButton("monitor", bx, mY + 38, bw, 4, "MONITOR", C.btnWarn, nil, function() startMonitorSelection() end)
-    addButton("manualBack", bx, mY + 43, bw, 4, "RETOUR SUP", C.btnAction, nil, function() state.currentView = "supervision"; pushEvent("View supervision") end)
-    return
-  end
+  addButton("updDebug", bx, baseY + 10, bw, 4, state.debugHitboxes and "DEBUG ON" or "DEBUG OFF", state.debugHitboxes and C.info or C.panelMid, nil, function()
+    state.debugHitboxes = not state.debugHitboxes
+    state.lastAction = state.debugHitboxes and "Hitbox debug ON" or "Hitbox debug OFF"
+    pushEvent(state.lastAction)
+  end)
 
+  local splitGap = 1
+  local splitW = math.max(8, math.floor((bw - splitGap) / 2))
+  addButton("updRollback", bx, baseY + 15, splitW, 4, "ROLLBACK", fs.exists(UPDATE_BACKUP_FILE) and C.bad or C.inactive, nil, function()
+    local ok, err = pcall(rollbackUpdate)
+    if not ok then
+      state.update.lastError = tostring(err)
+      setUpdateState("FAILED", nil, "Rollback crashed")
+      pushEvent("Update failed")
+    end
+  end)
+
+  addButton("monitor", bx + splitW + splitGap, baseY + 15, bw - splitW - splitGap, 4, "MONITOR", C.btnWarn, nil, function() startMonitorSelection() end)
+end
+
+function buildManualButtons(bx, bw, baseY)
+  drawBigButton("manualStart", bx, baseY, bw, "DEMARRAGE", canIgnite() and C.warn or C.inactive, function() startReactorSequence() end)
+  drawBigButton("manualStop", bx, baseY + 7, bw, "ARRET", C.bad, function() stopReactorSequence("ARRET DEMANDE") end)
+  addButton("manualT", bx, baseY + 14, bw, 5, "T LOCK", state.tOpen and C.tritium or C.inactive, nil, function() openTritium(not state.tOpen) end)
+  addButton("manualDT", bx, baseY + 20, bw, 5, "DT LOCK", state.dtOpen and C.dtFuel or C.inactive, nil, function()
+    local nextState = not state.dtOpen
+    openDTFuel(nextState)
+    if nextState then openSeparatedGases(false) end
+  end)
+  addButton("manualD", bx, baseY + 26, bw, 5, "D LOCK", state.dOpen and C.deuterium or C.inactive, nil, function() openDeuterium(not state.dOpen) end)
+  addButton("manualPulse", bx, baseY + 32, bw, 5, "PULSE LAS", C.warn, nil, function() fireLaser() end)
+  addButton("monitor", bx, baseY + 38, bw, 4, "MONITOR", C.btnWarn, nil, function() startMonitorSelection() end)
+  addButton("manualBack", bx, baseY + 43, bw, 4, "RETOUR SUP", C.btnAction, nil, function() state.currentView = "supervision"; pushEvent("View supervision") end)
+end
+
+function buildSupervisorCoreButtons(layout, bx, by, bw, bh, bGap)
   addButton("master", bx, by, bw, bh, "MASTER", state.autoMaster and C.btnOn or C.btnOff, nil, function()
     state.autoMaster = not state.autoMaster
     if not state.autoMaster then
@@ -2697,37 +2686,72 @@ local function buildButtons(layout)
   addButton("arret", bx, by + (bh + bGap) * 3 + 12, bw, 4, "ARRET", C.bad, nil, function() stopReactorSequence("ARRET DEMANDE") end)
 
   local center = layout.center
-  if center and layout.mode ~= "compact" and state.currentView == "supervision" then
-    local innerX = center.x + 2
-    local innerW = center.w - 4
-    local barY = center.y + center.h - 5
-    local btnH = 5
-    local gap = 3
-    local btnW = math.max(10, math.floor((innerW - (gap * 2)) / 3))
-    local totalW = (btnW * 3) + (gap * 2)
-    local startX = innerX + math.max(0, math.floor((innerW - totalW) / 2))
+  if not center or layout.mode == "compact" or state.currentView ~= "supervision" then return end
 
-    addButton("lock_t", startX, barY, btnW, btnH, "T LOCK", state.tOpen and C.tritium or C.inactive, C.btnText, function()
-      openTritium(not state.tOpen)
-    end)
+  local innerX = center.x + 2
+  local innerW = center.w - 4
+  local barY = center.y + center.h - 5
+  local btnH = 5
+  local gap = 3
+  local btnW = math.max(10, math.floor((innerW - (gap * 2)) / 3))
+  local totalW = (btnW * 3) + (gap * 2)
+  local startX = innerX + math.max(0, math.floor((innerW - totalW) / 2))
 
-    addButton("lock_dt", startX + btnW + gap, barY, btnW, btnH, "DT LOCK", state.dtOpen and C.dtFuel or C.inactive, C.btnText, function()
-      local nextState = not state.dtOpen
-      openDTFuel(nextState)
-      if nextState then openSeparatedGases(false) end
-    end)
+  addButton("lock_t", startX, barY, btnW, btnH, "T LOCK", state.tOpen and C.tritium or C.inactive, C.btnText, function()
+    openTritium(not state.tOpen)
+  end)
 
-    addButton("lock_d", startX + (btnW + gap) * 2, barY, btnW, btnH, "D LOCK", state.dOpen and C.deuterium or C.inactive, C.btnText, function()
-      openDeuterium(not state.dOpen)
-    end)
-  end
+  addButton("lock_dt", startX + btnW + gap, barY, btnW, btnH, "DT LOCK", state.dtOpen and C.dtFuel or C.inactive, C.btnText, function()
+    local nextState = not state.dtOpen
+    openDTFuel(nextState)
+    if nextState then openSeparatedGases(false) end
+  end)
+
+  addButton("lock_d", startX + (btnW + gap) * 2, barY, btnW, btnH, "D LOCK", state.dOpen and C.deuterium or C.inactive, C.btnText, function()
+    openDeuterium(not state.dOpen)
+  end)
 end
 
-local function getCurrentInputSource()
+function buildButtons(layout)
+  buttons = {}
+  if state.choosingMonitor then
+    buildMonitorSelectionButtons(layout)
+    return
+  end
+
+  local ctrl = layout.right or layout.left
+  local bx = ctrl.x + 2
+  local bw = math.max(12, ctrl.w - 4)
+  local by = ctrl.y + 10
+  local bh = (layout.mode == "compact") and 4 or 5
+  local bGap = 2
+
+  buildNavigationButtons(ctrl, bx, bw)
+  buildRefreshButton(ctrl, bx, bw)
+
+  if state.currentView == "update" then
+    buildUpdateButtons(bx, bw, by)
+    return
+  end
+
+  if state.currentView == "diagnostic" or state.currentView == "induction" then
+    drawBigButton("monitor", bx, ctrl.y + 12, bw, "MONITOR", C.btnWarn, function() startMonitorSelection() end)
+    return
+  end
+
+  if state.currentView == "manual" then
+    buildManualButtons(bx, bw, by)
+    return
+  end
+
+  buildSupervisorCoreButtons(layout, bx, by, bw, bh, bGap)
+end
+
+function getCurrentInputSource()
   return term.current() == nativeTerm and "terminal" or "monitor"
 end
 
-local function drawButtons(source)
+function drawButtons(source)
   clearHitboxes(source)
   for _, b in ipairs(buttons) do
     drawButton(source, b)
@@ -2735,7 +2759,7 @@ local function drawButtons(source)
   drawHitboxDebugOverlay(source)
 end
 
-local function handleClick(x, y, source)
+function handleClick(x, y, source)
   local bucket = getHitboxBucket(source)
   for i = #bucket, 1, -1 do
     local hit = bucket[i]
@@ -2750,7 +2774,7 @@ end
 
 
 
-local function inductionStatus()
+function inductionStatus()
   if not state.inductionPresent then return "OFFLINE", C.bad end
   if not state.inductionFormed then return "UNFORMED", C.warn end
 
@@ -2767,11 +2791,11 @@ local function inductionStatus()
   return "ONLINE", C.info
 end
 
-local function getInductionFillRatio()
+function getInductionFillRatio()
   return CoreInduction.getFillRatio(state)
 end
 
-local function drawMonitorSelection(layout)
+function drawMonitorSelection(layout)
   term.setBackgroundColor(C.bg)
   term.setTextColor(C.text)
   term.clear()
@@ -2801,7 +2825,7 @@ local function drawMonitorSelection(layout)
   drawFooter(layout)
 end
 
-local function drawIoPanel(x, y, w, h)
+function drawIoPanel(x, y, w, h)
   if h < 4 then return end
   drawBox(x, y, w, h, "REAL I/O", C.border)
   local rx = x + 2
@@ -2820,7 +2844,7 @@ local function drawIoPanel(x, y, w, h)
 
 end
 
-local function drawStatusPanel(panel)
+function drawStatusPanel(panel)
   drawBox(panel.x, panel.y, panel.w, panel.h, "REACTOR STATUS", C.border)
   local x = panel.x + 2
   local y = panel.y + 1
@@ -2884,7 +2908,7 @@ local function drawStatusPanel(panel)
     writeAt(x + 2, y4 + i, shortText(logs[i], w - 4), C.info, C.panelDark)
   end
 end
-local function drawControlPanel(panel, layout)
+function drawControlPanel(panel, layout)
   drawBox(panel.x, panel.y, panel.w, panel.h, state.currentView == "manual" and "MANUAL CONTROL" or (state.currentView == "update" and "UPDATE COMMAND" or "CONTROL SYSTEM"), C.border)
   local x = panel.x + 2
   local w = panel.w - 3
@@ -2910,7 +2934,7 @@ local function drawControlPanel(panel, layout)
   drawIoPanel(x, yIo, w, ioH)
 end
 
-local function drawDiagnosticView(layout)
+function drawDiagnosticView(layout)
   local left = layout.left
   local center = layout.center
   drawStatusPanel(left)
@@ -2953,7 +2977,7 @@ local function drawDiagnosticView(layout)
   drawControlPanel(layout.right or layout.left, layout)
 end
 
-local function inductionFillTone(status, pulse)
+function inductionFillTone(status, pulse)
   if status == "CHARGING" then return pulse and C.info or C.energy end
   if status == "DISCHARGING" then return pulse and C.warn or C.energy end
   if status == "LOW" or status == "EMPTY" then return pulse and C.bad or C.warn end
@@ -2961,7 +2985,7 @@ local function inductionFillTone(status, pulse)
   return C.energy
 end
 
-local function inductionDiagramGeometry(x, y, w, h)
+function inductionDiagramGeometry(x, y, w, h)
   local geo = {
     ix = x + 2,
     iy = y + 2,
@@ -2995,7 +3019,7 @@ local function inductionDiagramGeometry(x, y, w, h)
   return geo
 end
 
-local function drawInductionProfileBase(geo)
+function drawInductionProfileBase(geo)
   fillArea(geo.ix, geo.iy, geo.iw, geo.ih, C.panelDark)
   drawBox(geo.sx - 1, geo.sy - 1, geo.profileW + geo.capDepth + 2, geo.profileH + 2, "SIDE PROFILE", C.borderDim)
 
@@ -3009,7 +3033,7 @@ local function drawInductionProfileBase(geo)
   end
 end
 
-local function drawInductionProfileFill(geo, status, pulse, fillTone)
+function drawInductionProfileFill(geo, status, pulse, fillTone)
   local waveOffset = (status == "CHARGING" and pulse) and 1 or 0
   for i = 0, geo.fillRows - 1 do
     local yy = geo.ey - 1 - i
@@ -3027,7 +3051,7 @@ local function drawInductionProfileFill(geo, status, pulse, fillTone)
   end
 end
 
-local function drawInductionProfileDecor(geo, status)
+function drawInductionProfileDecor(geo, status)
   local cellDensity = clamp(math.floor((math.max(1, state.inductionCells) + 3) / 4), 1, 8)
   for i = 0, cellDensity - 1 do
     local yy = geo.sy + math.floor((i + 1) * geo.profileH / (cellDensity + 1))
@@ -3043,7 +3067,7 @@ local function drawInductionProfileDecor(geo, status)
   end
 end
 
-local function drawInductionDiagramInfo(x, y, w, h, geo, status, tone)
+function drawInductionDiagramInfo(x, y, w, h, geo, status, tone)
   writeAt(x + 2, y + 1, string.format("STATE %s", status), tone, C.panelDark)
   writeAt(geo.infoX, geo.sy + 1, string.format("FILL  %5.1f%%", state.inductionPct), C.energy, C.panelDark)
   writeAt(geo.infoX, geo.sy + 2, string.format("STORED %s", formatMJ(state.inductionEnergy)), C.text, C.panelDark)
@@ -3059,7 +3083,7 @@ local function drawInductionDiagramInfo(x, y, w, h, geo, status, tone)
   writeAt(x + 2, y + h - 2, shortText(string.format("CELLS %d | PROVIDERS %d | %dx%dx%d", state.inductionCells, state.inductionProviders, state.inductionLength, state.inductionWidth, state.inductionHeight), w - 4), C.dim, C.panelDark)
 end
 
-local function drawInductionDiagram(x, y, w, h)
+function drawInductionDiagram(x, y, w, h)
   drawBox(x, y, w, h, "INDUCTION MATRIX", C.border)
   if w < 34 or h < 16 then
     writeAt(x + 2, y + 2, "Schema matrix indisponible", C.dim, C.panelDark)
@@ -3077,7 +3101,7 @@ local function drawInductionDiagram(x, y, w, h)
   drawInductionDiagramInfo(x, y, w, h, geo, status, tone)
 end
 
-local function drawInductionView(layout)
+function drawInductionView(layout)
   local istat, statusTone = inductionStatus()
   local left = layout.left
   drawBox(left.x, left.y, left.w, left.h, "INDUCTION MATRIX", C.border)
@@ -3112,7 +3136,7 @@ local function drawInductionView(layout)
   end
 end
 
-local function drawManualView(layout)
+function drawManualView(layout)
   if layout.center then
     drawReactorDiagram(layout.center.x, layout.center.y, layout.center.w, layout.center.h)
   end
@@ -3120,7 +3144,7 @@ local function drawManualView(layout)
   drawControlPanel(layout.right or layout.left, layout)
 end
 
-local function drawSupervisionView(layout)
+function drawSupervisionView(layout)
   if layout.mode == "compact" then
     drawStatusPanel(layout.left)
     drawControlPanel(layout.right, layout)
@@ -3131,7 +3155,7 @@ local function drawSupervisionView(layout)
   drawControlPanel(layout.right, layout)
 end
 
-local function drawUpdateView(layout)
+function drawUpdateView(layout)
   local infoPanel
   local controlPanel
 
