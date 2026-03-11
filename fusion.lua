@@ -50,6 +50,16 @@ local CFG = {
 
 local CONFIG_FILE = "fusion_monitor.cfg"
 
+-- Configuration update GitHub
+local LOCAL_VERSION = "1.0.0"
+local UPDATE_ENABLED = true
+local UPDATE_REPO_RAW_BASE = "https://raw.githubusercontent.com/viper1331/fusion-vipercraft/main"
+local UPDATE_VERSION_URL = UPDATE_REPO_RAW_BASE .. "/fusion.version"
+local UPDATE_SCRIPT_URL = UPDATE_REPO_RAW_BASE .. "/fusion.lua"
+local UPDATE_SCRIPT_FILE = "fusion.lua"
+local UPDATE_BACKUP_FILE = "fusion.bak"
+local UPDATE_TEMP_FILE = "fusion.new"
+
 local nativeTerm = term.current()
 local buttons = {}
 local touchHitboxes = { terminal = {}, monitor = {} }
@@ -138,6 +148,20 @@ local state = {
   ignitionBlockers = {},
   eventLog = {},
   maxEventLog = 8,
+
+  update = {
+    localVersion = LOCAL_VERSION,
+    remoteVersion = "UNKNOWN",
+    status = UPDATE_ENABLED and "IDLE" or "DISABLED",
+    httpStatus = "UNKNOWN",
+    lastCheckResult = "Never",
+    lastApplyResult = "Never",
+    lastError = "",
+    available = false,
+    restartRequired = false,
+    downloaded = false,
+    lastCheckClock = 0,
+  },
 
   tick = 0,
 }
@@ -820,6 +844,288 @@ local function saveSelectedMonitorName(name)
   if not h then return end
   h.writeLine(name or "")
   h.close()
+end
+
+local function trimText(txt)
+  txt = tostring(txt or "")
+  return (txt:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+local function isHttpReady()
+  return type(http) == "table" and type(http.get) == "function"
+end
+
+local function setUpdateState(status, checkResult, applyResult)
+  state.update.status = status or state.update.status
+  if checkResult then state.update.lastCheckResult = checkResult end
+  if applyResult then state.update.lastApplyResult = applyResult end
+end
+
+local function httpGetText(url)
+  if not isHttpReady() then
+    state.update.httpStatus = "DISABLED"
+    return false, nil, "HTTP API disabled"
+  end
+
+  local ok, response = pcall(http.get, url)
+  if not ok or not response then
+    state.update.httpStatus = "FAIL"
+    return false, nil, "HTTP request failed"
+  end
+
+  local readOk, body = pcall(response.readAll)
+  pcall(response.close)
+
+  if not readOk then
+    state.update.httpStatus = "FAIL"
+    return false, nil, "Unable to read response"
+  end
+
+  if type(body) ~= "string" or #trimText(body) == 0 then
+    state.update.httpStatus = "FAIL"
+    return false, nil, "Empty response"
+  end
+
+  state.update.httpStatus = "OK"
+  return true, body, nil
+end
+
+local function parseVersion(version)
+  local parts = {}
+  for n in tostring(version or "0"):gmatch("%d+") do
+    parts[#parts + 1] = tonumber(n) or 0
+  end
+  if #parts == 0 then parts[1] = 0 end
+  return parts
+end
+
+local function compareVersions(localV, remoteV)
+  local a = parseVersion(localV)
+  local b = parseVersion(remoteV)
+  local count = math.max(#a, #b)
+
+  for i = 1, count do
+    local av = a[i] or 0
+    local bv = b[i] or 0
+    if bv > av then return 1 end
+    if bv < av then return -1 end
+  end
+  return 0
+end
+
+local function validateLuaScript(text)
+  if type(text) ~= "string" then return false, "Not a string" end
+  if #trimText(text) < 32 then return false, "Downloaded script is too short" end
+  if not contains(text, "local CFG") and not contains(text, "state") then
+    return false, "Invalid Lua signature"
+  end
+  return true, nil
+end
+
+local function writeTextFile(path, content)
+  local h = fs.open(path, "w")
+  if not h then return false, "Cannot open file for writing: " .. tostring(path) end
+  h.write(content)
+  h.close()
+  return true, nil
+end
+
+local function readTextFile(path)
+  if not fs.exists(path) then return false, nil, "File not found: " .. tostring(path) end
+  local h = fs.open(path, "r")
+  if not h then return false, nil, "Cannot open file: " .. tostring(path) end
+  local text = h.readAll()
+  h.close()
+  return true, text, nil
+end
+
+local function checkForUpdate()
+  state.update.lastError = ""
+  state.update.downloaded = false
+  pushEvent("Update check started")
+
+  if not UPDATE_ENABLED then
+    state.update.httpStatus = "DISABLED"
+    state.update.remoteVersion = "DISABLED"
+    state.update.available = false
+    setUpdateState("DISABLED", "Update disabled", nil)
+    return false, "Update disabled"
+  end
+
+  local ok, body, err = httpGetText(UPDATE_VERSION_URL)
+  if not ok then
+    state.update.remoteVersion = "UNKNOWN"
+    state.update.available = false
+    state.update.lastError = err or "Unknown network error"
+    setUpdateState("FAILED", "Check failed: " .. state.update.lastError, nil)
+    pushEvent("Update failed")
+    return false, state.update.lastError
+  end
+
+  local remoteVersion = trimText(body)
+  state.update.remoteVersion = remoteVersion
+  state.update.lastCheckClock = os.clock()
+  pushEvent("Remote version found " .. remoteVersion)
+
+  local cmp = compareVersions(state.update.localVersion, remoteVersion)
+  if cmp == 1 then
+    state.update.available = true
+    setUpdateState("UPDATE AVAILABLE", "Remote " .. remoteVersion .. " > local " .. state.update.localVersion, nil)
+    pushEvent("Update available")
+    return true, "Update available"
+  elseif cmp == 0 then
+    state.update.available = false
+    setUpdateState("UP TO DATE", "Local version is current", nil)
+    return true, "Up to date"
+  end
+
+  state.update.available = false
+  setUpdateState("AHEAD", "Local version is newer than remote", nil)
+  return true, "Local ahead"
+end
+
+local function downloadUpdate()
+  state.update.lastError = ""
+  if not UPDATE_ENABLED then
+    setUpdateState("DISABLED", nil, "Update disabled")
+    return false, "Update disabled"
+  end
+
+  setUpdateState("DOWNLOADING", nil, "Download started")
+  pushEvent("Download started")
+
+  local ok, body, err = httpGetText(UPDATE_SCRIPT_URL)
+  if not ok then
+    state.update.lastError = err or "Download failed"
+    setUpdateState("FAILED", nil, "Download failed: " .. state.update.lastError)
+    pushEvent("Update failed")
+    return false, state.update.lastError
+  end
+
+  local valid, reason = validateLuaScript(body)
+  if not valid then
+    state.update.lastError = reason or "Invalid update file"
+    setUpdateState("FAILED", nil, "Validation failed: " .. state.update.lastError)
+    pushEvent("Update failed")
+    return false, state.update.lastError
+  end
+
+  local writeOk, writeErr = writeTextFile(UPDATE_TEMP_FILE, body)
+  if not writeOk then
+    state.update.lastError = writeErr or "Temp write failed"
+    setUpdateState("FAILED", nil, "Temp file failed")
+    pushEvent("Update failed")
+    return false, state.update.lastError
+  end
+
+  state.update.downloaded = true
+  setUpdateState("DOWNLOADED", nil, "Download complete")
+  pushEvent("Download complete")
+  return true, nil
+end
+
+local function applyUpdate()
+  state.update.lastError = ""
+  if not fs.exists(UPDATE_TEMP_FILE) then
+    setUpdateState("FAILED", nil, "No downloaded update")
+    return false, "No downloaded update"
+  end
+
+  setUpdateState("APPLYING", nil, "Applying update")
+
+  local readNewOk, newText, readNewErr = readTextFile(UPDATE_TEMP_FILE)
+  if not readNewOk then
+    state.update.lastError = readNewErr or "Cannot read temp file"
+    setUpdateState("FAILED", nil, "Apply failed: " .. state.update.lastError)
+    pushEvent("Update failed")
+    return false, state.update.lastError
+  end
+
+  local valid, reason = validateLuaScript(newText)
+  if not valid then
+    state.update.lastError = reason or "Invalid update file"
+    setUpdateState("FAILED", nil, "Apply failed: invalid script")
+    pushEvent("Update failed")
+    return false, state.update.lastError
+  end
+
+  local readCurrentOk, currentText, readCurrentErr = readTextFile(UPDATE_SCRIPT_FILE)
+  if not readCurrentOk then
+    state.update.lastError = readCurrentErr or "Cannot read current script"
+    setUpdateState("FAILED", nil, "Apply failed: cannot backup")
+    pushEvent("Update failed")
+    return false, state.update.lastError
+  end
+
+  local backupOk, backupErr = writeTextFile(UPDATE_BACKUP_FILE, currentText)
+  if not backupOk then
+    state.update.lastError = backupErr or "Backup failed"
+    setUpdateState("FAILED", nil, "Backup failed")
+    pushEvent("Update failed")
+    return false, state.update.lastError
+  end
+  pushEvent("Backup created")
+
+  local replaceOk, replaceErr = writeTextFile(UPDATE_SCRIPT_FILE, newText)
+  if not replaceOk then
+    pcall(writeTextFile, UPDATE_SCRIPT_FILE, currentText)
+    state.update.lastError = replaceErr or "Replace failed"
+    setUpdateState("FAILED", nil, "Apply failed: replaced file invalid")
+    pushEvent("Update failed")
+    return false, state.update.lastError
+  end
+
+  pcall(fs.delete, UPDATE_TEMP_FILE)
+  state.update.downloaded = false
+  state.update.restartRequired = true
+  state.update.localVersion = state.update.remoteVersion ~= "UNKNOWN" and state.update.remoteVersion or state.update.localVersion
+  setUpdateState("RESTART REQUIRED", nil, "Update applied. Restart required")
+  pushEvent("Update applied")
+  pushEvent("Restart required")
+  return true, nil
+end
+
+local function performUpdate()
+  local okCheck = checkForUpdate()
+  if not okCheck then return false, "Check failed" end
+  if not state.update.available then
+    setUpdateState("UP TO DATE", state.update.lastCheckResult, "No update to apply")
+    return false, "No update available"
+  end
+
+  local okDownload, downloadErr = downloadUpdate()
+  if not okDownload then return false, downloadErr end
+
+  local okApply, applyErr = applyUpdate()
+  if not okApply then return false, applyErr end
+
+  return true, nil
+end
+
+local function rollbackUpdate()
+  if not fs.exists(UPDATE_BACKUP_FILE) then
+    setUpdateState("FAILED", nil, "No backup file")
+    return false, "No backup file"
+  end
+
+  local okBackup, backupText, errBackup = readTextFile(UPDATE_BACKUP_FILE)
+  if not okBackup then
+    setUpdateState("FAILED", nil, "Rollback failed")
+    return false, errBackup
+  end
+
+  local okWrite, errWrite = writeTextFile(UPDATE_SCRIPT_FILE, backupText)
+  if not okWrite then
+    setUpdateState("FAILED", nil, "Rollback failed")
+    return false, errWrite
+  end
+
+  state.update.restartRequired = true
+  state.update.downloaded = false
+  setUpdateState("RESTART REQUIRED", nil, "Rollback applied. Restart required")
+  pushEvent("Rollback applied")
+  pushEvent("Restart required")
+  return true, nil
 end
 
 local function getMonitorCandidates()
@@ -1689,16 +1995,50 @@ local function buildButtons(layout)
   local bh = (layout.mode == "compact") and 4 or 5
   local bGap = 2
 
-  local navW = math.max(7, math.floor(bw / 4))
+  local navW = math.max(6, math.floor(bw / 5))
   addButton("viewSup", bx, ctrl.y + 1, navW, 4, "SUP", state.currentView == "supervision" and C.btnOn or C.panelMid, nil, function() state.currentView = "supervision"; pushEvent("View supervision") end, { hitPadX = 1, hitPadY = 1 })
   addButton("viewDiag", bx + navW, ctrl.y + 1, navW, 4, "DIAG", state.currentView == "diagnostic" and C.btnOn or C.panelMid, nil, function() state.currentView = "diagnostic"; pushEvent("View diagnostic") end, { hitPadX = 1, hitPadY = 1 })
   addButton("viewMan", bx + (navW * 2), ctrl.y + 1, navW, 4, "MAN", state.currentView == "manual" and C.btnOn or C.panelMid, nil, function() state.currentView = "manual"; pushEvent("View manual") end, { hitPadX = 1, hitPadY = 1 })
-  addButton("viewInd", bx + (navW * 3), ctrl.y + 1, bw - (navW * 3), 4, "IND", state.currentView == "induction" and C.btnOn or C.panelMid, nil, function() state.currentView = "induction"; pushEvent("View induction") end, { hitPadX = 1, hitPadY = 1 })
+  addButton("viewInd", bx + (navW * 3), ctrl.y + 1, navW, 4, "IND", state.currentView == "induction" and C.btnOn or C.panelMid, nil, function() state.currentView = "induction"; pushEvent("View induction") end, { hitPadX = 1, hitPadY = 1 })
+  addButton("viewUpd", bx + (navW * 4), ctrl.y + 1, bw - (navW * 4), 4, "UPD", state.currentView == "update" and C.btnOn or C.panelMid, nil, function() state.currentView = "update"; pushEvent("View update") end, { hitPadX = 1, hitPadY = 1 })
 
   addButton("refreshNow", bx, ctrl.y + 6, bw, 4, "REFRESH", C.btnAction, nil, function()
     refreshAll()
     state.lastAction = "Refresh"
   end, { hitPadX = 1, hitPadY = 1 })
+
+  if state.currentView == "update" then
+    local uY = by
+    addButton("updCheck", bx, uY, bw, 5, "CHECK", C.btnAction, nil, function()
+      local ok, err = pcall(checkForUpdate)
+      if not ok then
+        state.update.lastError = tostring(err)
+        setUpdateState("FAILED", "Check crashed", "No apply")
+        pushEvent("Update failed")
+      end
+    end, { hitPadX = 1, hitPadY = 1 })
+    addButton("updApply", bx, uY + 6, bw, 5, "UPDATE", state.update.available and C.warn or C.inactive, nil, function()
+      local ok, result, err = pcall(performUpdate)
+      if not ok then
+        state.update.lastError = tostring(result)
+        setUpdateState("FAILED", nil, "Update crashed")
+        pushEvent("Update failed")
+      elseif result == false then
+        state.update.lastError = tostring(err or "No update available")
+        state.lastAction = "No update"
+      end
+    end, { hitPadX = 1, hitPadY = 1 })
+    addButton("updRollback", bx, uY + 12, bw, 5, "ROLLBACK", fs.exists(UPDATE_BACKUP_FILE) and C.bad or C.inactive, nil, function()
+      local ok, err = pcall(rollbackUpdate)
+      if not ok then
+        state.update.lastError = tostring(err)
+        setUpdateState("FAILED", nil, "Rollback crashed")
+        pushEvent("Update failed")
+      end
+    end, { hitPadX = 1, hitPadY = 1 })
+    addButton("monitor", bx, uY + 18, bw, 4, "MONITOR", C.btnWarn, nil, function() startMonitorSelection() end, { hitPadX = 1, hitPadY = 1 })
+    return
+  end
 
   if state.currentView == "diagnostic" or state.currentView == "induction" then
     drawBigButton("monitor", bx, ctrl.y + 12, bw, "MONITOR", C.btnWarn, function() startMonitorSelection() end)
@@ -1939,7 +2279,7 @@ local function drawStatusPanel(panel)
   end
 end
 local function drawControlPanel(panel, layout)
-  drawBox(panel.x, panel.y, panel.w, panel.h, state.currentView == "manual" and "MANUAL COMMAND" or "CONTROL COLUMN", C.border)
+  drawBox(panel.x, panel.y, panel.w, panel.h, state.currentView == "manual" and "MANUAL COMMAND" or (state.currentView == "update" and "UPDATE COMMAND" or "CONTROL COLUMN"), C.border)
   local x = panel.x + 1
   local w = panel.w - 2
 
@@ -2155,6 +2495,45 @@ local function drawSupervisionView(layout)
   drawControlPanel(layout.right, layout)
 end
 
+local function drawUpdateView(layout)
+  local infoPanel
+  local controlPanel
+
+  if layout.center then
+    drawStatusPanel(layout.left)
+    infoPanel = layout.center
+    controlPanel = layout.right or layout.left
+  else
+    infoPanel = layout.left
+    controlPanel = layout.right or layout.left
+  end
+
+  drawBox(infoPanel.x, infoPanel.y, infoPanel.w, infoPanel.h, "UPDATE CENTER", C.border)
+  local x = infoPanel.x + 2
+  local w = infoPanel.w - 4
+
+  drawBox(x - 1, infoPanel.y + 1, w, 6, "VERSIONS", C.borderDim)
+  drawKeyValue(x, infoPanel.y + 2, "Local", state.update.localVersion, C.dim, C.ok, w - 4)
+  drawKeyValue(x, infoPanel.y + 3, "Remote", state.update.remoteVersion, C.dim, C.info, w - 4)
+  drawKeyValue(x, infoPanel.y + 4, "Status", state.update.status, C.dim, statusColor(state.update.available and "WARN" or "OK"), w - 4)
+
+  drawBox(x - 1, infoPanel.y + 7, w, 6, "NETWORK", C.borderDim)
+  drawKeyValue(x, infoPanel.y + 8, "HTTP", state.update.httpStatus, C.dim, state.update.httpStatus == "OK" and C.ok or C.warn, w - 4)
+  drawKeyValue(x, infoPanel.y + 9, "Enabled", UPDATE_ENABLED and "YES" or "NO", C.dim, UPDATE_ENABLED and C.ok or C.bad, w - 4)
+  drawKeyValue(x, infoPanel.y + 10, "Error", state.update.lastError ~= "" and state.update.lastError or "None", C.dim, state.update.lastError ~= "" and C.bad or C.info, w - 4)
+
+  local resultY = infoPanel.y + 13
+  local resultH = math.max(7, infoPanel.h - 14)
+  drawBox(x - 1, resultY, w, resultH, "RESULT", C.borderDim)
+  writeAt(x, resultY + 1, shortText("Check: " .. tostring(state.update.lastCheckResult or "Never"), w - 3), C.info, C.panelDark)
+  writeAt(x, resultY + 2, shortText("Apply: " .. tostring(state.update.lastApplyResult or "Never"), w - 3), C.info, C.panelDark)
+  writeAt(x, resultY + 3, shortText("Backup: " .. (fs.exists(UPDATE_BACKUP_FILE) and "AVAILABLE" or "MISSING"), w - 3), C.dim, C.panelDark)
+  writeAt(x, resultY + 4, shortText("Temp: " .. (fs.exists(UPDATE_TEMP_FILE) and "READY" or "EMPTY"), w - 3), C.dim, C.panelDark)
+  writeAt(x, resultY + 5, shortText("Restart: " .. (state.update.restartRequired and "REQUIRED" or "NOT REQUIRED"), w - 3), state.update.restartRequired and C.warn or C.ok, C.panelDark)
+
+  drawControlPanel(controlPanel, layout)
+end
+
 local function drawUI()
   local tw, th = term.getSize()
   local layout = computeLayout(tw, th)
@@ -2182,6 +2561,8 @@ local function drawUI()
     drawManualView(layout)
   elseif state.currentView == "induction" then
     drawInductionView(layout)
+  elseif state.currentView == "update" then
+    drawUpdateView(layout)
   else
     drawSupervisionView(layout)
   end
@@ -2194,6 +2575,17 @@ setupMonitor()
 refreshAll()
 state.status = "READY"
 pushEvent("System ready")
+
+if UPDATE_ENABLED then
+  local ok, err = pcall(checkForUpdate)
+  if not ok then
+    state.update.status = "FAILED"
+    state.update.lastCheckResult = "Startup check failed"
+    state.update.lastError = tostring(err)
+    state.update.httpStatus = "FAIL"
+    pushEvent("Update failed")
+  end
+end
 
 while state.running do
   refreshAll()
@@ -2244,6 +2636,9 @@ while state.running do
       elseif ch == "4" then
         state.currentView = "induction"
         pushEvent("View induction")
+      elseif ch == "5" then
+        state.currentView = "update"
+        pushEvent("View update")
       elseif ch == "i" then
         triggerAutomaticIgnitionSequence()
       elseif ch == "l" then
