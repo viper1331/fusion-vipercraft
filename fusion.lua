@@ -216,8 +216,8 @@ local hw = {
 local UI_PALETTE = {
   bgMain = colors.black,
   bgElevated = colors.gray,
-  frameOuter = colors.lightBlue,
-  frameInner = colors.cyan,
+  frameOuter = colors.gray,
+  frameInner = colors.lightBlue,
   frameDim = colors.gray,
   textMain = colors.white,
   textDim = colors.lightGray,
@@ -227,8 +227,8 @@ local UI_PALETTE = {
   accentInfo = colors.cyan,
   accentViolet = colors.purple,
   accentLaser = colors.yellow,
-  headerBg = colors.gray,
-  footerBg = colors.gray,
+  headerBg = colors.black,
+  footerBg = colors.black,
   buttonNeutral = colors.gray,
   buttonActive = colors.blue,
   buttonPressed = colors.lightGray,
@@ -240,17 +240,17 @@ local UI_PALETTE = {
 
 local styles = {
   panel = {
-    default = { bg = UI_PALETTE.bgMain, header = UI_PALETTE.bgElevated, border = UI_PALETTE.frameInner, trim = UI_PALETTE.frameDim, text = UI_PALETTE.textMain },
-    accent = { bg = UI_PALETTE.bgMain, header = UI_PALETTE.buttonActive, border = UI_PALETTE.frameOuter, trim = UI_PALETTE.frameInner, text = UI_PALETTE.textMain },
+    default = { bg = UI_PALETTE.bgMain, header = UI_PALETTE.bgElevated, border = UI_PALETTE.frameDim, trim = UI_PALETTE.bgElevated, accent = UI_PALETTE.frameInner, text = UI_PALETTE.textMain },
+    accent = { bg = UI_PALETTE.bgMain, header = UI_PALETTE.bgElevated, border = UI_PALETTE.frameDim, trim = UI_PALETTE.bgElevated, accent = UI_PALETTE.frameInner, text = UI_PALETTE.textMain },
   },
   button = {
-    primary = { face = UI_PALETTE.buttonActive, rimLight = UI_PALETTE.frameOuter, rimDark = UI_PALETTE.bgMain, text = UI_PALETTE.textMain },
-    secondary = { face = UI_PALETTE.buttonNeutral, rimLight = UI_PALETTE.frameInner, rimDark = UI_PALETTE.bgMain, text = UI_PALETTE.textMain },
-    danger = { face = UI_PALETTE.buttonDanger, rimLight = UI_PALETTE.accentWarn, rimDark = UI_PALETTE.bgMain, text = UI_PALETTE.textMain },
-    fuelT = { face = UI_PALETTE.buttonFuelT, rimLight = UI_PALETTE.accentOk, rimDark = UI_PALETTE.bgMain, text = UI_PALETTE.textMain },
-    fuelD = { face = UI_PALETTE.buttonFuelD, rimLight = UI_PALETTE.accentWarn, rimDark = UI_PALETTE.bgMain, text = UI_PALETTE.textMain },
-    fuelDT = { face = UI_PALETTE.buttonFuelDT, rimLight = UI_PALETTE.frameOuter, rimDark = UI_PALETTE.bgMain, text = UI_PALETTE.textMain },
-    disabled = { face = UI_PALETTE.frameDim, rimLight = UI_PALETTE.textDim, rimDark = UI_PALETTE.bgMain, text = UI_PALETTE.textDim },
+    primary = { face = UI_PALETTE.buttonActive, rimLight = UI_PALETTE.frameInner, rimDark = UI_PALETTE.bgMain, trim = UI_PALETTE.frameOuter, text = UI_PALETTE.textMain },
+    secondary = { face = UI_PALETTE.buttonNeutral, rimLight = UI_PALETTE.frameDim, rimDark = UI_PALETTE.bgMain, trim = UI_PALETTE.frameInner, text = UI_PALETTE.textMain },
+    danger = { face = UI_PALETTE.buttonDanger, rimLight = UI_PALETTE.accentWarn, rimDark = UI_PALETTE.bgMain, trim = UI_PALETTE.frameInner, text = UI_PALETTE.textMain },
+    fuelT = { face = UI_PALETTE.buttonFuelT, rimLight = UI_PALETTE.accentOk, rimDark = UI_PALETTE.bgMain, trim = UI_PALETTE.frameInner, text = UI_PALETTE.textMain },
+    fuelD = { face = UI_PALETTE.buttonFuelD, rimLight = UI_PALETTE.accentWarn, rimDark = UI_PALETTE.bgMain, trim = UI_PALETTE.frameInner, text = UI_PALETTE.textMain },
+    fuelDT = { face = UI_PALETTE.buttonFuelDT, rimLight = UI_PALETTE.frameInner, rimDark = UI_PALETTE.bgMain, trim = UI_PALETTE.frameOuter, text = UI_PALETTE.textMain },
+    disabled = { face = UI_PALETTE.frameDim, rimLight = UI_PALETTE.bgElevated, rimDark = UI_PALETTE.bgMain, trim = UI_PALETTE.bgMain, text = UI_PALETTE.textDim },
   },
 }
 
@@ -347,13 +347,17 @@ end
 
 function ui.panel(x, y, w, h, title, style)
   local skin = style or styles.panel.default
+  local accent = skin.accent or skin.border
   ui.frame(x, y, w, h, skin.border, skin.trim)
   if w > 2 and h > 2 then
     ui.fill(x + 1, y + 1, w - 2, h - 2, skin.bg)
   end
+  if h >= 4 and w >= 8 then
+    ui.vline(x + 1, y + 1, h - 2, accent)
+  end
   if title and #title > 0 and w > 8 then
-    ui.hline(x + 1, y, w - 2, skin.header)
-    ui.write(x + 2, y, uiShortText(" " .. title .. " ", w - 4), skin.text, skin.header)
+    ui.hline(x + 2, y, math.max(1, w - 3), skin.header)
+    ui.write(x + 3, y, uiShortText(" " .. title .. " ", w - 5), skin.text, skin.header)
   end
 end
 
@@ -371,12 +375,12 @@ end
 local function applyPremiumPalette()
   if not term.isColor or not term.isColor() then return end
   pcall(term.setPaletteColor, colors.black, 0.03, 0.05, 0.09)
-  pcall(term.setPaletteColor, colors.gray, 0.14, 0.19, 0.24)
-  pcall(term.setPaletteColor, colors.lightGray, 0.28, 0.35, 0.41)
-  pcall(term.setPaletteColor, colors.white, 0.84, 0.91, 0.98)
-  pcall(term.setPaletteColor, colors.blue, 0.08, 0.24, 0.42)
-  pcall(term.setPaletteColor, colors.lightBlue, 0.22, 0.68, 0.92)
-  pcall(term.setPaletteColor, colors.cyan, 0.19, 0.83, 0.86)
+  pcall(term.setPaletteColor, colors.gray, 0.12, 0.16, 0.21)
+  pcall(term.setPaletteColor, colors.lightGray, 0.24, 0.31, 0.37)
+  pcall(term.setPaletteColor, colors.white, 0.86, 0.92, 0.97)
+  pcall(term.setPaletteColor, colors.blue, 0.07, 0.20, 0.36)
+  pcall(term.setPaletteColor, colors.lightBlue, 0.18, 0.48, 0.67)
+  pcall(term.setPaletteColor, colors.cyan, 0.14, 0.62, 0.66)
   pcall(term.setPaletteColor, colors.green, 0.15, 0.55, 0.24)
   pcall(term.setPaletteColor, colors.lime, 0.30, 0.95, 0.50)
   pcall(term.setPaletteColor, colors.red, 0.93, 0.20, 0.23)
@@ -536,22 +540,24 @@ end
 local function drawBox(x, y, w, h, title, accent)
   if w < 4 or h < 3 then return end
   local function drawPanelHeader(px, py, pw, text, skin)
-    ui.hline(px + 1, py, pw - 2, skin.header)
+    ui.hline(px + 2, py, math.max(1, pw - 3), skin.header)
     if text and #text > 0 and pw > 8 then
-      ui.write(px + 2, py, uiShortText(" " .. text .. " ", pw - 4), skin.text, skin.header)
+      ui.write(px + 3, py, uiShortText(" " .. text .. " ", pw - 5), skin.text, skin.header)
     end
   end
 
   local function drawPanelSection(px, py, pw, ph, skin)
     if ph <= 0 or pw <= 2 then return end
     ui.fill(px + 1, py, pw - 2, ph, skin.bg)
+    if ph >= 2 then
+      ui.vline(px + 1, py, ph, skin.accent or skin.border)
+    end
   end
 
   local function drawPanelBlock(px, py, pw, ph, skin)
     if ph < 3 or pw < 6 then return end
-    ui.hline(px + 1, py, pw - 2, skin.trim)
-    ui.fill(px + 1, py + 1, pw - 2, ph - 2, skin.bg)
-    ui.hline(px + 1, py + ph - 1, pw - 2, skin.trim)
+    ui.hline(px + 2, py, math.max(1, pw - 3), skin.trim)
+    ui.fill(px + 2, py + 1, math.max(1, pw - 3), ph - 2, skin.bg)
   end
 
   local function drawSidePanel(px, py, pw, ph, text, skin)
@@ -567,9 +573,10 @@ local function drawBox(x, y, w, h, title, accent)
   if accent and accent ~= C.border then
     style = {
       bg = styles.panel.default.bg,
-      header = accent,
-      border = accent,
+      header = styles.panel.default.header,
+      border = styles.panel.default.border,
       trim = styles.panel.default.trim,
+      accent = accent,
       text = styles.panel.default.text,
     }
   end
@@ -588,26 +595,32 @@ local isRuntimeFuelOk
 
 local function drawHeaderBarSprite(title, status)
   local function drawPhaseBar(x, y, w, phase)
-    local label = "PHASE " .. shortText(phase, math.max(4, w - 7))
-    ui.hline(x, y, w, C.panelDark)
-    ui.write(x + 1, y, shortText(label, math.max(1, w - 2)), phaseColor(phase), C.panelDark)
+    local label = "PHASE " .. shortText(phase, math.max(4, w - 9))
+    ui.hline(x, y, w, C.bg)
+    if w > 2 then
+      ui.hline(x + 1, y, w - 2, C.panelDark)
+      ui.write(x + 2, y, shortText(label, math.max(1, w - 4)), phaseColor(phase), C.panelDark)
+    end
   end
 
   local function drawAlertSegment(x, y, w, alert, pulse)
     local alertTone = statusColor(alert)
     local glyph = pulse and "!" or " "
-    local txt = shortText(glyph .. " ALERT " .. tostring(alert or "N/A"), math.max(1, w - 2))
-    ui.hline(x, y, w, C.panelDark)
-    ui.write(x + 1, y, txt, alertTone, C.panelDark)
+    local txt = shortText(glyph .. " ALERT " .. tostring(alert or "N/A"), math.max(1, w - 4))
+    ui.hline(x, y, w, C.bg)
+    if w > 2 then
+      ui.hline(x + 1, y, w - 2, C.panelDark)
+      ui.write(x + 2, y, txt, alertTone, C.panelDark)
+    end
   end
 
   local function drawMainHeader(headerTitle, headerStatus)
     local tw = term.getSize()
     local phase = reactorPhase()
     local pulse = (state.tick % 8 < 4)
-    ui.hline(1, 1, tw, C.headerBg)
+    ui.hline(1, 1, tw, C.bg)
     if tw < 28 then
-      ui.write(2, 1, shortText(headerTitle, tw - 2), C.headerText, C.headerBg)
+      ui.write(2, 1, shortText(headerTitle, tw - 2), C.headerText, C.bg)
       return
     end
 
@@ -618,8 +631,9 @@ local function drawHeaderBarSprite(title, status)
     local cx = lx + leftW
     local rx = cx + centerW
 
-    ui.hline(lx, 1, leftW, C.headerBg)
-    ui.write(lx + 1, 1, shortText(headerTitle .. " | " .. string.upper(state.currentView), math.max(1, leftW - 2)), C.headerText, C.headerBg)
+    ui.hline(lx, 1, leftW, C.bg)
+    ui.hline(lx + 1, 1, math.max(1, leftW - 2), C.headerBg)
+    ui.write(lx + 2, 1, shortText(headerTitle .. " | " .. string.upper(state.currentView), math.max(1, leftW - 4)), C.headerText, C.headerBg)
     drawPhaseBar(cx, 1, centerW, phase)
     drawAlertSegment(rx, 1, rightW, headerStatus or state.alert, pulse)
   end
@@ -629,15 +643,18 @@ end
 
 local function drawFooterBarSprite()
   local function drawFooterSegment(x, y, w, key, value, tone, bg)
-    local txt = shortText(key .. " " .. value, math.max(1, w - 2))
-    ui.hline(x, y, w, bg)
-    ui.write(x + 1, y, txt, tone or C.text, bg)
+    local txt = shortText(key .. " " .. value, math.max(1, w - 3))
+    ui.hline(x, y, w, C.bg)
+    if w > 2 then
+      ui.hline(x + 1, y, w - 2, bg)
+      ui.write(x + 2, y, txt, tone or C.text, bg)
+    end
   end
 
   local function drawMainFooter()
     local tw, th = term.getSize()
     local bg = C.footerBg
-    ui.hline(1, th, tw, bg)
+    ui.hline(1, th, tw, C.bg)
     local phase = reactorPhase()
     local labels = {
       { key = "ACT", value = shortText(state.lastAction, 16), tone = C.text },
@@ -654,7 +671,7 @@ local function drawFooterBarSprite()
       drawFooterSegment(sx, th, width, seg.key, seg.value, seg.tone, bg)
       if i < #labels then
         local divX = sx + width - 1
-        if divX <= tw then ui.write(divX, th, " ", C.borderDim, C.borderDim) end
+        if divX <= tw then ui.write(divX, th, " ", C.borderDim, C.bg) end
       end
     end
   end
@@ -848,7 +865,7 @@ local function computeLayout(tw, th)
 end
 
 local function drawReactorDiagram(x, y, w, h)
-  drawBox(x, y, w, h, "FUSION CHAMBER", C.border)
+  drawBox(x, y, w, h, "FUSION CHAMBER", C.borderDim)
   if w < 30 or h < 16 then
     writeAt(x + 2, y + 2, "Schema top-down indisponible", C.dim, C.panelDark)
     return
@@ -1058,7 +1075,7 @@ local function drawReactorDiagram(x, y, w, h)
   end
 
 
-  writeAt(x + 2, y + 2, shortText("CORE " .. (state.reactorPresent and (state.reactorFormed and "FORMED" or "UNFORMED") or "ABSENT"), math.max(8, math.floor(w * 0.33))), state.reactorPresent and C.info or C.bad, C.panelDark)
+  writeAt(x + 3, y + 2, shortText("CORE " .. (state.reactorPresent and (state.reactorFormed and "FORMED" or "UNFORMED") or "ABSENT"), math.max(8, math.floor(w * 0.31))), state.reactorPresent and C.info or C.bad, C.panelDark)
 end
 
 local function drawBadge(x, y, label, value, tone)
@@ -2437,19 +2454,21 @@ end
 
 local function drawButtonSprite(button, style)
   local skin = style or resolveButtonStyle(button)
+  local trim = skin.trim or skin.rimLight
   ui.fill(button.x, button.y, button.w, button.h, skin.face)
-  if button.w >= 2 and button.h >= 2 then
+  if button.w >= 3 and button.h >= 3 then
     ui.hline(button.x, button.y, button.w, skin.rimLight)
     ui.vline(button.x, button.y + 1, button.h - 2, skin.rimLight)
     ui.hline(button.x, button.y + button.h - 1, button.w, skin.rimDark)
     ui.vline(button.x + button.w - 1, button.y + 1, button.h - 2, skin.rimDark)
+    ui.hline(button.x + 1, button.y + 1, math.max(1, button.w - 2), trim)
   end
   return skin.face, skin.text
 end
 
 local function drawButtonPressedSprite(button, style)
   local skin = style or resolveButtonStyle(button)
-  local pressed = { face = UI_PALETTE.buttonPressed, rimLight = skin.face, rimDark = skin.rimDark, text = skin.text }
+  local pressed = { face = UI_PALETTE.buttonPressed, rimLight = skin.rimLight, rimDark = skin.rimDark, trim = skin.face, text = skin.text }
   return drawButtonSprite(button, pressed)
 end
 
@@ -2463,13 +2482,13 @@ end
 
 local function drawTabSprite(x, y, w, h, label, isActive, isPressed)
   local base = isActive and UI_PALETTE.buttonActive or UI_PALETTE.bgElevated
-  local top = isPressed and UI_PALETTE.frameDim or (isActive and UI_PALETTE.frameOuter or UI_PALETTE.frameInner)
+  local top = isPressed and UI_PALETTE.frameDim or (isActive and UI_PALETTE.frameInner or UI_PALETTE.frameDim)
   local bottom = isActive and UI_PALETTE.frameOuter or UI_PALETTE.frameDim
   ui.fill(x, y, w, h, base)
   ui.hline(x, y, w, top)
   ui.hline(x, y + h - 1, w, bottom)
   if h >= 4 then
-    ui.hline(x + 1, y + h - 2, math.max(1, w - 2), isActive and UI_PALETTE.frameOuter or UI_PALETTE.bgMain)
+    ui.hline(x + 1, y + 1, math.max(1, w - 2), isActive and UI_PALETTE.frameOuter or UI_PALETTE.bgMain)
   end
   local textY = y + math.floor((h - 1) / 2) + (isPressed and 1 or 0)
   ui.write(x + 1, textY, shortText(label, math.max(1, w - 2)), C.text, base)
@@ -2862,9 +2881,9 @@ end
 
 local function drawStatusPanel(panel)
   drawBox(panel.x, panel.y, panel.w, panel.h, "SUPERVISION CORE", C.border)
-  local x = panel.x + 1
+  local x = panel.x + 2
   local y = panel.y + 1
-  local w = panel.w - 2
+  local w = panel.w - 3
 
   local b1h = clamp(math.floor(panel.h * 0.23), 5, 7)
   local b2h = clamp(math.floor(panel.h * 0.22), 5, 7)
@@ -2926,8 +2945,8 @@ local function drawStatusPanel(panel)
 end
 local function drawControlPanel(panel, layout)
   drawBox(panel.x, panel.y, panel.w, panel.h, state.currentView == "manual" and "MANUAL COMMAND" or (state.currentView == "update" and "UPDATE COMMAND" or "CONTROL COLUMN"), C.border)
-  local x = panel.x + 1
-  local w = panel.w - 2
+  local x = panel.x + 2
+  local w = panel.w - 3
 
   local autoH = clamp(math.floor(panel.h * 0.24), 6, 8)
   local actionH = clamp(math.floor(panel.h * 0.34), 8, 12)
