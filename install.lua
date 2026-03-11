@@ -317,6 +317,8 @@ local function isLargeLayout(layout)
   return layout.large
 end
 
+local drawButton
+
 local function drawButtonRow(source, y, defs, left, right, gap)
   local count = #defs
   if count == 0 then return end
@@ -335,7 +337,7 @@ local function drawButtonRow(source, y, defs, left, right, gap)
   end
 end
 
-local function drawButton(source, id, x, y, w, label, kind, action)
+drawButton = function(source, id, x, y, w, label, kind, action)
   if w < 4 then return end
   local clipped = fitText(label, w - 2)
   local bg, fg, shade = buttonColors(kind, false)
