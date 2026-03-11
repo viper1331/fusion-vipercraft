@@ -1,5 +1,10 @@
 local M = {}
 
+function M.isValidVersion(version)
+  if type(version) ~= "string" then return false end
+  return version:match("^%d+%.%d+%.%d+$") ~= nil
+end
+
 function M.parseVersion(version)
   local a, b, c = tostring(version or "0.0.0"):match("^(%d+)%.(%d+)%.(%d+)$")
   return tonumber(a) or 0, tonumber(b) or 0, tonumber(c) or 0

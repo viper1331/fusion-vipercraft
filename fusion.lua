@@ -1155,103 +1155,23 @@ local function readLocalVersionFile()
   return CoreConfig.readLocalVersionFile(fs, VERSION_FILE, LOCAL_VERSION)
 end
 
-local function defaultFusionConfig()
-  return {
-    configVersion = 1,
-    setupName = "Fusion ViperCraft",
-    monitor = { name = CFG.preferredMonitor, scale = CFG.monitorScale },
-    devices = {
-      reactorController = CFG.preferredReactor,
-      logicAdapter = CFG.preferredLogicAdapter,
-      laser = CFG.preferredLaser,
-      induction = CFG.preferredInduction,
-    },
-    relays = {
-      laser = { name = CFG.knownRelays.laser_charge.relay, side = CFG.knownRelays.laser_charge.side },
-      tritium = { name = CFG.knownRelays.tritium.relay, side = CFG.knownRelays.tritium.side },
-      deuterium = { name = CFG.knownRelays.deuterium.relay, side = CFG.knownRelays.deuterium.side },
-    },
-    readers = {
-      tritium = CFG.knownReaders.tritium,
-      deuterium = CFG.knownReaders.deuterium,
-      aux = CFG.knownReaders.inventory,
-    },
-    ui = {
-      preferredView = "SUP",
-      touchEnabled = true,
-      refreshDelay = CFG.refreshDelay,
-    },
-    update = {
-      enabled = UPDATE_ENABLED,
-    },
-  }
-end
-
-local function mergeDefaults(target, defaults)
-  if type(target) ~= "table" then target = {} end
-  for k, v in pairs(defaults) do
-    if type(v) == "table" then
-      target[k] = mergeDefaults(type(target[k]) == "table" and target[k] or {}, v)
-    elseif target[k] == nil then
-      target[k] = v
-    end
-  end
-  return target
-end
-
-local function migrateConfig(config)
-  local cfg = type(config) == "table" and config or {}
-  local version = tonumber(cfg.configVersion) or 0
-
-  if version < 1 then
-    cfg = mergeDefaults(cfg, defaultFusionConfig())
-    cfg.configVersion = 1
-  end
-
-  cfg = mergeDefaults(cfg, defaultFusionConfig())
-  return cfg
-end
-
 local function loadFusionConfig()
-  if not fs.exists(CONFIG_FILE) then
-    return false, nil, "CONFIG_MISSING"
-  end
-
-  local ok, configOrErr = pcall(dofile, CONFIG_FILE)
-  if not ok then
-    return false, nil, "CONFIG_INVALID: " .. tostring(configOrErr)
-  end
-
-  if type(configOrErr) ~= "table" then
-    return false, nil, "CONFIG_INVALID: Not a table"
-  end
-
-  local migrated = migrateConfig(configOrErr)
-  return true, migrated, nil
+  return CoreConfig.loadFusionConfig(fs, CONFIG_FILE, CFG, UPDATE_ENABLED)
 end
 
 local function applyConfigToRuntime(config)
   if type(config) ~= "table" then return end
+  CoreConfig.applyConfigToRuntime(config, CFG)
 
-  CFG.preferredMonitor = config.monitor and config.monitor.name or CFG.preferredMonitor
-  CFG.monitorScale = toNumber(config.monitor and config.monitor.scale, CFG.monitorScale)
-  CFG.refreshDelay = toNumber(config.ui and config.ui.refreshDelay, CFG.refreshDelay)
-
-  CFG.preferredReactor = config.devices and config.devices.reactorController or CFG.preferredReactor
-  CFG.preferredLogicAdapter = config.devices and config.devices.logicAdapter or CFG.preferredLogicAdapter
-  CFG.preferredLaser = config.devices and config.devices.laser or CFG.preferredLaser
-  CFG.preferredInduction = config.devices and config.devices.induction or CFG.preferredInduction
-
-  CFG.knownReaders.deuterium = config.readers and config.readers.deuterium or CFG.knownReaders.deuterium
-  CFG.knownReaders.tritium = config.readers and config.readers.tritium or CFG.knownReaders.tritium
-  CFG.knownReaders.inventory = config.readers and config.readers.aux or CFG.knownReaders.inventory
-
-  CFG.knownRelays.laser_charge.relay = config.relays and config.relays.laser and config.relays.laser.name or CFG.knownRelays.laser_charge.relay
-  CFG.knownRelays.laser_charge.side = config.relays and config.relays.laser and config.relays.laser.side or CFG.knownRelays.laser_charge.side
-  CFG.knownRelays.tritium.relay = config.relays and config.relays.tritium and config.relays.tritium.name or CFG.knownRelays.tritium.relay
-  CFG.knownRelays.tritium.side = config.relays and config.relays.tritium and config.relays.tritium.side or CFG.knownRelays.tritium.side
-  CFG.knownRelays.deuterium.relay = config.relays and config.relays.deuterium and config.relays.deuterium.name or CFG.knownRelays.deuterium.relay
-  CFG.knownRelays.deuterium.side = config.relays and config.relays.deuterium and config.relays.deuterium.side or CFG.knownRelays.deuterium.side
+  if type(config.ui) == "table" and type(config.ui.preferredView) == "string" then
+    local view = string.upper(config.ui.preferredView)
+    if view == "SUP" then state.currentView = "supervision"
+    elseif view == "DIAG" then state.currentView = "diagnostic"
+    elseif view == "MAN" then state.currentView = "manual"
+    elseif view == "IND" then state.currentView = "induction"
+    elseif view == "UPDATE" then state.currentView = "update"
+    end
+  end
 
   if type(config.update) == "table" and config.update.enabled ~= nil then
     UPDATE_ENABLED = config.update.enabled and true or false
@@ -1268,6 +1188,26 @@ local function ensureConfigOrInstaller()
     term.setCursorPos(1, 1)
     print("[FUSION] Configuration absente ou invalide: " .. tostring(err))
     print("[FUSION] Lancez install.lua pour configurer ce setup.")
+    print("[FUSION] Appuyez sur I pour lancer l'installateur, ou une autre touche pour quitter.")
+    local _, key = os.pullEvent("key")
+    if key == keys.i and fs.exists("install.lua") then
+      shell.run("install.lua")
+    end
+    return false, nil
+  end
+
+  local configValid, configErrors = CoreConfig.validateConfig(config)
+  if not configValid then
+    term.redirect(nativeTerm)
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.white)
+    term.clear()
+    term.setCursorPos(1, 1)
+    print("[FUSION] Configuration invalide: champs obligatoires manquants.")
+    for _, item in ipairs(configErrors) do
+      print(" - " .. tostring(item))
+    end
+    print("[FUSION] Corrigez fusion_config.lua ou relancez install.lua.")
     print("[FUSION] Appuyez sur I pour lancer l'installateur, ou une autre touche pour quitter.")
     local _, key = os.pullEvent("key")
     if key == keys.i and fs.exists("install.lua") then
@@ -1327,6 +1267,13 @@ local function compareVersions(localV, remoteV)
   return CoreUpdate.compareVersions(localV, remoteV)
 end
 
+local function validateVersionString(version)
+  if not CoreUpdate.isValidVersion(version) then
+    return false, "Version format must be MAJOR.MINOR.PATCH"
+  end
+  return true, nil
+end
+
 local function validateLuaScript(text)
   if type(text) ~= "string" then return false, "Not a string" end
   if #trimText(text) < 32 then return false, "Downloaded script is too short" end
@@ -1377,6 +1324,16 @@ local function checkForUpdate()
   end
 
   local remoteVersion = trimText(body)
+  local validVersion, versionErr = validateVersionString(remoteVersion)
+  if not validVersion then
+    state.update.remoteVersion = "INVALID"
+    state.update.available = false
+    state.update.lastError = versionErr
+    setUpdateState("FAILED", "Check failed: " .. state.update.lastError, nil)
+    pushEvent("Update failed")
+    return false, versionErr
+  end
+
   state.update.remoteVersion = remoteVersion
   state.update.lastCheckClock = os.clock()
   pushEvent("Remote version found " .. remoteVersion)
@@ -1417,8 +1374,9 @@ local function downloadUpdate()
   end
 
   local remoteVersion = trimText(versionBody)
-  if #remoteVersion == 0 then
-    state.update.lastError = "Remote version is empty"
+  local validVersion, versionErr = validateVersionString(remoteVersion)
+  if not validVersion then
+    state.update.lastError = versionErr or "Remote version is invalid"
     setUpdateState("FAILED", nil, "Invalid remote version")
     pushEvent("Update failed")
     return false, state.update.lastError
@@ -1497,8 +1455,9 @@ local function applyUpdate()
   end
 
   local newVersion = trimText(newVersionText)
-  if #newVersion == 0 then
-    state.update.lastError = "Temp version is empty"
+  local validVersion, versionErr = validateVersionString(newVersion)
+  if not validVersion then
+    state.update.lastError = versionErr or "Temp version is invalid"
     setUpdateState("FAILED", nil, "Apply failed: invalid version")
     pushEvent("Update failed")
     return false, state.update.lastError

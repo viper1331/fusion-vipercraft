@@ -1,5 +1,22 @@
 local M = {}
 
+local VALID_VIEWS = {
+  SUP = true,
+  DIAG = true,
+  MAN = true,
+  IND = true,
+  UPDATE = true,
+}
+
+local VALID_SIDES = {
+  top = true,
+  bottom = true,
+  left = true,
+  right = true,
+  front = true,
+  back = true,
+}
+
 function M.trimText(txt)
   txt = tostring(txt or "")
   return (txt:gsub("^%s+", ""):gsub("%s+$", ""))
@@ -100,8 +117,8 @@ function M.applyConfigToRuntime(config, CFG)
   if type(config) ~= "table" then return end
 
   CFG.preferredMonitor = config.monitor and config.monitor.name or CFG.preferredMonitor
-  CFG.monitorScale = tonumber(config.monitor and config.monitor.scale) or CFG.monitorScale
-  CFG.refreshDelay = tonumber(config.ui and config.ui.refreshDelay) or CFG.refreshDelay
+  CFG.monitorScale = M.sanitizeMonitorScale(config.monitor and config.monitor.scale, CFG.monitorScale)
+  CFG.refreshDelay = M.sanitizeRefreshDelay(config.ui and config.ui.refreshDelay, CFG.refreshDelay)
 
   CFG.preferredReactor = config.devices and config.devices.reactorController or CFG.preferredReactor
   CFG.preferredLogicAdapter = config.devices and config.devices.logicAdapter or CFG.preferredLogicAdapter
@@ -113,11 +130,73 @@ function M.applyConfigToRuntime(config, CFG)
   CFG.knownReaders.inventory = config.readers and config.readers.aux or CFG.knownReaders.inventory
 
   CFG.knownRelays.laser_charge.relay = config.relays and config.relays.laser and config.relays.laser.name or CFG.knownRelays.laser_charge.relay
-  CFG.knownRelays.laser_charge.side = config.relays and config.relays.laser and config.relays.laser.side or CFG.knownRelays.laser_charge.side
+  CFG.knownRelays.laser_charge.side = M.sanitizeRelaySide(config.relays and config.relays.laser and config.relays.laser.side, CFG.knownRelays.laser_charge.side)
   CFG.knownRelays.tritium.relay = config.relays and config.relays.tritium and config.relays.tritium.name or CFG.knownRelays.tritium.relay
-  CFG.knownRelays.tritium.side = config.relays and config.relays.tritium and config.relays.tritium.side or CFG.knownRelays.tritium.side
+  CFG.knownRelays.tritium.side = M.sanitizeRelaySide(config.relays and config.relays.tritium and config.relays.tritium.side, CFG.knownRelays.tritium.side)
   CFG.knownRelays.deuterium.relay = config.relays and config.relays.deuterium and config.relays.deuterium.name or CFG.knownRelays.deuterium.relay
-  CFG.knownRelays.deuterium.side = config.relays and config.relays.deuterium and config.relays.deuterium.side or CFG.knownRelays.deuterium.side
+  CFG.knownRelays.deuterium.side = M.sanitizeRelaySide(config.relays and config.relays.deuterium and config.relays.deuterium.side, CFG.knownRelays.deuterium.side)
+end
+
+function M.sanitizeMonitorScale(value, fallback)
+  local numeric = tonumber(value)
+  if numeric == nil then return fallback end
+  if numeric < 0.5 then return 0.5 end
+  if numeric > 5 then return 5 end
+  return math.floor(numeric * 2 + 0.5) / 2
+end
+
+function M.sanitizeRefreshDelay(value, fallback)
+  local numeric = tonumber(value)
+  if numeric == nil then return fallback end
+  if numeric < 0.05 then return 0.05 end
+  if numeric > 5 then return 5 end
+  return numeric
+end
+
+function M.sanitizeRelaySide(value, fallback)
+  local side = tostring(value or "")
+  if VALID_SIDES[side] then return side end
+  return fallback
+end
+
+function M.validateConfig(config)
+  local errors = {}
+  if type(config) ~= "table" then
+    table.insert(errors, "Configuration root must be a table")
+    return false, errors
+  end
+
+  local monitorName = config.monitor and config.monitor.name
+  if type(monitorName) ~= "string" or M.trimText(monitorName) == "" then
+    table.insert(errors, "monitor.name is missing")
+  end
+
+  local deviceKeys = { "reactorController", "logicAdapter", "laser", "induction" }
+  for _, key in ipairs(deviceKeys) do
+    local value = config.devices and config.devices[key]
+    if type(value) ~= "string" or M.trimText(value) == "" then
+      table.insert(errors, "devices." .. key .. " is missing")
+    end
+  end
+
+  local preferredView = config.ui and config.ui.preferredView
+  if preferredView ~= nil and not VALID_VIEWS[tostring(preferredView)] then
+    table.insert(errors, "ui.preferredView is invalid")
+  end
+
+  local relayEntries = {
+    { path = "relays.laser.side", value = config.relays and config.relays.laser and config.relays.laser.side },
+    { path = "relays.tritium.side", value = config.relays and config.relays.tritium and config.relays.tritium.side },
+    { path = "relays.deuterium.side", value = config.relays and config.relays.deuterium and config.relays.deuterium.side },
+  }
+
+  for _, relay in ipairs(relayEntries) do
+    if relay.value ~= nil and not VALID_SIDES[tostring(relay.value)] then
+      table.insert(errors, relay.path .. " is invalid")
+    end
+  end
+
+  return #errors == 0, errors
 end
 
 return M

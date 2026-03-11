@@ -5,6 +5,8 @@ local CONFIG_FILE = "fusion_config.lua"
 local VERSION_FILE = "fusion.version"
 local DEFAULT_VERSION = "1.1.0"
 
+local CoreConfig = require("core.config")
+
 local SIDES = { "top", "bottom", "left", "right", "front", "back" }
 
 local function contains(str, sub)
@@ -803,6 +805,12 @@ local function buildConfig()
   }
 end
 
+local function validateBuiltConfig(config)
+  local ok, errors = CoreConfig.validateConfig(config)
+  if ok then return true, nil end
+  return false, table.concat(errors, "; ")
+end
+
 local function drawSummary(source, w, h, layout)
   local left = layout.marginX
   local right = w - layout.marginX
@@ -829,7 +837,14 @@ local function drawSummary(source, w, h, layout)
 
   drawButtonRow(source, layout.navY - 4, {
     { id = "save", label = "SAVE CONFIG", kind = "primary", action = function()
-      local ok, err = writeConfig(buildConfig())
+      local config = buildConfig()
+      local valid, validationErr = validateBuiltConfig(config)
+      if not valid then
+        state.status = "Config incomplète: " .. tostring(validationErr)
+        return
+      end
+
+      local ok, err = writeConfig(config)
       if not ok then
         state.status = "Erreur sauvegarde: " .. tostring(err)
         return
@@ -838,8 +853,20 @@ local function drawSummary(source, w, h, layout)
       state.status = "CONFIG SAVED - INSTALLATION COMPLETE - READY TO LAUNCH"
     end },
     { id = "launch", label = "LAUNCH FUSION", kind = "primary", action = function()
-      local ok = writeConfig(buildConfig())
-      if ok then ensureVersionFile() end
+      local config = buildConfig()
+      local valid, validationErr = validateBuiltConfig(config)
+      if not valid then
+        state.status = "Config incomplète: " .. tostring(validationErr)
+        return
+      end
+
+      local ok, err = writeConfig(config)
+      if not ok then
+        state.status = "Erreur sauvegarde: " .. tostring(err)
+        return
+      end
+
+      ensureVersionFile()
       state.running = false
       state.launch = true
     end },
