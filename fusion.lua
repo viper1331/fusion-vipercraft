@@ -70,6 +70,18 @@ local buttons = {}
 local touchHitboxes = { terminal = {}, monitor = {} }
 local pressedButtons = {}
 local pressedEffectDuration = 0.18
+local UI_HITBOX_DEBUG = false
+
+local HITBOX_DEFAULTS = {
+  minW = 10,
+  minH = 3,
+  basePadX = 1,
+  basePadY = 1,
+  smallBoostPadX = 2,
+  smallBoostPadY = 1,
+  rowPadX = 1,
+  rowPadY = 0,
+}
 
 local state = {
   running = true,
@@ -2101,18 +2113,45 @@ end
 
 local function addButton(id, x, y, w, h, label, bg, fg, action, opts)
   opts = opts or {}
+  local width = math.max(6, w)
+  local height = math.max(3, h or (opts.big and 5 or 4))
+
+  local hitPadX = opts.hitPadX
+  local hitPadY = opts.hitPadY
+
+  if hitPadX == nil then
+    hitPadX = HITBOX_DEFAULTS.basePadX
+    if width <= HITBOX_DEFAULTS.minW then
+      hitPadX = math.max(hitPadX, HITBOX_DEFAULTS.smallBoostPadX)
+    end
+    if opts.kind == "row" then
+      hitPadX = math.max(hitPadX, HITBOX_DEFAULTS.rowPadX)
+    end
+  end
+
+  if hitPadY == nil then
+    hitPadY = HITBOX_DEFAULTS.basePadY
+    if height <= HITBOX_DEFAULTS.minH then
+      hitPadY = math.max(hitPadY, HITBOX_DEFAULTS.smallBoostPadY)
+    end
+    if opts.kind == "row" then
+      hitPadY = math.max(hitPadY, HITBOX_DEFAULTS.rowPadY)
+    end
+  end
+
   buttons[#buttons + 1] = {
     id = id,
     x = x,
     y = y,
-    w = math.max(6, w),
-    h = math.max(3, h or (opts.big and 5 or 4)),
+    w = width,
+    h = height,
     label = label,
     bg = bg,
     fg = fg or C.btnText,
     action = action,
-    hitPadX = opts.hitPadX or 0,
-    hitPadY = opts.hitPadY or 0,
+    hitPadX = hitPadX,
+    hitPadY = hitPadY,
+    hitbox = opts.hitbox,
     isBig = opts.big,
   }
 end
@@ -2161,15 +2200,47 @@ local function drawButton(source, button)
   writeAt(lx, ly, button.label, button.fg, faceColor)
 
   local maxW, maxH = term.getSize()
-  local x1 = clamp(button.x - button.hitPadX, 1, maxW)
-  local y1 = clamp(button.y - button.hitPadY, 1, maxH)
-  local x2 = clamp(button.x + button.w - 1 + button.hitPadX, 1, maxW)
-  local y2 = clamp(button.y + button.h - 1 + button.hitPadY, 1, maxH)
+  local baseX1 = button.x
+  local baseY1 = button.y
+  local baseX2 = button.x + button.w - 1
+  local baseY2 = button.y + button.h - 1
+  if type(button.hitbox) == "table" then
+    baseX1 = button.hitbox.x1 or baseX1
+    baseY1 = button.hitbox.y1 or baseY1
+    baseX2 = button.hitbox.x2 or baseX2
+    baseY2 = button.hitbox.y2 or baseY2
+  end
+  local x1 = clamp(baseX1 - button.hitPadX, 1, maxW)
+  local y1 = clamp(baseY1 - button.hitPadY, 1, maxH)
+  local x2 = clamp(baseX2 + button.hitPadX, 1, maxW)
+  local y2 = clamp(baseY2 + button.hitPadY, 1, maxH)
   addHitbox(source, button.id, x1, y1, x2, y2, button.action)
 end
 
 local function drawBigButton(id, x, y, w, label, bg, action)
-  addButton(id, x, y, w, 5, label, bg, C.btnText, action, { big = true, hitPadX = 1, hitPadY = 1 })
+  addButton(id, x, y, w, 5, label, bg, C.btnText, action, { big = true })
+end
+
+local function addRowButton(id, x, y, w, h, label, bg, fg, action)
+  addButton(id, x, y, w, h, label, bg, fg, action, {
+    kind = "row",
+    hitbox = { x1 = x, y1 = y, x2 = x + w - 1, y2 = y + h - 1 },
+  })
+end
+
+local function drawHitboxDebug(source)
+  if not UI_HITBOX_DEBUG then return end
+  local bucket = getHitboxBucket(source)
+  for _, hit in ipairs(bucket) do
+    for xx = hit.x1, hit.x2 do
+      writeAt(xx, hit.y1, "·", C.warn, nil)
+      writeAt(xx, hit.y2, "·", C.warn, nil)
+    end
+    for yy = hit.y1, hit.y2 do
+      writeAt(hit.x1, yy, "·", C.warn, nil)
+      writeAt(hit.x2, yy, "·", C.warn, nil)
+    end
+  end
 end
 
 local function startMonitorSelection()
@@ -2201,11 +2272,14 @@ local function buildButtons(layout)
   if state.choosingMonitor then
     local boxW = clamp(layout.width - 6, 24, 60)
     local x = math.floor((layout.width - boxW) / 2) + 1
-    local y0 = layout.top + 3
+    local y0 = layout.top + 4
     for i = 1, 4 do
-      addButton("m" .. i, x + 1, y0 + (i - 1) * 5, boxW - 2, 4, tostring(i), C.btnAction, nil, function() selectMonitorByIndex(i) end, { hitPadX = 1, hitPadY = 1 })
+      local rowY = y0 + (i - 1) * 3
+      local rowAction = function() selectMonitorByIndex(i) end
+      addRowButton("mrow" .. i, x + 1, rowY, boxW - 2, 2, "", C.panelDark, C.text, rowAction)
+      addButton("m" .. i, x + boxW - 8, rowY, 6, 2, tostring(i), C.btnAction, nil, rowAction, { kind = "small" })
     end
-    addButton("cancelMon", x + 1, layout.bottom - 4, boxW - 2, 4, "ANNULER", C.bad, nil, function() stopMonitorSelection() end, { hitPadX = 1, hitPadY = 1 })
+    addButton("cancelMon", x + 1, layout.bottom - 4, boxW - 2, 4, "ANNULER", C.bad, nil, function() stopMonitorSelection() end)
     return
   end
 
@@ -2217,16 +2291,16 @@ local function buildButtons(layout)
   local bGap = 2
 
   local navW = math.max(6, math.floor(bw / 5))
-  addButton("viewSup", bx, ctrl.y + 1, navW, 4, "SUP", state.currentView == "supervision" and C.btnOn or C.panelMid, nil, function() state.currentView = "supervision"; pushEvent("View supervision") end, { hitPadX = 1, hitPadY = 1 })
-  addButton("viewDiag", bx + navW, ctrl.y + 1, navW, 4, "DIAG", state.currentView == "diagnostic" and C.btnOn or C.panelMid, nil, function() state.currentView = "diagnostic"; pushEvent("View diagnostic") end, { hitPadX = 1, hitPadY = 1 })
-  addButton("viewMan", bx + (navW * 2), ctrl.y + 1, navW, 4, "MAN", state.currentView == "manual" and C.btnOn or C.panelMid, nil, function() state.currentView = "manual"; pushEvent("View manual") end, { hitPadX = 1, hitPadY = 1 })
-  addButton("viewInd", bx + (navW * 3), ctrl.y + 1, navW, 4, "IND", state.currentView == "induction" and C.btnOn or C.panelMid, nil, function() state.currentView = "induction"; pushEvent("View induction") end, { hitPadX = 1, hitPadY = 1 })
-  addButton("viewUpd", bx + (navW * 4), ctrl.y + 1, bw - (navW * 4), 4, "UPD", state.currentView == "update" and C.btnOn or C.panelMid, nil, function() state.currentView = "update"; pushEvent("View update") end, { hitPadX = 1, hitPadY = 1 })
+  addButton("viewSup", bx, ctrl.y + 1, navW, 4, "SUP", state.currentView == "supervision" and C.btnOn or C.panelMid, nil, function() state.currentView = "supervision"; pushEvent("View supervision") end)
+  addButton("viewDiag", bx + navW, ctrl.y + 1, navW, 4, "DIAG", state.currentView == "diagnostic" and C.btnOn or C.panelMid, nil, function() state.currentView = "diagnostic"; pushEvent("View diagnostic") end)
+  addButton("viewMan", bx + (navW * 2), ctrl.y + 1, navW, 4, "MAN", state.currentView == "manual" and C.btnOn or C.panelMid, nil, function() state.currentView = "manual"; pushEvent("View manual") end)
+  addButton("viewInd", bx + (navW * 3), ctrl.y + 1, navW, 4, "IND", state.currentView == "induction" and C.btnOn or C.panelMid, nil, function() state.currentView = "induction"; pushEvent("View induction") end)
+  addButton("viewUpd", bx + (navW * 4), ctrl.y + 1, bw - (navW * 4), 4, "UPD", state.currentView == "update" and C.btnOn or C.panelMid, nil, function() state.currentView = "update"; pushEvent("View update") end)
 
   addButton("refreshNow", bx, ctrl.y + 6, bw, 4, "REFRESH", C.btnAction, nil, function()
     refreshAll()
     state.lastAction = "Refresh"
-  end, { hitPadX = 1, hitPadY = 1 })
+  end)
 
   if state.currentView == "update" then
     local uY = by
@@ -2237,7 +2311,7 @@ local function buildButtons(layout)
         setUpdateState("FAILED", "Check crashed", "No apply")
         pushEvent("Update failed")
       end
-    end, { hitPadX = 1, hitPadY = 1 })
+    end)
     addButton("updApply", bx, uY + 6, bw, 5, "UPDATE", state.update.available and C.warn or C.inactive, nil, function()
       local ok, result, err = pcall(performUpdate)
       if not ok then
@@ -2248,7 +2322,7 @@ local function buildButtons(layout)
         state.update.lastError = tostring(err or "No update available")
         state.lastAction = "No update"
       end
-    end, { hitPadX = 1, hitPadY = 1 })
+    end)
     addButton("updRollback", bx, uY + 12, bw, 5, "ROLLBACK", fs.exists(UPDATE_BACKUP_FILE) and C.bad or C.inactive, nil, function()
       local ok, err = pcall(rollbackUpdate)
       if not ok then
@@ -2256,8 +2330,8 @@ local function buildButtons(layout)
         setUpdateState("FAILED", nil, "Rollback crashed")
         pushEvent("Update failed")
       end
-    end, { hitPadX = 1, hitPadY = 1 })
-    addButton("monitor", bx, uY + 18, bw, 4, "MONITOR", C.btnWarn, nil, function() startMonitorSelection() end, { hitPadX = 1, hitPadY = 1 })
+    end)
+    addButton("monitor", bx, uY + 18, bw, 4, "MONITOR", C.btnWarn, nil, function() startMonitorSelection() end)
     return
   end
 
@@ -2270,16 +2344,16 @@ local function buildButtons(layout)
     local mY = by
     drawBigButton("manualStart", bx, mY, bw, "DEMARRAGE", canIgnite() and C.warn or C.inactive, function() startReactorSequence() end)
     drawBigButton("manualStop", bx, mY + 7, bw, "ARRET", C.bad, function() stopReactorSequence("ARRET DEMANDE") end)
-    addButton("manualT", bx, mY + 14, bw, 5, "T LOCK", state.tOpen and C.tritium or C.inactive, nil, function() openTritium(not state.tOpen) end, { hitPadX = 1, hitPadY = 1 })
+    addButton("manualT", bx, mY + 14, bw, 5, "T LOCK", state.tOpen and C.tritium or C.inactive, nil, function() openTritium(not state.tOpen) end)
     addButton("manualDT", bx, mY + 20, bw, 5, "DT LOCK", state.dtOpen and C.dtFuel or C.inactive, nil, function()
       local nextState = not state.dtOpen
       openDTFuel(nextState)
       if nextState then openSeparatedGases(false) end
-    end, { hitPadX = 1, hitPadY = 1 })
-    addButton("manualD", bx, mY + 26, bw, 5, "D LOCK", state.dOpen and C.deuterium or C.inactive, nil, function() openDeuterium(not state.dOpen) end, { hitPadX = 1, hitPadY = 1 })
-    addButton("manualPulse", bx, mY + 32, bw, 5, "PULSE LAS", C.warn, nil, function() fireLaser() end, { hitPadX = 1, hitPadY = 1 })
-    addButton("monitor", bx, mY + 38, bw, 4, "MONITOR", C.btnWarn, nil, function() startMonitorSelection() end, { hitPadX = 1, hitPadY = 1 })
-    addButton("manualBack", bx, mY + 43, bw, 4, "RETOUR SUP", C.btnAction, nil, function() state.currentView = "supervision"; pushEvent("View supervision") end, { hitPadX = 1, hitPadY = 1 })
+    end)
+    addButton("manualD", bx, mY + 26, bw, 5, "D LOCK", state.dOpen and C.deuterium or C.inactive, nil, function() openDeuterium(not state.dOpen) end)
+    addButton("manualPulse", bx, mY + 32, bw, 5, "PULSE LAS", C.warn, nil, function() fireLaser() end)
+    addButton("monitor", bx, mY + 38, bw, 4, "MONITOR", C.btnWarn, nil, function() startMonitorSelection() end)
+    addButton("manualBack", bx, mY + 43, bw, 4, "RETOUR SUP", C.btnAction, nil, function() state.currentView = "supervision"; pushEvent("View supervision") end)
     return
   end
 
@@ -2295,21 +2369,21 @@ local function buildButtons(layout)
       state.status = "MASTER ON"
     end
     state.lastAction = "Toggle MASTER"
-  end, { hitPadX = 1, hitPadY = 1 })
+  end)
 
   addButton("fusion", bx, by + (bh + bGap), bw, bh, "FUSION", state.fusionAuto and C.btnOn or C.btnOff, nil, function()
     state.fusionAuto = not state.fusionAuto
     state.lastAction = "Toggle FUSION"
-  end, { hitPadX = 1, hitPadY = 1 })
+  end)
 
   addButton("charge", bx, by + (bh + bGap) * 2, bw, bh, "CHARGE", state.chargeAuto and C.btnOn or C.btnOff, nil, function()
     state.chargeAuto = not state.chargeAuto
     state.lastAction = "Toggle CHARGE"
-  end, { hitPadX = 1, hitPadY = 1 })
+  end)
 
   drawBigButton("demarrage", bx, by + (bh + bGap) * 3, bw, "DEMARRAGE", canIgnite() and C.warn or C.inactive, function() startReactorSequence() end)
-  addButton("monitor", bx, by + (bh + bGap) * 3 + 7, bw, 4, "MONITOR", C.btnWarn, nil, function() startMonitorSelection() end, { hitPadX = 1, hitPadY = 1 })
-  addButton("arret", bx, by + (bh + bGap) * 3 + 12, bw, 4, "ARRET", C.bad, nil, function() stopReactorSequence("ARRET DEMANDE") end, { hitPadX = 1, hitPadY = 1 })
+  addButton("monitor", bx, by + (bh + bGap) * 3 + 7, bw, 4, "MONITOR", C.btnWarn, nil, function() startMonitorSelection() end)
+  addButton("arret", bx, by + (bh + bGap) * 3 + 12, bw, 4, "ARRET", C.bad, nil, function() stopReactorSequence("ARRET DEMANDE") end)
 
   local center = layout.center
   if center and layout.mode ~= "compact" and state.currentView == "supervision" then
@@ -2324,17 +2398,17 @@ local function buildButtons(layout)
 
     addButton("lock_t", startX, barY, btnW, btnH, "T LOCK", state.tOpen and C.tritium or C.inactive, C.btnText, function()
       openTritium(not state.tOpen)
-    end, { hitPadX = 1, hitPadY = 1 })
+    end)
 
     addButton("lock_dt", startX + btnW + gap, barY, btnW, btnH, "DT LOCK", state.dtOpen and C.dtFuel or C.inactive, C.btnText, function()
       local nextState = not state.dtOpen
       openDTFuel(nextState)
       if nextState then openSeparatedGases(false) end
-    end, { hitPadX = 1, hitPadY = 1 })
+    end)
 
     addButton("lock_d", startX + (btnW + gap) * 2, barY, btnW, btnH, "D LOCK", state.dOpen and C.deuterium or C.inactive, C.btnText, function()
       openDeuterium(not state.dOpen)
-    end, { hitPadX = 1, hitPadY = 1 })
+    end)
   end
 end
 
@@ -2347,6 +2421,7 @@ local function drawButtons(source)
   for _, b in ipairs(buttons) do
     drawButton(source, b)
   end
+  drawHitboxDebug(source)
 end
 
 local function handleClick(x, y, source)
