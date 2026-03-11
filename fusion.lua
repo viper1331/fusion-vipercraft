@@ -1220,43 +1220,12 @@ local function ensureConfigOrInstaller()
   return true, config
 end
 
-local function isHttpReady()
-  return type(http) == "table" and type(http.get) == "function"
-end
-
 local function setUpdateState(status, checkResult, applyResult)
-  state.update.status = status or state.update.status
-  if checkResult then state.update.lastCheckResult = checkResult end
-  if applyResult then state.update.lastApplyResult = applyResult end
+  CoreUpdate.setUpdateState(state.update, status, checkResult, applyResult)
 end
 
 local function httpGetText(url)
-  if not isHttpReady() then
-    state.update.httpStatus = "DISABLED"
-    return false, nil, "HTTP API disabled"
-  end
-
-  local ok, response = pcall(http.get, url)
-  if not ok or not response then
-    state.update.httpStatus = "FAIL"
-    return false, nil, "HTTP request failed"
-  end
-
-  local readOk, body = pcall(response.readAll)
-  pcall(response.close)
-
-  if not readOk then
-    state.update.httpStatus = "FAIL"
-    return false, nil, "Unable to read response"
-  end
-
-  if type(body) ~= "string" or #trimText(body) == 0 then
-    state.update.httpStatus = "FAIL"
-    return false, nil, "Empty response"
-  end
-
-  state.update.httpStatus = "OK"
-  return true, body, nil
+  return CoreUpdate.httpGetText(http, trimText, state.update, url)
 end
 
 local function parseVersion(version)
@@ -1268,36 +1237,19 @@ local function compareVersions(localV, remoteV)
 end
 
 local function validateVersionString(version)
-  if not CoreUpdate.isValidVersion(version) then
-    return false, "Version format must be MAJOR.MINOR.PATCH"
-  end
-  return true, nil
+  return CoreUpdate.validateVersionString(version)
 end
 
 local function validateLuaScript(text)
-  if type(text) ~= "string" then return false, "Not a string" end
-  if #trimText(text) < 32 then return false, "Downloaded script is too short" end
-  if not contains(text, "local CFG") and not contains(text, "state") then
-    return false, "Invalid Lua signature"
-  end
-  return true, nil
+  return CoreUpdate.validateLuaScript(text, trimText, contains)
 end
 
 local function writeTextFile(path, content)
-  local h = fs.open(path, "w")
-  if not h then return false, "Cannot open file for writing: " .. tostring(path) end
-  h.write(content)
-  h.close()
-  return true, nil
+  return CoreUpdate.writeTextFile(fs, path, content)
 end
 
 local function readTextFile(path)
-  if not fs.exists(path) then return false, nil, "File not found: " .. tostring(path) end
-  local h = fs.open(path, "r")
-  if not h then return false, nil, "Cannot open file: " .. tostring(path) end
-  local text = h.readAll()
-  h.close()
-  return true, text, nil
+  return CoreUpdate.readTextFile(fs, path)
 end
 
 local function checkForUpdate()
@@ -1615,49 +1567,8 @@ local function restoreTerm()
   term.setCursorBlink(false)
 end
 
-local function hasMethods(obj, methods, minCount)
-  return IoDevices.hasMethods(obj, methods, minCount)
-end
-
-local function detectBestPeripheral(preferredName, validator)
-  return IoDevices.detectBestPeripheral(peripheral, preferredName, safePeripheral, validator)
-end
-
 local function scanPeripherals()
-  hw.relays = {}
-  hw.blockReaders = {}
-
-  hw.logic, hw.logicName = detectBestPeripheral(CFG.preferredLogicAdapter, function(obj, name)
-    return contains(name, "fusion") or hasMethods(obj, { "isFormed", "isIgnited", "getPlasmaTemperature", "getCaseTemperature" }, 2)
-  end)
-
-  hw.reactor, hw.reactorName = detectBestPeripheral(CFG.preferredReactor, function(obj, name)
-    return contains(name, "fusion_reactor") or contains(name, "reactor_controller")
-        or hasMethods(obj, { "isIgnited", "getPlasmaTemperature", "getIgnitionTemperature" }, 2)
-  end)
-
-  hw.laser, hw.laserName = detectBestPeripheral(CFG.preferredLaser, function(obj, name)
-    return contains(name, "laser") or hasMethods(obj, { "getEnergy", "getEnergyStored", "getMaxEnergyStored" }, 2)
-  end)
-
-  hw.induction, hw.inductionName = detectBestPeripheral(CFG.preferredInduction, function(obj, name)
-    return contains(name, "induction") or hasMethods(obj, { "getEnergy", "getEnergyStored", "getMaxEnergyStored", "getEnergyCapacity" }, 2)
-  end)
-
-  for _, name in ipairs(peripheral.getNames()) do
-    local ptype = getTypeOf(name)
-
-    if ptype == "redstone_relay" then
-      hw.relays[name] = safePeripheral(name)
-    elseif ptype == "block_reader" or contains(name, "block_reader") then
-      table.insert(hw.blockReaders, {
-        name = name,
-        obj = safePeripheral(name),
-        role = "unknown",
-        data = nil,
-      })
-    end
-  end
+  IoDevices.scanPeripherals(peripheral, hw, CFG, safePeripheral, getTypeOf, contains)
 end
 
 local function resolveKnownRelays()
@@ -1665,26 +1576,7 @@ local function resolveKnownRelays()
 end
 
 local function resolveKnownReaders()
-  local byName = {}
-
-  for _, entry in ipairs(hw.blockReaders) do
-    byName[entry.name] = entry
-  end
-
-  if byName[CFG.knownReaders.deuterium] then
-    hw.readerRoles.deuterium = byName[CFG.knownReaders.deuterium]
-    hw.readerRoles.deuterium.role = "deuterium"
-  end
-
-  if byName[CFG.knownReaders.tritium] then
-    hw.readerRoles.tritium = byName[CFG.knownReaders.tritium]
-    hw.readerRoles.tritium.role = "tritium"
-  end
-
-  if byName[CFG.knownReaders.inventory] then
-    hw.readerRoles.inventory = byName[CFG.knownReaders.inventory]
-    hw.readerRoles.inventory.role = "inventory"
-  end
+  IoReaders.resolveKnownReaders(hw, CFG.knownReaders)
 end
 
 local function resolveKnownTopology()
@@ -1693,150 +1585,32 @@ local function resolveKnownTopology()
 end
 
 local function classifyBlockReaderData(data)
-  if type(data) ~= "table" then return "unknown" end
-
-  if type(data.chemical_tanks) == "table" and type(data.chemical_tanks[1]) == "table" then
-    local stored = data.chemical_tanks[1].stored
-    if type(stored) == "table" then
-      local chemId = tostring(stored.id or "")
-      if contains(chemId, "deuterium") then
-        return "deuterium"
-      elseif contains(chemId, "tritium") then
-        return "tritium"
-      end
-    end
-    return "chemical"
-  end
-
-  if type(data.energy_containers) == "table" then
-    return "energy"
-  end
-
-  if data.inventory ~= nil or data.items ~= nil or data.slots ~= nil then
-    return "inventory"
-  end
-
-  if data.active_state ~= nil or data.redstone ~= nil or data.current_redstone ~= nil then
-    return "active"
-  end
-
-  return "unknown"
+  return IoReaders.classifyBlockReaderData(data)
 end
 
 local function scanBlockReaders()
-  hw.readerRoles = {
-    deuterium = nil,
-    tritium = nil,
-    inventory = nil,
-    energy = nil,
-    active = {},
-    unknown = {},
-  }
-
-  resolveKnownTopology()
-
-  for _, entry in ipairs(hw.blockReaders) do
-    entry.role = "unknown"
-    entry.data = nil
-
-    if entry.obj and type(entry.obj.getBlockData) == "function" then
-      local ok, data = pcall(entry.obj.getBlockData)
-      if ok then
-        entry.data = data
-        entry.role = classifyBlockReaderData(data)
-      end
-    end
-
-    if entry == hw.readerRoles.deuterium or entry == hw.readerRoles.tritium or entry == hw.readerRoles.inventory then
-      -- deja force par topologie connue
-    elseif entry.role == "deuterium" and not hw.readerRoles.deuterium then
-      hw.readerRoles.deuterium = entry
-    elseif entry.role == "tritium" and not hw.readerRoles.tritium then
-      hw.readerRoles.tritium = entry
-    elseif entry.role == "inventory" and not hw.readerRoles.inventory then
-      hw.readerRoles.inventory = entry
-    elseif entry.role == "energy" and not hw.readerRoles.energy then
-      hw.readerRoles.energy = entry
-    elseif entry.role == "active" then
-      table.insert(hw.readerRoles.active, entry)
-    else
-      table.insert(hw.readerRoles.unknown, entry)
-    end
-  end
+  resolveKnownRelays()
+  IoReaders.scanBlockReaders(hw, CFG.knownReaders)
 end
 
 local function extractChemicalData(raw)
-  if type(raw) ~= "table" then return "N/A", 0 end
-  local tanks = raw.chemical_tanks
-  if type(tanks) ~= "table" or type(tanks[1]) ~= "table" then return "N/A", 0 end
-  local stored = tanks[1].stored
-  if type(stored) ~= "table" then return "VIDE", 0 end
-  return tostring(stored.id or "UNKNOWN"), toNumber(stored.amount, 0)
+  return IoReaders.extractChemicalData(raw, toNumber)
 end
 
 local function readChemicalFromReader(entry)
-  if not entry or not entry.data then return "N/A", 0 end
-  return extractChemicalData(entry.data)
+  return IoReaders.readChemicalFromReader(entry, toNumber)
 end
 
 local function readActiveFromReader(entry)
-  if not entry or not entry.data then return false, 0 end
-  local a = entry.data.active_state
-  local active = (a == true) or (tonumber(a) == 1)
-  return active, toNumber(entry.data.current_redstone or entry.data.redstone, 0)
+  return IoReaders.readActiveFromReader(entry, toNumber)
 end
 
 local function relayWrite(actionName, on)
-  local cfg = CFG.actions[actionName]
-  if not cfg then return false end
-
-  local relay = hw.relays[cfg.relay]
-  if not relay then return false end
-
-  if cfg.pulse then
-    if on then
-      if type(relay.setAnalogOutput) == "function" then
-        relay.setAnalogOutput(cfg.side, cfg.analog or 15)
-        sleep(cfg.pulseTime or 0.2)
-        relay.setAnalogOutput(cfg.side, 0)
-        return true
-      elseif type(relay.setOutput) == "function" then
-        relay.setOutput(cfg.side, true)
-        sleep(cfg.pulseTime or 0.2)
-        relay.setOutput(cfg.side, false)
-        return true
-      end
-    end
-  else
-    if type(relay.setAnalogOutput) == "function" then
-      relay.setAnalogOutput(cfg.side, on and (cfg.analog or 15) or 0)
-      return true
-    elseif type(relay.setOutput) == "function" then
-      relay.setOutput(cfg.side, on and true or false)
-      return true
-    end
-  end
-
-  return false
+  return IoRelays.relayWrite(CFG.actions, hw.relays, actionName, on)
 end
 
 local function readRelayOutputState(actionName, fallback)
-  local cfg = CFG.actions[actionName]
-  if not cfg then return fallback end
-  local relay = hw.relays[cfg.relay]
-  if not relay then return fallback end
-
-  if type(relay.getAnalogOutput) == "function" then
-    local ok, v = pcall(relay.getAnalogOutput, cfg.side)
-    if ok then return toNumber(v, 0) > 0 end
-  end
-
-  if type(relay.getOutput) == "function" then
-    local ok, v = pcall(relay.getOutput, cfg.side)
-    if ok then return v == true end
-  end
-
-  return fallback
+  return IoRelays.readRelayOutputState(CFG.actions, hw.relays, actionName, fallback, toNumber)
 end
 
 local function setLaserCharge(on)
