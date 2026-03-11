@@ -2284,7 +2284,6 @@ end
 
 local function drawHitboxDebugOverlay(source)
   if not state.debugHitboxes then return end
-  if state.currentView ~= "update" then return end
   local bucket = getHitboxBucket(source)
   for _, hit in ipairs(bucket) do
     drawHitboxBox(hit)
@@ -2353,7 +2352,7 @@ local function buildButtons(layout)
 
   if state.currentView == "update" then
     local uY = by
-    addButton("updCheck", bx, uY, bw, 5, "CHECK", C.btnAction, nil, function()
+    addButton("updCheck", bx, uY, bw, 4, "CHECK", C.btnAction, nil, function()
       local ok, err = pcall(checkForUpdate)
       if not ok then
         state.update.lastError = tostring(err)
@@ -2361,7 +2360,7 @@ local function buildButtons(layout)
         pushEvent("Update failed")
       end
     end)
-    addButton("updApply", bx, uY + 6, bw, 5, "UPDATE", state.update.available and C.warn or C.inactive, nil, function()
+    addButton("updApply", bx, uY + 5, bw, 4, "UPDATE", state.update.available and C.warn or C.inactive, nil, function()
       local ok, result, err = pcall(performUpdate)
       if not ok then
         state.update.lastError = tostring(result)
@@ -2372,7 +2371,14 @@ local function buildButtons(layout)
         state.lastAction = "No update"
       end
     end)
-    addButton("updRollback", bx, uY + 12, bw, 5, "ROLLBACK", fs.exists(UPDATE_BACKUP_FILE) and C.bad or C.inactive, nil, function()
+    addButton("updDebug", bx, uY + 10, bw, 4, state.debugHitboxes and "DEBUG ON" or "DEBUG OFF", state.debugHitboxes and C.info or C.panelMid, nil, function()
+      state.debugHitboxes = not state.debugHitboxes
+      state.lastAction = state.debugHitboxes and "Hitbox debug ON" or "Hitbox debug OFF"
+      pushEvent(state.lastAction)
+    end)
+    local splitGap = 1
+    local splitW = math.max(8, math.floor((bw - splitGap) / 2))
+    addButton("updRollback", bx, uY + 15, splitW, 4, "ROLLBACK", fs.exists(UPDATE_BACKUP_FILE) and C.bad or C.inactive, nil, function()
       local ok, err = pcall(rollbackUpdate)
       if not ok then
         state.update.lastError = tostring(err)
@@ -2380,14 +2386,7 @@ local function buildButtons(layout)
         pushEvent("Update failed")
       end
     end)
-    local splitGap = 1
-    local splitW = math.max(8, math.floor((bw - splitGap) / 2))
-    addButton("monitor", bx, uY + 18, splitW, 4, "MONITOR", C.btnWarn, nil, function() startMonitorSelection() end)
-    addButton("updDebug", bx + splitW + splitGap, uY + 18, bw - splitW - splitGap, 4, "DEBUG", state.debugHitboxes and C.info or C.panelMid, nil, function()
-      state.debugHitboxes = not state.debugHitboxes
-      state.lastAction = state.debugHitboxes and "Hitbox debug ON" or "Hitbox debug OFF"
-      pushEvent(state.lastAction)
-    end)
+    addButton("monitor", bx + splitW + splitGap, uY + 15, bw - splitW - splitGap, 4, "MONITOR", C.btnWarn, nil, function() startMonitorSelection() end)
     return
   end
 
