@@ -70,7 +70,6 @@ local buttons = {}
 local touchHitboxes = { terminal = {}, monitor = {} }
 local pressedButtons = {}
 local pressedEffectDuration = 0.18
-local UI_HITBOX_DEBUG = false
 
 local HITBOX_DEFAULTS = {
   minW = 10,
@@ -182,6 +181,7 @@ local state = {
   },
 
   tick = 0,
+  debugHitboxes = false,
 }
 
 local hw = {
@@ -2266,18 +2266,29 @@ local function addRowButton(id, x, y, w, h, label, bg, fg, action)
   })
 end
 
-local function drawHitboxDebug(source)
-  if not UI_HITBOX_DEBUG then return end
+local function drawHitboxBox(hit)
+  for xx = hit.x1, hit.x2 do
+    writeAt(xx, hit.y1, " ", C.warn, colors.brown)
+    writeAt(xx, hit.y2, " ", C.warn, colors.brown)
+  end
+  for yy = hit.y1, hit.y2 do
+    writeAt(hit.x1, yy, " ", C.warn, colors.brown)
+    writeAt(hit.x2, yy, " ", C.warn, colors.brown)
+  end
+end
+
+local function drawHitboxLabel(hit)
+  local label = shortText(hit.id or "btn", math.max(3, hit.x2 - hit.x1 + 1))
+  writeAt(hit.x1, hit.y1, label, C.text, colors.cyan)
+end
+
+local function drawHitboxDebugOverlay(source)
+  if not state.debugHitboxes then return end
+  if state.currentView ~= "update" then return end
   local bucket = getHitboxBucket(source)
   for _, hit in ipairs(bucket) do
-    for xx = hit.x1, hit.x2 do
-      writeAt(xx, hit.y1, "·", C.warn, nil)
-      writeAt(xx, hit.y2, "·", C.warn, nil)
-    end
-    for yy = hit.y1, hit.y2 do
-      writeAt(hit.x1, yy, "·", C.warn, nil)
-      writeAt(hit.x2, yy, "·", C.warn, nil)
-    end
+    drawHitboxBox(hit)
+    drawHitboxLabel(hit)
   end
 end
 
@@ -2369,7 +2380,14 @@ local function buildButtons(layout)
         pushEvent("Update failed")
       end
     end)
-    addButton("monitor", bx, uY + 18, bw, 4, "MONITOR", C.btnWarn, nil, function() startMonitorSelection() end)
+    local splitGap = 1
+    local splitW = math.max(8, math.floor((bw - splitGap) / 2))
+    addButton("monitor", bx, uY + 18, splitW, 4, "MONITOR", C.btnWarn, nil, function() startMonitorSelection() end)
+    addButton("updDebug", bx + splitW + splitGap, uY + 18, bw - splitW - splitGap, 4, "DEBUG", state.debugHitboxes and C.info or C.panelMid, nil, function()
+      state.debugHitboxes = not state.debugHitboxes
+      state.lastAction = state.debugHitboxes and "Hitbox debug ON" or "Hitbox debug OFF"
+      pushEvent(state.lastAction)
+    end)
     return
   end
 
@@ -2459,7 +2477,7 @@ local function drawButtons(source)
   for _, b in ipairs(buttons) do
     drawButton(source, b)
   end
-  drawHitboxDebug(source)
+  drawHitboxDebugOverlay(source)
 end
 
 local function handleClick(x, y, source)
