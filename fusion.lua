@@ -128,6 +128,7 @@ local state = {
   inductionLength = 0,
   inductionHeight = 0,
   inductionWidth = 0,
+  inductionPortMode = "UNKNOWN",
 
   deuteriumName = "N/A",
   deuteriumAmount = 0,
@@ -294,6 +295,40 @@ local function fmt(n)
     end
   end
   return tostring(math.floor(n))
+end
+
+local function formatMJ(n)
+  if type(n) ~= "number" then return tostring(n) end
+  local absn = math.abs(n)
+  local units = {
+    { 1e12, "TMJ" },
+    { 1e9, "GMJ" },
+    { 1e6, "MMJ" },
+    { 1e3, "kMJ" },
+  }
+
+  for _, u in ipairs(units) do
+    if absn >= u[1] then
+      return string.format("%.2f%s", n / u[1], u[2])
+    end
+  end
+
+  return string.format("%.0fMJ", n)
+end
+
+local function normalizePortMode(mode)
+  local raw = tostring(mode or "")
+  local upper = string.upper(raw)
+
+  if upper == "INPUT" or upper == "IN" then
+    return "INPUT"
+  end
+
+  if upper == "OUTPUT" or upper == "OUT" then
+    return "OUTPUT"
+  end
+
+  return "UNKNOWN"
 end
 
 local function formatFuelLevel(n)
@@ -1834,6 +1869,7 @@ local function readInductionStatus()
   state.inductionLength = 0
   state.inductionHeight = 0
   state.inductionWidth = 0
+  state.inductionPortMode = "UNKNOWN"
 
   state.energyPresent = state.inductionPresent
   state.energyKnown = false
@@ -1856,6 +1892,7 @@ local function readInductionStatus()
   local okLen, length = safeCall(hw.induction, "getLength")
   local okHeight, height = safeCall(hw.induction, "getHeight")
   local okWidth, width = safeCall(hw.induction, "getWidth")
+  local okPortMode, portMode = safeCall(hw.induction, "getMode")
 
   state.inductionFormed = okFormed and formed == true or false
   state.inductionEnergy = toNumber(energy, 0)
@@ -1869,6 +1906,7 @@ local function readInductionStatus()
   state.inductionLength = toNumber(length, 0)
   state.inductionHeight = toNumber(height, 0)
   state.inductionWidth = toNumber(width, 0)
+  state.inductionPortMode = okPortMode and normalizePortMode(portMode) or "UNKNOWN"
 
   if okPct then
     local rawPct = toNumber(pct, 0)
@@ -2729,12 +2767,13 @@ local function drawInductionDiagram(x, y, w, h)
   local infoX = ix + profileW + capDepth + gapRight
   writeAt(x + 2, y + 1, string.format("STATE %s", status), tone, C.panelDark)
   writeAt(infoX, sy + 1, string.format("FILL  %5.1f%%", state.inductionPct), C.energy, C.panelDark)
-  writeAt(infoX, sy + 2, string.format("STORED %sFE", fmt(state.inductionEnergy)), C.text, C.panelDark)
-  writeAt(infoX, sy + 3, string.format("MAX    %sFE", fmt(state.inductionMax)), C.dim, C.panelDark)
-  writeAt(infoX, sy + 4, string.format("NEEDED %sFE", fmt(state.inductionNeeded)), C.dim, C.panelDark)
-  writeAt(infoX, sy + 6, string.format("IN   %s", fmt(state.inductionInput)), C.ok, C.panelDark)
-  writeAt(infoX, sy + 7, string.format("OUT  %s", fmt(state.inductionOutput)), C.warn, C.panelDark)
-  writeAt(infoX, sy + 8, string.format("CAP  %s", fmt(state.inductionTransferCap)), C.info, C.panelDark)
+  writeAt(infoX, sy + 2, string.format("STORED %s", formatMJ(state.inductionEnergy)), C.text, C.panelDark)
+  writeAt(infoX, sy + 3, string.format("MAX    %s", formatMJ(state.inductionMax)), C.dim, C.panelDark)
+  writeAt(infoX, sy + 4, string.format("NEEDED %s", formatMJ(state.inductionNeeded)), C.dim, C.panelDark)
+  writeAt(infoX, sy + 6, string.format("IN   %s", formatMJ(state.inductionInput)), C.ok, C.panelDark)
+  writeAt(infoX, sy + 7, string.format("OUT  %s", formatMJ(state.inductionOutput)), C.warn, C.panelDark)
+  writeAt(infoX, sy + 8, string.format("CAP  %s", formatMJ(state.inductionTransferCap)), C.info, C.panelDark)
+  writeAt(infoX, sy + 9, string.format("PORT  %s", state.inductionPortMode), C.info, C.panelDark)
   writeAt(infoX, sy + 10, string.format("CELLS %d", state.inductionCells), C.info, C.panelDark)
   writeAt(infoX, sy + 11, string.format("PROV  %d", state.inductionProviders), C.info, C.panelDark)
   writeAt(infoX, sy + 12, string.format("DIM   %dx%dx%d", state.inductionLength, state.inductionWidth, state.inductionHeight), C.text, C.panelDark)
@@ -2753,18 +2792,19 @@ local function drawInductionView(layout)
   drawKeyValue(x, y + 2, "Global", istat, C.dim, statusTone, left.w - 6)
 
   drawBox(x - 1, y + 4, left.w - 4, 9, "TECHNICAL", C.borderDim)
-  drawKeyValue(x, y + 5, "Stored", fmt(state.inductionEnergy), C.dim, C.energy, left.w - 6)
-  drawKeyValue(x, y + 6, "Max", fmt(state.inductionMax), C.dim, C.energy, left.w - 6)
+  drawKeyValue(x, y + 5, "Stored", formatMJ(state.inductionEnergy), C.dim, C.energy, left.w - 6)
+  drawKeyValue(x, y + 6, "Max", formatMJ(state.inductionMax), C.dim, C.energy, left.w - 6)
   drawKeyValue(x, y + 7, "Fill %", string.format("%.1f%%", state.inductionPct), C.dim, C.energy, left.w - 6)
-  drawKeyValue(x, y + 8, "Needed", fmt(state.inductionNeeded), C.dim, C.dim, left.w - 6)
-  drawKeyValue(x, y + 9, "Transfer", fmt(state.inductionTransferCap), C.dim, C.info, left.w - 6)
-  drawKeyValue(x, y + 10, "Last In", fmt(state.inductionInput), C.dim, C.ok, left.w - 6)
-  drawKeyValue(x, y + 11, "Last Out", fmt(state.inductionOutput), C.dim, C.warn, left.w - 6)
+  drawKeyValue(x, y + 8, "Needed", formatMJ(state.inductionNeeded), C.dim, C.dim, left.w - 6)
+  drawKeyValue(x, y + 9, "Transfer Cap", formatMJ(state.inductionTransferCap), C.dim, C.info, left.w - 6)
+  drawKeyValue(x, y + 10, "Last In", formatMJ(state.inductionInput), C.dim, C.ok, left.w - 6)
+  drawKeyValue(x, y + 11, "Last Out", formatMJ(state.inductionOutput), C.dim, C.warn, left.w - 6)
 
   drawBox(x - 1, y + 13, left.w - 4, 6, "STRUCTURE", C.borderDim)
   drawKeyValue(x, y + 14, "Cells", tostring(state.inductionCells), C.dim, C.info, left.w - 6)
   drawKeyValue(x, y + 15, "Providers", tostring(state.inductionProviders), C.dim, C.info, left.w - 6)
   drawKeyValue(x, y + 16, "Dimensions", string.format("%dx%dx%d", state.inductionLength, state.inductionWidth, state.inductionHeight), C.dim, C.text, left.w - 6)
+  drawKeyValue(x, y + 17, "Port Mode", state.inductionPortMode, C.dim, C.info, left.w - 6)
 
   if layout.center then
     drawInductionDiagram(layout.center.x, layout.center.y, layout.center.w, layout.center.h)
