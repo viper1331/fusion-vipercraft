@@ -219,8 +219,9 @@ for k, v in pairs(state.suggested) do
 end
 
 local hitboxes = { term = {}, monitor = {} }
+local nativeTerm = term.current()
 local currentSource = "term"
-local currentSurface = term
+local currentSurface = nativeTerm
 
 local function clearHitboxes(source)
   hitboxes[source] = {}
@@ -701,12 +702,12 @@ local function render()
       pcall(function() mon.setTextScale(sanitizeScale(state.monitorScale)) end)
     else
       currentSource = "term"
-      currentSurface = term
+      currentSurface = nativeTerm
       state.uiOnMonitor = false
     end
   else
     currentSource = "term"
-    currentSurface = term
+    currentSurface = nativeTerm
   end
 
   withSurface(function()
