@@ -65,6 +65,21 @@ local UPDATE_VERSION_BACKUP_FILE = "fusion.version.bak"
 local UPDATE_TEMP_FILE = "fusion.new"
 local UPDATE_TEMP_VERSION_FILE = "fusion.version.new"
 
+
+local Theme = require("ui.theme")
+local UIComponents = require("ui.components")
+local UIRender = require("ui.render")
+local UIViews = require("ui.views")
+local CoreConfig = require("core.config")
+local CoreUpdate = require("core.update")
+local CoreState = require("core.state")
+local CoreReactor = require("core.reactor")
+local CoreInduction = require("core.induction")
+local IoDevices = require("io.devices")
+local IoReaders = require("io.readers")
+local IoRelays = require("io.relays")
+local IoMonitor = require("io.monitor")
+
 local nativeTerm = term.current()
 local buttons = {}
 local touchHitboxes = { terminal = {}, monitor = {} }
@@ -82,7 +97,7 @@ local HITBOX_DEFAULTS = {
   rowPadY = 0,
 }
 
-local state = {
+local state = CoreState.new({
   running = true,
   uiDrawn = false,
   choosingMonitor = false,
@@ -182,7 +197,7 @@ local state = {
 
   tick = 0,
   debugHitboxes = false,
-}
+})
 
 local hw = {
   monitor = nil,
@@ -375,6 +390,7 @@ function ui.centerText(y, text, tc, bc)
 end
 
 local function applyPremiumPalette()
+  Theme.applyPremiumPalette(C)
   if not term.isColor or not term.isColor() then return end
   pcall(term.setPaletteColor, colors.black, 0.03, 0.04, 0.05)
   pcall(term.setPaletteColor, colors.gray, 0.15, 0.18, 0.20)
@@ -758,6 +774,7 @@ local function getIgnitionBlockers()
 end
 
 local function canIgnite()
+  if not CoreReactor.canIgnite(state) then return false end
   return #getIgnitionBlockers() == 0
 end
 
@@ -813,6 +830,7 @@ local function drawHeader(title, status)
 end
 
 local function drawFooter(layout)
+  local currentViewName = UIViews.resolveViewName(state.currentView)
   drawFooterBarSprite()
 end
 
@@ -1130,23 +1148,11 @@ local function saveSelectedMonitorName(name)
 end
 
 local function trimText(txt)
-  txt = tostring(txt or "")
-  return (txt:gsub("^%s+", ""):gsub("%s+$", ""))
+  return CoreConfig.trimText(txt)
 end
 
 local function readLocalVersionFile()
-  local ok, content = pcall(function()
-    if not fs.exists(VERSION_FILE) then return nil end
-    local h = fs.open(VERSION_FILE, "r")
-    if not h then return nil end
-    local v = h.readAll()
-    h.close()
-    return trimText(v)
-  end)
-  if ok and content and #content > 0 then
-    return content
-  end
-  return LOCAL_VERSION
+  return CoreConfig.readLocalVersionFile(fs, VERSION_FILE, LOCAL_VERSION)
 end
 
 local function defaultFusionConfig()
@@ -1314,26 +1320,11 @@ local function httpGetText(url)
 end
 
 local function parseVersion(version)
-  local parts = {}
-  for n in tostring(version or "0"):gmatch("%d+") do
-    parts[#parts + 1] = tonumber(n) or 0
-  end
-  if #parts == 0 then parts[1] = 0 end
-  return parts
+  return CoreUpdate.parseVersion(version)
 end
 
 local function compareVersions(localV, remoteV)
-  local a = parseVersion(localV)
-  local b = parseVersion(remoteV)
-  local count = math.max(#a, #b)
-
-  for i = 1, count do
-    local av = a[i] or 0
-    local bv = b[i] or 0
-    if bv > av then return 1 end
-    if bv < av then return -1 end
-  end
-  return 0
+  return CoreUpdate.compareVersions(localV, remoteV)
 end
 
 local function validateLuaScript(text)
@@ -1628,22 +1619,7 @@ local function rollbackUpdate()
 end
 
 local function getMonitorCandidates()
-  local monitors = {}
-  for _, name in ipairs(peripheral.getNames()) do
-    if getTypeOf(name) == "monitor" then
-      local obj = safePeripheral(name)
-      local w, h = 0, 0
-      if obj and type(obj.getSize) == "function" then
-        local ok, mw, mh = pcall(obj.getSize)
-        if ok then
-          w, h = mw, mh
-        end
-      end
-      table.insert(monitors, { name = name, obj = obj, w = w, h = h })
-    end
-  end
-  table.sort(monitors, function(a, b) return a.name < b.name end)
-  return monitors
+  return IoDevices.getMonitorCandidates(peripheral, getTypeOf, safePeripheral)
 end
 
 local function chooseMonitorAuto()
@@ -1672,18 +1648,7 @@ local function setupMonitor()
   local chosen = chooseMonitorAuto()
   hw.monitor = chosen and chosen.obj or nil
   hw.monitorName = chosen and chosen.name or nil
-
-  if hw.monitor then
-    term.redirect(nativeTerm)
-    hw.monitor.setTextScale(CFG.monitorScale)
-    hw.monitor.setBackgroundColor(C.bg)
-    hw.monitor.setTextColor(C.text)
-    term.redirect(hw.monitor)
-  else
-    term.redirect(nativeTerm)
-  end
-
-  term.setCursorBlink(false)
+  IoMonitor.setupMonitor(nativeTerm, hw, CFG, C)
 end
 
 local function restoreTerm()
@@ -1692,30 +1657,11 @@ local function restoreTerm()
 end
 
 local function hasMethods(obj, methods, minCount)
-  if not obj then return false end
-  local count = 0
-  for _, m in ipairs(methods) do
-    if type(obj[m]) == "function" then
-      count = count + 1
-    end
-  end
-  return count >= (minCount or 1)
+  return IoDevices.hasMethods(obj, methods, minCount)
 end
 
 local function detectBestPeripheral(preferredName, validator)
-  local p = safePeripheral(preferredName)
-  if p and validator(p, preferredName) then
-    return p, preferredName
-  end
-
-  for _, name in ipairs(peripheral.getNames()) do
-    local obj = safePeripheral(name)
-    if obj and validator(obj, name) then
-      return obj, name
-    end
-  end
-
-  return nil, nil
+  return IoDevices.detectBestPeripheral(peripheral, preferredName, safePeripheral, validator)
 end
 
 local function scanPeripherals()
@@ -1756,16 +1702,7 @@ local function scanPeripherals()
 end
 
 local function resolveKnownRelays()
-  for action, cfg in pairs(CFG.knownRelays) do
-    if CFG.actions[action] == nil then
-      CFG.actions[action] = { relay = cfg.relay, side = cfg.side, analog = 15, pulse = false }
-    else
-      CFG.actions[action].relay = cfg.relay
-      CFG.actions[action].side = cfg.side
-      CFG.actions[action].analog = CFG.actions[action].analog or 15
-      CFG.actions[action].pulse = false
-    end
-  end
+  IoRelays.resolveKnownRelays(CFG)
 end
 
 local function resolveKnownReaders()
@@ -2831,8 +2768,7 @@ local function inductionStatus()
 end
 
 local function getInductionFillRatio()
-  local pct = clamp(toNumber(state.inductionPct, 0), 0, 100)
-  return clamp(pct / 100, 0, 1)
+  return CoreInduction.getFillRatio(state)
 end
 
 local function drawMonitorSelection(layout)
