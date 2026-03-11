@@ -534,6 +534,35 @@ local function statusColor(status)
 end
 
 local function drawBox(x, y, w, h, title, accent)
+  if w < 4 or h < 3 then return end
+  local function drawPanelHeader(px, py, pw, text, skin)
+    ui.hline(px + 1, py, pw - 2, skin.header)
+    if text and #text > 0 and pw > 8 then
+      ui.write(px + 2, py, uiShortText(" " .. text .. " ", pw - 4), skin.text, skin.header)
+    end
+  end
+
+  local function drawPanelSection(px, py, pw, ph, skin)
+    if ph <= 0 or pw <= 2 then return end
+    ui.fill(px + 1, py, pw - 2, ph, skin.bg)
+  end
+
+  local function drawPanelBlock(px, py, pw, ph, skin)
+    if ph < 3 or pw < 6 then return end
+    ui.hline(px + 1, py, pw - 2, skin.trim)
+    ui.fill(px + 1, py + 1, pw - 2, ph - 2, skin.bg)
+    ui.hline(px + 1, py + ph - 1, pw - 2, skin.trim)
+  end
+
+  local function drawSidePanel(px, py, pw, ph, text, skin)
+    ui.frame(px, py, pw, ph, skin.border, skin.trim)
+    drawPanelSection(px, py + 1, pw, ph - 2, skin)
+    drawPanelHeader(px, py, pw, text, skin)
+    if ph >= 7 then
+      drawPanelBlock(px, py + 2, pw, 3, skin)
+    end
+  end
+
   local style = styles.panel.default
   if accent and accent ~= C.border then
     style = {
@@ -544,7 +573,7 @@ local function drawBox(x, y, w, h, title, accent)
       text = styles.panel.default.text,
     }
   end
-  ui.panel(x, y, w, h, title, style)
+  drawSidePanel(x, y, w, h, title, style)
 end
 
 local function drawPanelSprite(x, y, w, h, title, style)
@@ -558,38 +587,79 @@ local getRuntimeFuelMode
 local isRuntimeFuelOk
 
 local function drawHeaderBarSprite(title, status)
-  local tw = term.getSize()
-  local heartbeat = (state.tick % 8 < 4) and "•" or " "
-  local phase = reactorPhase()
-  ui.hline(1, 1, tw, C.headerBg)
-  ui.write(2, 1, shortText(title .. " | " .. string.upper(state.currentView), math.max(10, tw - 42)), C.headerText, C.headerBg)
-  local centerTxt = "PHASE " .. shortText(phase, 18)
-  local cx = math.max(2, math.floor((tw - #centerTxt) / 2))
-  ui.write(cx, 1, centerTxt, phaseColor(phase), C.headerBg)
-  local statusTxt = shortText(status or "N/A", 16)
-  local rightTxt = heartbeat .. " ALERT " .. statusTxt
-  local sx = math.max(2, tw - #rightTxt - 1)
-  ui.write(sx, 1, rightTxt, statusColor(state.alert), C.headerBg)
+  local function drawPhaseBar(x, y, w, phase)
+    local label = "PHASE " .. shortText(phase, math.max(4, w - 7))
+    ui.hline(x, y, w, C.panelDark)
+    ui.write(x + 1, y, shortText(label, math.max(1, w - 2)), phaseColor(phase), C.panelDark)
+  end
+
+  local function drawAlertSegment(x, y, w, alert, pulse)
+    local alertTone = statusColor(alert)
+    local glyph = pulse and "!" or " "
+    local txt = shortText(glyph .. " ALERT " .. tostring(alert or "N/A"), math.max(1, w - 2))
+    ui.hline(x, y, w, C.panelDark)
+    ui.write(x + 1, y, txt, alertTone, C.panelDark)
+  end
+
+  local function drawMainHeader(headerTitle, headerStatus)
+    local tw = term.getSize()
+    local phase = reactorPhase()
+    local pulse = (state.tick % 8 < 4)
+    ui.hline(1, 1, tw, C.headerBg)
+    if tw < 28 then
+      ui.write(2, 1, shortText(headerTitle, tw - 2), C.headerText, C.headerBg)
+      return
+    end
+
+    local leftW = clamp(math.floor(tw * 0.37), 12, tw - 16)
+    local rightW = clamp(math.floor(tw * 0.28), 10, tw - leftW - 6)
+    local centerW = tw - leftW - rightW
+    local lx = 1
+    local cx = lx + leftW
+    local rx = cx + centerW
+
+    ui.hline(lx, 1, leftW, C.headerBg)
+    ui.write(lx + 1, 1, shortText(headerTitle .. " | " .. string.upper(state.currentView), math.max(1, leftW - 2)), C.headerText, C.headerBg)
+    drawPhaseBar(cx, 1, centerW, phase)
+    drawAlertSegment(rx, 1, rightW, headerStatus or state.alert, pulse)
+  end
+
+  drawMainHeader(title, status)
 end
 
 local function drawFooterBarSprite()
-  local tw, th = term.getSize()
-  ui.hline(1, th, tw, C.footerBg)
-  local labels = {
-    { "ACT", shortText(state.lastAction, 18), C.text },
-    { "MON", tostring(hw.monitorName or "term"), C.info },
-    { "PHASE", reactorPhase(), phaseColor(reactorPhase()) },
-    { "LAS", yesno(state.laserLineOn), state.laserLineOn and C.warn or C.dim },
-    { "GRID", state.energyKnown and string.format("%3.0f%%", state.energyPct) or "N/A", C.energy },
-    { "FUEL", "D " .. formatFuelLevel(state.deuteriumAmount) .. " T " .. formatFuelLevel(state.tritiumAmount), C.fuel },
-  }
-  local segW = math.max(9, math.floor(tw / #labels))
-  for i, item in ipairs(labels) do
-    local sx = ((i - 1) * segW) + 1
-    local content = shortText(item[1] .. " " .. item[2], segW - 1)
-    ui.write(sx, th, content, item[3], C.footerBg)
-    if i < #labels and sx + segW - 1 <= tw then ui.write(sx + segW - 1, th, " ", C.borderDim, C.borderDim) end
+  local function drawFooterSegment(x, y, w, key, value, tone, bg)
+    local txt = shortText(key .. " " .. value, math.max(1, w - 2))
+    ui.hline(x, y, w, bg)
+    ui.write(x + 1, y, txt, tone or C.text, bg)
   end
+
+  local function drawMainFooter()
+    local tw, th = term.getSize()
+    local bg = C.footerBg
+    ui.hline(1, th, tw, bg)
+    local phase = reactorPhase()
+    local labels = {
+      { key = "ACT", value = shortText(state.lastAction, 16), tone = C.text },
+      { key = "MON", value = tostring(hw.monitorName or "term"), tone = C.info },
+      { key = "PHS", value = shortText(phase, 14), tone = phaseColor(phase) },
+      { key = "LAS", value = yesno(state.laserLineOn), tone = state.laserLineOn and C.warn or C.dim },
+      { key = "GRID", value = state.energyKnown and string.format("%3.0f%%", state.energyPct) or "N/A", tone = C.energy },
+      { key = "FUEL", value = "D " .. formatFuelLevel(state.deuteriumAmount) .. " T " .. formatFuelLevel(state.tritiumAmount), tone = C.fuel },
+    }
+    local segW = math.max(8, math.floor(tw / #labels))
+    for i, seg in ipairs(labels) do
+      local sx = ((i - 1) * segW) + 1
+      local width = (i == #labels) and (tw - sx + 1) or segW
+      drawFooterSegment(sx, th, width, seg.key, seg.value, seg.tone, bg)
+      if i < #labels then
+        local divX = sx + width - 1
+        if divX <= tw then ui.write(divX, th, " ", C.borderDim, C.borderDim) end
+      end
+    end
+  end
+
+  drawMainFooter()
 end
 
 getRuntimeFuelMode = function()
@@ -2352,6 +2422,19 @@ local function resolveButtonStyle(button)
   return styles.button.secondary
 end
 
+local function isTabButton(button)
+  return type(button.id) == "string" and string.sub(button.id, 1, 4) == "view"
+end
+
+local function drawButtonLabel(button, textColor, faceColor, isPressed)
+  local textOffset = isPressed and 1 or 0
+  local lx = button.x + math.max(1, math.floor((button.w - #button.label) / 2)) + textOffset
+  local ly = button.y + math.floor((button.h - 1) / 2) + textOffset
+  lx = clamp(lx, button.x + 1, button.x + button.w - #button.label)
+  ly = clamp(ly, button.y + 1, button.y + button.h - 1)
+  writeAt(lx, ly, button.label, textColor or button.fg, faceColor)
+end
+
 local function drawButtonSprite(button, style)
   local skin = style or resolveButtonStyle(button)
   ui.fill(button.x, button.y, button.w, button.h, skin.face)
@@ -2378,12 +2461,51 @@ local function drawButtonActiveSprite(button, style)
   return drawButtonSprite(button, style or resolveButtonStyle(button))
 end
 
-local function drawTabSprite(x, y, w, label, isActive)
-  local bg = isActive and UI_PALETTE.buttonActive or UI_PALETTE.bgElevated
-  local edge = isActive and UI_PALETTE.frameOuter or UI_PALETTE.frameDim
-  ui.hline(x, y, w, bg)
-  ui.hline(x, y + 1, w, edge)
-  ui.write(x + 1, y, shortText(label, math.max(1, w - 2)), C.text, bg)
+local function drawTabSprite(x, y, w, h, label, isActive, isPressed)
+  local base = isActive and UI_PALETTE.buttonActive or UI_PALETTE.bgElevated
+  local top = isPressed and UI_PALETTE.frameDim or (isActive and UI_PALETTE.frameOuter or UI_PALETTE.frameInner)
+  local bottom = isActive and UI_PALETTE.frameOuter or UI_PALETTE.frameDim
+  ui.fill(x, y, w, h, base)
+  ui.hline(x, y, w, top)
+  ui.hline(x, y + h - 1, w, bottom)
+  if h >= 4 then
+    ui.hline(x + 1, y + h - 2, math.max(1, w - 2), isActive and UI_PALETTE.frameOuter or UI_PALETTE.bgMain)
+  end
+  local textY = y + math.floor((h - 1) / 2) + (isPressed and 1 or 0)
+  ui.write(x + 1, textY, shortText(label, math.max(1, w - 2)), C.text, base)
+end
+
+local function drawTabBar(button, isPressed)
+  local isActive = button.bg == C.btnOn
+  drawTabSprite(button.x, button.y, button.w, button.h, button.label, isActive, isPressed)
+  return button.bg, C.text
+end
+
+local function drawFuelButton(button, isPressed)
+  local style = resolveButtonStyle(button)
+  return isPressed and drawButtonPressedSprite(button, style) or drawButtonActiveSprite(button, style)
+end
+
+local function drawPrimaryButton(button, isPressed)
+  local style = resolveButtonStyle(button)
+  return isPressed and drawButtonPressedSprite(button, style) or drawButtonActiveSprite(button, style)
+end
+
+local function drawActionButton(button, isPressed)
+  local style = resolveButtonStyle(button)
+  return isPressed and drawButtonPressedSprite(button, style) or drawButtonActiveSprite(button, style)
+end
+
+local function drawControlButton(button, isPressed)
+  if button.disabled then return drawButtonDisabledSprite(button) end
+  if isTabButton(button) then return drawTabBar(button, isPressed) end
+  if button.bg == C.tritium or button.bg == C.deuterium or button.bg == C.dtFuel then
+    return drawFuelButton(button, isPressed)
+  end
+  if button.bg == C.btnAction then
+    return drawActionButton(button, isPressed)
+  end
+  return drawPrimaryButton(button, isPressed)
 end
 
 local function drawStatusBarSprite(x, y, w, title, value, tone)
@@ -2403,19 +2525,10 @@ end
 
 local function drawButton(source, button)
   local isPressed = (not button.disabled) and isButtonPressed(source, button.id)
-  local faceColor, textColor
-  if button.disabled then
-    faceColor, textColor = drawButtonDisabledSprite(button)
-  else
-    faceColor, textColor = isPressed and drawPressedButton(button) or drawRaisedButton(button)
+  local faceColor, textColor = drawControlButton(button, isPressed)
+  if not isTabButton(button) then
+    drawButtonLabel(button, textColor, faceColor, isPressed)
   end
-
-  local textOffset = isPressed and 1 or 0
-  local lx = button.x + math.max(1, math.floor((button.w - #button.label) / 2)) + textOffset
-  local ly = button.y + math.floor((button.h - 1) / 2) + textOffset
-  lx = clamp(lx, button.x + 1, button.x + button.w - #button.label)
-  ly = clamp(ly, button.y + 1, button.y + button.h - 1)
-  writeAt(lx, ly, button.label, textColor or button.fg, faceColor)
 
   local maxW, maxH = term.getSize()
   local baseX1 = button.x
