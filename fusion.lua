@@ -413,6 +413,8 @@ local reactorPhase
 local phaseColor
 local getRuntimeFuelMode
 local isRuntimeFuelOk
+local computeSafetyWarnings
+local collectSafetyWarnings
 
 local function drawHeaderBarSprite(title, status)
   local function drawHeaderSegment(x, y, w, label, value, tone)
@@ -426,7 +428,7 @@ local function drawHeaderBarSprite(title, status)
   local function drawMainHeader(headerTitle, headerStatus)
     local tw = term.getSize()
     local phase = reactorPhase()
-    local warnings, critical = collectSafetyWarnings()
+    local warnings, critical = computeSafetyWarnings()
     local pulse = (state.tick % 8 < 4)
     local mainAlert = headerStatus or state.alert or "INFO"
     local firstWarn = warnings[1] or "NONE"
@@ -575,7 +577,7 @@ local function canIgnite()
   return #getIgnitionBlockers() == 0
 end
 
-local function computeSafetyWarnings()
+computeSafetyWarnings = function()
   local warnings = {}
   local critical = false
 
@@ -620,6 +622,10 @@ local function computeSafetyWarnings()
 
   if #hw.readerRoles.unknown > 0 then table.insert(warnings, "FALLBACK DETECTION") end
   return warnings, critical
+end
+
+collectSafetyWarnings = function()
+  return computeSafetyWarnings()
 end
 
 local function drawHeader(title, status)
