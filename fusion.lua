@@ -56,14 +56,11 @@ local VERSION_FILE = "fusion.version"
 local LOCAL_VERSION = "0.0.0"
 local UPDATE_ENABLED = true
 local UPDATE_REPO_RAW_BASE = "https://raw.githubusercontent.com/viper1331/fusion-vipercraft/main"
-local UPDATE_VERSION_URL = UPDATE_REPO_RAW_BASE .. "/fusion.version"
-local UPDATE_SCRIPT_URL = UPDATE_REPO_RAW_BASE .. "/fusion.lua"
-local UPDATE_SCRIPT_FILE = "fusion.lua"
-local UPDATE_VERSION_FILE = "fusion.version"
-local UPDATE_BACKUP_FILE = "fusion.bak"
-local UPDATE_VERSION_BACKUP_FILE = "fusion.version.bak"
-local UPDATE_TEMP_FILE = "fusion.new"
-local UPDATE_TEMP_VERSION_FILE = "fusion.version.new"
+local UPDATE_MANIFEST_FILE = "fusion.manifest.json"
+local UPDATE_MANIFEST_URL = UPDATE_REPO_RAW_BASE .. "/" .. UPDATE_MANIFEST_FILE
+local UPDATE_TEMP_DIR = ".fusion_update_tmp"
+local UPDATE_MANIFEST_CACHE_FILE = "fusion.manifest.cache"
+local UPDATE_MISSING_BACKUP_SUFFIX = ".bak.missing"
 
 
 local Theme = require("ui.theme")
@@ -192,7 +189,11 @@ local state = CoreState.new({
     available = false,
     restartRequired = false,
     downloaded = false,
+    manifestLoaded = false,
+    filesToUpdate = 0,
+    lastManifestError = "",
     lastCheckClock = 0,
+    lastManifest = nil,
   },
 
   tick = 0,
@@ -1252,9 +1253,180 @@ local function readTextFile(path)
   return CoreUpdate.readTextFile(fs, path)
 end
 
+local function normalizePath(path)
+  return tostring(path or ""):gsub("\\", "/")
+end
+
+local function buildRawFileUrl(path)
+  return UPDATE_REPO_RAW_BASE .. "/" .. normalizePath(path)
+end
+
+local function getTempPathFor(filePath)
+  return UPDATE_TEMP_DIR .. "/" .. normalizePath(filePath) .. ".new"
+end
+
+local function getBackupPathFor(filePath)
+  return normalizePath(filePath) .. ".bak"
+end
+
+local function getMissingBackupMarker(filePath)
+  return getBackupPathFor(filePath) .. UPDATE_MISSING_BACKUP_SUFFIX
+end
+
+local function ensureParentDir(path)
+  local dir = fs.getDir(path)
+  if dir and dir ~= "" and not fs.exists(dir) then
+    fs.makeDir(dir)
+  end
+end
+
+local function isPreservedFile(path, preserveSet)
+  return preserveSet[normalizePath(path)] == true
+end
+
+local function buildPreserveSet(manifest)
+  local preserveSet = {}
+  for _, path in ipairs(manifest.preserve or {}) do
+    preserveSet[normalizePath(path)] = true
+  end
+  preserveSet[CONFIG_FILE] = true
+  return preserveSet
+end
+
+local function parseManifest(body)
+  if type(textutils) ~= "table" or type(textutils.unserializeJSON) ~= "function" then
+    return false, nil, "JSON parser unavailable"
+  end
+
+  local ok, decoded = pcall(textutils.unserializeJSON, body)
+  if not ok or type(decoded) ~= "table" then
+    return false, nil, "Invalid manifest JSON"
+  end
+  if type(decoded.version) ~= "string" then
+    return false, nil, "Manifest version missing"
+  end
+  if type(decoded.files) ~= "table" or #decoded.files == 0 then
+    return false, nil, "Manifest files missing"
+  end
+
+  local validVersion, versionErr = validateVersionString(trimText(decoded.version))
+  if not validVersion then
+    return false, nil, versionErr or "Manifest version invalid"
+  end
+
+  local seen = {}
+  local files = {}
+  for _, item in ipairs(decoded.files) do
+    local path = normalizePath(trimText(item))
+    if path ~= "" and not seen[path] then
+      seen[path] = true
+      table.insert(files, path)
+    end
+  end
+  if #files == 0 then
+    return false, nil, "Manifest files list is empty"
+  end
+
+  local preserve = {}
+  if type(decoded.preserve) == "table" then
+    for _, item in ipairs(decoded.preserve) do
+      local path = normalizePath(trimText(item))
+      if path ~= "" then table.insert(preserve, path) end
+    end
+  end
+
+  return true, {
+    version = trimText(decoded.version),
+    files = files,
+    preserve = preserve,
+  }, nil
+end
+
+local function validateDownloadedContent(path, content)
+  local normalized = normalizePath(path)
+  if type(content) ~= "string" or #trimText(content) == 0 then
+    return false, "Downloaded file is empty: " .. normalized
+  end
+
+  if normalized == "fusion.version" then
+    return validateVersionString(trimText(content))
+  end
+
+  if normalized:match("%.lua$") then
+    if #trimText(content) < 8 then
+      return false, "Lua file too short: " .. normalized
+    end
+  end
+
+  return true, nil
+end
+
+local function fetchRemoteManifest()
+  local ok, body, err = httpGetText(UPDATE_MANIFEST_URL)
+  if not ok then
+    return false, nil, err or "Manifest download failed"
+  end
+
+  local parsedOk, manifest, parseErr = parseManifest(body)
+  if not parsedOk then
+    return false, nil, parseErr
+  end
+
+  return true, manifest, nil
+end
+
+local function saveManifestCache(manifest)
+  if type(textutils) ~= "table" or type(textutils.serializeJSON) ~= "function" then
+    return false, "JSON serializer unavailable"
+  end
+
+  local ok, encoded = pcall(textutils.serializeJSON, manifest)
+  if not ok or type(encoded) ~= "string" or #trimText(encoded) == 0 then
+    return false, "Cannot encode manifest cache"
+  end
+
+  return writeTextFile(UPDATE_MANIFEST_CACHE_FILE, encoded)
+end
+
+local function readManifestCache()
+  if not fs.exists(UPDATE_MANIFEST_CACHE_FILE) then
+    return false, nil, "Manifest cache missing"
+  end
+
+  local ok, body, err = readTextFile(UPDATE_MANIFEST_CACHE_FILE)
+  if not ok then return false, nil, err end
+  return parseManifest(body)
+end
+
+local function rollbackTargetList(noRemote)
+  local okCache, manifest = readManifestCache()
+  if okCache and type(manifest) == "table" and type(manifest.files) == "table" then
+    return manifest.files
+  end
+
+  if not noRemote then
+    local okManifest, remoteManifest = fetchRemoteManifest()
+    if okManifest then return remoteManifest.files end
+  end
+
+  return { "fusion.lua", "fusion.version", "install.lua", "diagviewer.lua" }
+end
+
+local function hasAnyRollbackBackup(files)
+  for _, filePath in ipairs(files or {}) do
+    if fs.exists(getBackupPathFor(filePath)) or fs.exists(getMissingBackupMarker(filePath)) then
+      return true
+    end
+  end
+  return false
+end
+
 local function checkForUpdate()
   state.update.lastError = ""
   state.update.downloaded = false
+  state.update.manifestLoaded = false
+  state.update.filesToUpdate = 0
+  state.update.lastManifestError = ""
   pushEvent("Update check started")
 
   if not UPDATE_ENABLED then
@@ -1265,35 +1437,28 @@ local function checkForUpdate()
     return false, "Update disabled"
   end
 
-  local ok, body, err = httpGetText(UPDATE_VERSION_URL)
-  if not ok then
+  local okManifest, manifest, errManifest = fetchRemoteManifest()
+  if not okManifest then
     state.update.remoteVersion = "UNKNOWN"
     state.update.available = false
-    state.update.lastError = err or "Unknown network error"
+    state.update.lastError = errManifest or "Manifest download failed"
+    state.update.lastManifestError = state.update.lastError
     setUpdateState("FAILED", "Check failed: " .. state.update.lastError, nil)
     pushEvent("Update failed")
     return false, state.update.lastError
   end
 
-  local remoteVersion = trimText(body)
-  local validVersion, versionErr = validateVersionString(remoteVersion)
-  if not validVersion then
-    state.update.remoteVersion = "INVALID"
-    state.update.available = false
-    state.update.lastError = versionErr
-    setUpdateState("FAILED", "Check failed: " .. state.update.lastError, nil)
-    pushEvent("Update failed")
-    return false, versionErr
-  end
-
-  state.update.remoteVersion = remoteVersion
+  state.update.manifestLoaded = true
+  state.update.lastManifest = manifest
+  state.update.remoteVersion = manifest.version
+  state.update.filesToUpdate = #manifest.files
   state.update.lastCheckClock = os.clock()
-  pushEvent("Remote version found " .. remoteVersion)
+  pushEvent("Manifest loaded " .. manifest.version)
 
-  local cmp = compareVersions(state.update.localVersion, remoteVersion)
+  local cmp = compareVersions(state.update.localVersion, manifest.version)
   if cmp == 1 then
     state.update.available = true
-    setUpdateState("UPDATE AVAILABLE", "Remote " .. remoteVersion .. " > local " .. state.update.localVersion, nil)
+    setUpdateState("UPDATE AVAILABLE", "Remote " .. manifest.version .. " > local " .. state.update.localVersion, nil)
     pushEvent("Update available")
     return true, "Update available"
   elseif cmp == 0 then
@@ -1314,161 +1479,152 @@ local function downloadUpdate()
     return false, "Update disabled"
   end
 
-  setUpdateState("DOWNLOADING", nil, "Download started")
+  local manifest = state.update.lastManifest
+  if type(manifest) ~= "table" then
+    local okCheck, checkErr = checkForUpdate()
+    if not okCheck then return false, checkErr end
+    manifest = state.update.lastManifest
+  end
+
+  if type(manifest) ~= "table" then
+    setUpdateState("FAILED", nil, "Manifest unavailable")
+    return false, "Manifest unavailable"
+  end
+
+  setUpdateState("DOWNLOADING", nil, "Downloading files")
   pushEvent("Download started")
 
-  local okVersion, versionBody, versionErr = httpGetText(UPDATE_VERSION_URL)
-  if not okVersion then
-    state.update.lastError = versionErr or "Version download failed"
-    setUpdateState("FAILED", nil, "Version download failed: " .. state.update.lastError)
-    pushEvent("Update failed")
+  local preserveSet = buildPreserveSet(manifest)
+  local downloadedCount = 0
+  for _, filePath in ipairs(manifest.files) do
+    if not isPreservedFile(filePath, preserveSet) then
+      local okBody, body, errBody = httpGetText(buildRawFileUrl(filePath))
+      if not okBody then
+        state.update.lastError = errBody or ("Download failed: " .. filePath)
+        setUpdateState("FAILED", nil, "Download failed: " .. filePath)
+        pushEvent("Update failed")
+        return false, state.update.lastError
+      end
+
+      local valid, reason = validateDownloadedContent(filePath, body)
+      if not valid then
+        state.update.lastError = reason or ("Validation failed: " .. filePath)
+        setUpdateState("FAILED", nil, "Validation failed")
+        pushEvent("Update failed")
+        return false, state.update.lastError
+      end
+
+      local tempPath = getTempPathFor(filePath)
+      ensureParentDir(tempPath)
+      local okWrite, errWrite = writeTextFile(tempPath, body)
+      if not okWrite then
+        state.update.lastError = errWrite or ("Temp write failed: " .. filePath)
+        setUpdateState("FAILED", nil, "Temp write failed")
+        pushEvent("Update failed")
+        return false, state.update.lastError
+      end
+
+      downloadedCount = downloadedCount + 1
+    end
+  end
+
+  local cacheOk, cacheErr = saveManifestCache(manifest)
+  if not cacheOk then
+    state.update.lastError = cacheErr or "Cannot save manifest cache"
+    setUpdateState("FAILED", nil, "Manifest cache failed")
     return false, state.update.lastError
   end
 
-  local remoteVersion = trimText(versionBody)
-  local validVersion, versionErr = validateVersionString(remoteVersion)
-  if not validVersion then
-    state.update.lastError = versionErr or "Remote version is invalid"
-    setUpdateState("FAILED", nil, "Invalid remote version")
-    pushEvent("Update failed")
-    return false, state.update.lastError
-  end
-
-  local okScript, scriptBody, scriptErr = httpGetText(UPDATE_SCRIPT_URL)
-  if not okScript then
-    state.update.lastError = scriptErr or "Script download failed"
-    setUpdateState("FAILED", nil, "Script download failed: " .. state.update.lastError)
-    pushEvent("Update failed")
-    return false, state.update.lastError
-  end
-
-  local valid, reason = validateLuaScript(scriptBody)
-  if not valid then
-    state.update.lastError = reason or "Invalid update script"
-    setUpdateState("FAILED", nil, "Validation failed: " .. state.update.lastError)
-    pushEvent("Update failed")
-    return false, state.update.lastError
-  end
-
-  local writeVersionOk, writeVersionErr = writeTextFile(UPDATE_TEMP_VERSION_FILE, remoteVersion .. "\n")
-  if not writeVersionOk then
-    state.update.lastError = writeVersionErr or "Cannot write temp version"
-    setUpdateState("FAILED", nil, "Temp version write failed")
-    pushEvent("Update failed")
-    return false, state.update.lastError
-  end
-
-  local writeScriptOk, writeScriptErr = writeTextFile(UPDATE_TEMP_FILE, scriptBody)
-  if not writeScriptOk then
-    state.update.lastError = writeScriptErr or "Cannot write temp script"
-    setUpdateState("FAILED", nil, "Temp script write failed")
-    pushEvent("Update failed")
-    return false, state.update.lastError
-  end
-
-  state.update.remoteVersion = remoteVersion
   state.update.downloaded = true
-  setUpdateState("DOWNLOADED", nil, "Version and script downloaded")
+  state.update.remoteVersion = manifest.version
+  state.update.filesToUpdate = #manifest.files
+  setUpdateState("DOWNLOADED", nil, "Downloaded " .. tostring(downloadedCount) .. " files")
   pushEvent("Download complete")
   return true, nil
 end
 
 local function applyUpdate()
   state.update.lastError = ""
-  if not fs.exists(UPDATE_TEMP_FILE) or not fs.exists(UPDATE_TEMP_VERSION_FILE) then
-    setUpdateState("FAILED", nil, "Missing downloaded files")
-    return false, "Missing downloaded files"
+  local manifest = state.update.lastManifest
+  if type(manifest) ~= "table" then
+    local okManifest, cachedManifest, cacheErr = readManifestCache()
+    if not okManifest then
+      setUpdateState("FAILED", nil, "Manifest cache missing")
+      return false, cacheErr or "Manifest cache missing"
+    end
+    manifest = cachedManifest
+    state.update.lastManifest = manifest
   end
 
   setUpdateState("APPLYING", nil, "Applying update")
+  local preserveSet = buildPreserveSet(manifest)
 
-  local okNewScript, newScript, errNewScript = readTextFile(UPDATE_TEMP_FILE)
-  if not okNewScript then
-    state.update.lastError = errNewScript or "Cannot read temp script"
-    setUpdateState("FAILED", nil, "Apply failed: " .. state.update.lastError)
-    pushEvent("Update failed")
-    return false, state.update.lastError
+  for _, filePath in ipairs(manifest.files) do
+    local normalized = normalizePath(filePath)
+    if not isPreservedFile(normalized, preserveSet) then
+      local tempPath = getTempPathFor(normalized)
+      if not fs.exists(tempPath) then
+        state.update.lastError = "Missing temp file: " .. normalized
+        setUpdateState("FAILED", nil, "Apply failed")
+        return false, state.update.lastError
+      end
+
+      local okTemp, tempBody, tempErr = readTextFile(tempPath)
+      if not okTemp then
+        state.update.lastError = tempErr or ("Cannot read temp file: " .. normalized)
+        setUpdateState("FAILED", nil, "Apply failed")
+        return false, state.update.lastError
+      end
+
+      local valid, reason = validateDownloadedContent(normalized, tempBody)
+      if not valid then
+        state.update.lastError = reason or ("Invalid temp file: " .. normalized)
+        setUpdateState("FAILED", nil, "Apply failed")
+        return false, state.update.lastError
+      end
+
+      local backupPath = getBackupPathFor(normalized)
+      local missingMarker = getMissingBackupMarker(normalized)
+      ensureParentDir(backupPath)
+
+      if fs.exists(normalized) then
+        local okCurrent, currentBody, currentErr = readTextFile(normalized)
+        if not okCurrent then
+          state.update.lastError = currentErr or ("Cannot backup file: " .. normalized)
+          setUpdateState("FAILED", nil, "Backup failed")
+          return false, state.update.lastError
+        end
+        local okBackup, backupErr = writeTextFile(backupPath, currentBody)
+        if not okBackup then
+          state.update.lastError = backupErr or ("Cannot write backup: " .. normalized)
+          setUpdateState("FAILED", nil, "Backup failed")
+          return false, state.update.lastError
+        end
+        if fs.exists(missingMarker) then pcall(fs.delete, missingMarker) end
+      else
+        local markerOk, markerErr = writeTextFile(missingMarker, "missing\n")
+        if not markerOk then
+          state.update.lastError = markerErr or ("Cannot mark missing backup: " .. normalized)
+          setUpdateState("FAILED", nil, "Backup failed")
+          return false, state.update.lastError
+        end
+      end
+
+      ensureParentDir(normalized)
+      local okWrite, writeErr = writeTextFile(normalized, tempBody)
+      if not okWrite then
+        state.update.lastError = writeErr or ("Cannot replace file: " .. normalized)
+        setUpdateState("FAILED", nil, "Apply failed")
+        return false, state.update.lastError
+      end
+    end
   end
 
-  local scriptValid, scriptReason = validateLuaScript(newScript)
-  if not scriptValid then
-    state.update.lastError = scriptReason or "Invalid temp script"
-    setUpdateState("FAILED", nil, "Apply failed: invalid script")
-    pushEvent("Update failed")
-    return false, state.update.lastError
-  end
-
-  local okNewVersion, newVersionText, errNewVersion = readTextFile(UPDATE_TEMP_VERSION_FILE)
-  if not okNewVersion then
-    state.update.lastError = errNewVersion or "Cannot read temp version"
-    setUpdateState("FAILED", nil, "Apply failed: invalid version")
-    pushEvent("Update failed")
-    return false, state.update.lastError
-  end
-
-  local newVersion = trimText(newVersionText)
-  local validVersion, versionErr = validateVersionString(newVersion)
-  if not validVersion then
-    state.update.lastError = versionErr or "Temp version is invalid"
-    setUpdateState("FAILED", nil, "Apply failed: invalid version")
-    pushEvent("Update failed")
-    return false, state.update.lastError
-  end
-
-  local okCurrentScript, currentScript, errCurrentScript = readTextFile(UPDATE_SCRIPT_FILE)
-  if not okCurrentScript then
-    state.update.lastError = errCurrentScript or "Cannot read current script"
-    setUpdateState("FAILED", nil, "Apply failed: cannot backup script")
-    pushEvent("Update failed")
-    return false, state.update.lastError
-  end
-
-  local currentVersion = ""
-  if fs.exists(UPDATE_VERSION_FILE) then
-    local okCurrentVersion, currentVersionText = readTextFile(UPDATE_VERSION_FILE)
-    if okCurrentVersion then currentVersion = currentVersionText end
-  end
-
-  local okBackupScript, errBackupScript = writeTextFile(UPDATE_BACKUP_FILE, currentScript)
-  if not okBackupScript then
-    state.update.lastError = errBackupScript or "Script backup failed"
-    setUpdateState("FAILED", nil, "Backup failed")
-    pushEvent("Update failed")
-    return false, state.update.lastError
-  end
-
-  local okBackupVersion, errBackupVersion = writeTextFile(UPDATE_VERSION_BACKUP_FILE, currentVersion)
-  if not okBackupVersion then
-    state.update.lastError = errBackupVersion or "Version backup failed"
-    setUpdateState("FAILED", nil, "Backup failed")
-    pushEvent("Update failed")
-    return false, state.update.lastError
-  end
-
-  local okWriteScript, errWriteScript = writeTextFile(UPDATE_SCRIPT_FILE, newScript)
-  if not okWriteScript then
-    pcall(writeTextFile, UPDATE_SCRIPT_FILE, currentScript)
-    state.update.lastError = errWriteScript or "Cannot replace script"
-    setUpdateState("FAILED", nil, "Apply failed: script write")
-    pushEvent("Update failed")
-    return false, state.update.lastError
-  end
-
-  local okWriteVersion, errWriteVersion = writeTextFile(UPDATE_VERSION_FILE, newVersion .. "\n")
-  if not okWriteVersion then
-    pcall(writeTextFile, UPDATE_SCRIPT_FILE, currentScript)
-    pcall(writeTextFile, UPDATE_VERSION_FILE, currentVersion)
-    state.update.lastError = errWriteVersion or "Cannot replace version"
-    setUpdateState("FAILED", nil, "Apply failed: version write")
-    pushEvent("Update failed")
-    return false, state.update.lastError
-  end
-
-  pcall(fs.delete, UPDATE_TEMP_FILE)
-  pcall(fs.delete, UPDATE_TEMP_VERSION_FILE)
+  if fs.exists(UPDATE_TEMP_DIR) then pcall(fs.delete, UPDATE_TEMP_DIR) end
   state.update.downloaded = false
   state.update.restartRequired = true
-  state.update.localVersion = newVersion
+  state.update.localVersion = manifest.version
+  state.update.remoteVersion = manifest.version
   setUpdateState("RESTART REQUIRED", nil, "Update applied. Restart required")
   pushEvent("Update applied")
   pushEvent("Restart required")
@@ -1493,36 +1649,48 @@ local function performUpdate()
 end
 
 local function rollbackUpdate()
-  if not fs.exists(UPDATE_BACKUP_FILE) then
-    setUpdateState("FAILED", nil, "No backup file")
-    return false, "No backup file"
+  local files = rollbackTargetList()
+  local restored = 0
+
+  for _, filePath in ipairs(files) do
+    local normalized = normalizePath(filePath)
+    if normalized ~= CONFIG_FILE then
+      local backupPath = getBackupPathFor(normalized)
+      local missingMarker = getMissingBackupMarker(normalized)
+
+      if fs.exists(backupPath) then
+        local okRead, backupBody, readErr = readTextFile(backupPath)
+        if not okRead then
+          setUpdateState("FAILED", nil, "Rollback failed")
+          return false, readErr
+        end
+
+        ensureParentDir(normalized)
+        local okWrite, writeErr = writeTextFile(normalized, backupBody)
+        if not okWrite then
+          setUpdateState("FAILED", nil, "Rollback failed")
+          return false, writeErr
+        end
+        restored = restored + 1
+      elseif fs.exists(missingMarker) then
+        if fs.exists(normalized) then pcall(fs.delete, normalized) end
+        restored = restored + 1
+      end
+    end
   end
 
-  local okBackup, backupText, errBackup = readTextFile(UPDATE_BACKUP_FILE)
-  if not okBackup then
-    setUpdateState("FAILED", nil, "Rollback failed")
-    return false, errBackup
-  end
-
-  local versionBackupText = nil
-  if fs.exists(UPDATE_VERSION_BACKUP_FILE) then
-    local okVersionBackup, versionText = readTextFile(UPDATE_VERSION_BACKUP_FILE)
-    if okVersionBackup then versionBackupText = versionText end
-  end
-
-  local okWrite, errWrite = writeTextFile(UPDATE_SCRIPT_FILE, backupText)
-  if not okWrite then
-    setUpdateState("FAILED", nil, "Rollback failed")
-    return false, errWrite
-  end
-
-  if versionBackupText ~= nil then
-    pcall(writeTextFile, UPDATE_VERSION_FILE, versionBackupText)
-    state.update.localVersion = trimText(versionBackupText)
+  if fs.exists(VERSION_FILE) then
+    local okVersion, versionText = readTextFile(VERSION_FILE)
+    if okVersion then state.update.localVersion = trimText(versionText) end
   end
 
   state.update.restartRequired = true
   state.update.downloaded = false
+  if restored == 0 then
+    setUpdateState("FAILED", nil, "No rollback backup available")
+    return false, "No rollback backup available"
+  end
+
   setUpdateState("RESTART REQUIRED", nil, "Rollback applied. Restart required")
   pushEvent("Rollback applied")
   pushEvent("Restart required")
@@ -1530,6 +1698,7 @@ local function rollbackUpdate()
 end
 
 local function getMonitorCandidates()
+
   return IoDevices.getMonitorCandidates(peripheral, getTypeOf, safePeripheral)
 end
 
@@ -2362,7 +2531,7 @@ function buildUpdateButtons(bx, bw, baseY)
 
   local splitGap = 1
   local splitW = math.max(8, math.floor((bw - splitGap) / 2))
-  addButton("updRollback", bx, baseY + 15, splitW, 4, "ROLLBACK", fs.exists(UPDATE_BACKUP_FILE) and C.bad or C.inactive, nil, function()
+  addButton("updRollback", bx, baseY + 15, splitW, 4, "ROLLBACK", hasAnyRollbackBackup(rollbackTargetList(true)) and C.bad or C.inactive, nil, function()
     local ok, err = pcall(rollbackUpdate)
     if not ok then
       state.update.lastError = tostring(err)
@@ -2536,10 +2705,8 @@ local function buildUIViewContext()
     CFG = CFG,
     fs = fs,
     UPDATE_ENABLED = UPDATE_ENABLED,
-    UPDATE_BACKUP_FILE = UPDATE_BACKUP_FILE,
-    UPDATE_VERSION_BACKUP_FILE = UPDATE_VERSION_BACKUP_FILE,
-    UPDATE_TEMP_FILE = UPDATE_TEMP_FILE,
-    UPDATE_TEMP_VERSION_FILE = UPDATE_TEMP_VERSION_FILE,
+    UPDATE_TEMP_DIR = UPDATE_TEMP_DIR,
+    UPDATE_MISSING_BACKUP_SUFFIX = UPDATE_MISSING_BACKUP_SUFFIX,
     drawBox = drawBox,
     writeAt = writeAt,
     drawKeyValue = drawKeyValue,
@@ -2563,6 +2730,8 @@ local function buildUIViewContext()
     drawReactorDiagram = drawReactorDiagram,
     drawInductionDiagram = drawInductionDiagram,
     inductionStatus = inductionStatus,
+    hasAnyRollbackBackup = hasAnyRollbackBackup,
+    rollbackTargetList = rollbackTargetList,
   }
 end
 

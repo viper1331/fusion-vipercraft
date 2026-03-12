@@ -1,0 +1,27 @@
+{
+  "version": "2.1.0",
+  "files": [
+    "fusion.lua",
+    "fusion.version",
+    "install.lua",
+    "diagviewer.lua",
+    "core/config.lua",
+    "core/induction.lua",
+    "core/reactor.lua",
+    "core/state.lua",
+    "core/update.lua",
+    "io/devices.lua",
+    "io/monitor.lua",
+    "io/readers.lua",
+    "io/relays.lua",
+    "ui/components.lua",
+    "ui/render.lua",
+    "ui/theme.lua",
+    "ui/views.lua"
+  ],
+  "preserve": [
+    "fusion_config.lua",
+    "*.bak",
+    "*.bak.missing"
+  ]
+}

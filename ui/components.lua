@@ -112,26 +112,31 @@ function M.drawUpdateInfoPanel(ctx, infoPanel)
   local x = infoPanel.x + 2
   local w = infoPanel.w - 4
 
-  ctx.drawBox(x - 1, infoPanel.y + 1, w, 6, "VERSIONS", C.borderDim)
+  ctx.drawBox(x - 1, infoPanel.y + 1, w, 7, "VERSIONS", C.borderDim)
   ctx.drawKeyValue(x, infoPanel.y + 2, "Local", state.update.localVersion, C.dim, C.ok, w - 4)
   ctx.drawKeyValue(x, infoPanel.y + 3, "Remote", state.update.remoteVersion, C.dim, C.info, w - 4)
-  ctx.drawKeyValue(x, infoPanel.y + 4, "Status", state.update.status, C.dim, ctx.statusColor(state.update.available and "WARN" or "OK", C), w - 4)
+  ctx.drawKeyValue(x, infoPanel.y + 4, "Manifest", state.update.manifestLoaded and "LOADED" or "MISSING", C.dim, state.update.manifestLoaded and C.ok or C.warn, w - 4)
+  ctx.drawKeyValue(x, infoPanel.y + 5, "Files", tostring(state.update.filesToUpdate or 0), C.dim, C.info, w - 4)
+  ctx.drawKeyValue(x, infoPanel.y + 6, "Status", state.update.status, C.dim, ctx.statusColor(state.update.available and "WARN" or "OK", C), w - 4)
 
-  ctx.drawBox(x - 1, infoPanel.y + 7, w, 6, "NETWORK", C.borderDim)
-  ctx.drawKeyValue(x, infoPanel.y + 8, "HTTP", state.update.httpStatus, C.dim, state.update.httpStatus == "OK" and C.ok or C.warn, w - 4)
-  ctx.drawKeyValue(x, infoPanel.y + 9, "Enabled", ctx.UPDATE_ENABLED and "YES" or "NO", C.dim, ctx.UPDATE_ENABLED and C.ok or C.bad, w - 4)
-  ctx.drawKeyValue(x, infoPanel.y + 10, "Error", state.update.lastError ~= "" and state.update.lastError or "None", C.dim, state.update.lastError ~= "" and C.bad or C.info, w - 4)
+  ctx.drawBox(x - 1, infoPanel.y + 8, w, 6, "NETWORK", C.borderDim)
+  ctx.drawKeyValue(x, infoPanel.y + 9, "HTTP", state.update.httpStatus, C.dim, state.update.httpStatus == "OK" and C.ok or C.warn, w - 4)
+  ctx.drawKeyValue(x, infoPanel.y + 10, "Enabled", ctx.UPDATE_ENABLED and "YES" or "NO", C.dim, ctx.UPDATE_ENABLED and C.ok or C.bad, w - 4)
+  ctx.drawKeyValue(x, infoPanel.y + 11, "Error", state.update.lastError ~= "" and state.update.lastError or "None", C.dim, state.update.lastError ~= "" and C.bad or C.info, w - 4)
 
-  local resultY = infoPanel.y + 13
-  local resultH = math.max(9, infoPanel.h - 14)
+  local resultY = infoPanel.y + 14
+  local resultH = math.max(8, infoPanel.h - 15)
   ctx.drawBox(x - 1, resultY, w, resultH, "RESULT", C.borderDim)
   ctx.writeAt(x, resultY + 1, ctx.shortText("Check: " .. tostring(state.update.lastCheckResult or "Never"), w - 3), C.info, C.panelDark)
-  ctx.writeAt(x, resultY + 2, ctx.shortText("Apply: " .. tostring(state.update.lastApplyResult or "Never"), w - 3), C.info, C.panelDark)
-  ctx.writeAt(x, resultY + 3, ctx.shortText("Backup LUA: " .. (ctx.fs.exists(ctx.UPDATE_BACKUP_FILE) and "AVAILABLE" or "MISSING"), w - 3), C.dim, C.panelDark)
-  ctx.writeAt(x, resultY + 4, ctx.shortText("Backup VER: " .. (ctx.fs.exists(ctx.UPDATE_VERSION_BACKUP_FILE) and "AVAILABLE" or "MISSING"), w - 3), C.dim, C.panelDark)
-  ctx.writeAt(x, resultY + 5, ctx.shortText("Temp LUA: " .. (ctx.fs.exists(ctx.UPDATE_TEMP_FILE) and "READY" or "EMPTY"), w - 3), C.dim, C.panelDark)
-  ctx.writeAt(x, resultY + 6, ctx.shortText("Temp VER: " .. (ctx.fs.exists(ctx.UPDATE_TEMP_VERSION_FILE) and "READY" or "EMPTY"), w - 3), C.dim, C.panelDark)
-  ctx.writeAt(x, resultY + 7, ctx.shortText("Restart: " .. (state.update.restartRequired and "REQUIRED" or "NOT REQUIRED"), w - 3), state.update.restartRequired and C.warn or C.ok, C.panelDark)
+  ctx.writeAt(x, resultY + 2, ctx.shortText("Update: " .. tostring(state.update.lastApplyResult or "Never"), w - 3), C.info, C.panelDark)
+  ctx.writeAt(x, resultY + 3, ctx.shortText("Manifest err: " .. (state.update.lastManifestError ~= "" and state.update.lastManifestError or "None"), w - 3), C.dim, C.panelDark)
+  local hasBackup = false
+  if type(ctx.rollbackTargetList) == "function" and type(ctx.hasAnyRollbackBackup) == "function" then
+    hasBackup = ctx.hasAnyRollbackBackup(ctx.rollbackTargetList(true))
+  end
+  ctx.writeAt(x, resultY + 4, ctx.shortText("Backup set: " .. (hasBackup and "AVAILABLE" or "MISSING"), w - 3), hasBackup and C.ok or C.warn, C.panelDark)
+  ctx.writeAt(x, resultY + 5, ctx.shortText("Temp dir: " .. (ctx.fs.exists(ctx.UPDATE_TEMP_DIR) and "READY" or "EMPTY"), w - 3), C.dim, C.panelDark)
+  ctx.writeAt(x, resultY + 6, ctx.shortText("Restart: " .. (state.update.restartRequired and "REQUIRED" or "NOT REQUIRED"), w - 3), state.update.restartRequired and C.warn or C.ok, C.panelDark)
 end
 
 return M
