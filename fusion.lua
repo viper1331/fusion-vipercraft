@@ -1,67 +1,10 @@
 -- fusion_cc.lua
--- Version renforcée 39x19
--- CC:Tweaked + Mekanism + Advanced Peripherals + Redstone Relays
-
-local CFG = {
-  preferredMonitor = "monitor_2",
-  preferredReactor = "mekanismgenerators:fusion_reactor_controller_3",
-  preferredLogicAdapter = "fusionReactorLogicAdapter_0",
-  preferredLaser = "laserAmplifier_1",
-  preferredInduction = "inductionPort_1",
-
-  monitorScale = 0.5,
-  refreshDelay = 0.20,
-
-  ignitionLaserEnergyThreshold = 2000000000, -- 2.0G
-
-  laserChargeStartPct = 90,
-  laserChargeStopPct  = 100,
-
-  energyLowPct  = 20,
-  energyHighPct = 99,
-
-  emergencyStopIfReactorMissing = true,
-
-  ignitionRetryDelay = 3.0,
-
-  -- Topologie connue issue de diagviewer (prioritaire, avec fallback)
-  knownReaders = {
-    deuterium = "block_reader_1",
-    tritium = "block_reader_2",
-    inventory = "block_reader_6",
-  },
-
-  knownRelays = {
-    laser_charge = { relay = "redstone_relay_0", side = "top",   label = "LAS" },
-    deuterium    = { relay = "redstone_relay_1", side = "front", label = "Tank Deuterium" },
-    tritium      = { relay = "redstone_relay_2", side = "front", label = "Tank Tritium" },
-  },
-
-  -- Mapping des actions redstone
-  actions = {
-    laser_charge = { relay = "redstone_relay_0", side = "top",   analog = 15, pulse = false },
-    deuterium    = { relay = "redstone_relay_1", side = "front", analog = 15, pulse = false },
-    tritium      = { relay = "redstone_relay_2", side = "front", analog = 15, pulse = false },
-
-    laser_fire   = { relay = "redstone_relay_0", side = "top",   analog = 15, pulse = true, pulseTime = 0.15 },
-    dt_fuel      = nil,
-  },
-}
-
-local CONFIG_FILE = "fusion_config.lua"
-local MONITOR_CACHE_FILE = "fusion_monitor.cfg"
-local VERSION_FILE = "fusion.version"
-
--- Configuration update GitHub
-local LOCAL_VERSION = "0.0.0"
-local UPDATE_ENABLED = true
-local UPDATE_REPO_RAW_BASE = "https://raw.githubusercontent.com/viper1331/fusion-vipercraft/main"
-local UPDATE_MANIFEST_FILE = "fusion.manifest.json"
-local UPDATE_MANIFEST_URL = UPDATE_REPO_RAW_BASE .. "/" .. UPDATE_MANIFEST_FILE
-local UPDATE_TEMP_DIR = ".fusion_update_tmp"
-local UPDATE_MANIFEST_CACHE_FILE = "fusion.manifest.cache"
-local UPDATE_MISSING_BACKUP_SUFFIX = ".bak.missing"
-
+-- Bootstrap/Orchestrateur uniquement.
+-- Architecture cible:
+-- - core/: logique métier et état runtime.
+-- - ui/: rendu, vues, composants et hitboxes.
+-- - io/: accès matériel et périphériques.
+-- Toute nouvelle phase doit respecter cette séparation.
 
 local Theme = require("ui.theme")
 local UIComponents = require("ui.components")
@@ -72,10 +15,26 @@ local CoreUpdate = require("core.update")
 local CoreState = require("core.state")
 local CoreReactor = require("core.reactor")
 local CoreInduction = require("core.induction")
+local RuntimeConfig = require("core.runtime_config")
 local IoDevices = require("io.devices")
 local IoReaders = require("io.readers")
 local IoRelays = require("io.relays")
 local IoMonitor = require("io.monitor")
+
+local runtime = RuntimeConfig.new()
+local CFG = runtime.cfg
+local CONFIG_FILE = runtime.files.configFile
+local MONITOR_CACHE_FILE = runtime.files.monitorCacheFile
+local VERSION_FILE = runtime.files.versionFile
+
+local LOCAL_VERSION = runtime.update.localVersion
+local UPDATE_ENABLED = runtime.update.enabled
+local UPDATE_REPO_RAW_BASE = runtime.update.repoRawBase
+local UPDATE_MANIFEST_FILE = runtime.update.manifestFile
+local UPDATE_MANIFEST_URL = runtime.update.manifestUrl
+local UPDATE_TEMP_DIR = runtime.update.tempDir
+local UPDATE_MANIFEST_CACHE_FILE = runtime.update.manifestCacheFile
+local UPDATE_MISSING_BACKUP_SUFFIX = runtime.update.missingBackupSuffix
 
 local nativeTerm = term.current()
 local buttons = {}
@@ -83,163 +42,10 @@ local touchHitboxes = { terminal = {}, monitor = {} }
 local pressedButtons = {}
 local pressedEffectDuration = 0.18
 
-local HITBOX_DEFAULTS = {
-  minW = 10,
-  minH = 3,
-  basePadX = 1,
-  basePadY = 1,
-  smallBoostPadX = 2,
-  smallBoostPadY = 1,
-  rowPadX = 1,
-  rowPadY = 0,
-}
+local HITBOX_DEFAULTS = runtime.hitboxDefaults
 
-local state = CoreState.new({
-  running = true,
-  uiDrawn = false,
-  choosingMonitor = false,
-  monitorList = {},
-  monitorPage = 1,
-
-  autoMaster = true,
-  chargeAuto = true,
-  fusionAuto = true,
-  gasAuto = true,
-
-  reactorPresent = false,
-  reactorFormed = false,
-  ignition = false,
-  plasmaTemp = 0,
-  ignitionTemp = 0,
-  caseTemp = 0,
-
-  laserPresent = false,
-  laserEnergy = 0,
-  laserMax = 1,
-  laserPct = 0,
-  laserChargeOn = false,
-
-  energyPresent = false,
-  energyKnown = false,
-  energyStored = 0,
-  energyMax = 1,
-  energyPct = 0,
-
-  inductionPresent = false,
-  inductionFormed = false,
-  inductionEnergy = 0,
-  inductionMax = 1,
-  inductionPct = 0,
-  inductionNeeded = 0,
-  inductionInput = 0,
-  inductionOutput = 0,
-  inductionTransferCap = 0,
-  inductionCells = 0,
-  inductionProviders = 0,
-  inductionLength = 0,
-  inductionHeight = 0,
-  inductionWidth = 0,
-  inductionPortMode = "UNKNOWN",
-
-  deuteriumName = "N/A",
-  deuteriumAmount = 0,
-  tritiumName = "N/A",
-  tritiumAmount = 0,
-
-  auxPresent = false,
-  auxActive = false,
-  auxRedstone = 0,
-
-  dtOpen = false,
-  dOpen = false,
-  tOpen = false,
-
-  laserLineOn = false,
-  knownLabels = {
-    laser = "Charge Laser",
-    deuterium = "Tank Deuterium",
-    tritium = "Tank Tritium",
-    readerD = "Reader Deuterium",
-    readerT = "Reader Tritium",
-    readerAux = "Reader Aux",
-  },
-
-  ignitionSequencePending = false,
-  lastIgnitionAttempt = 0,
-
-  status = "Init",
-  lastAction = "Aucune",
-  alert = "INFO",
-
-  currentView = "supervision",
-  setup = {
-    loaded = nil,
-    working = nil,
-    deviceStatus = {},
-    dirty = false,
-    lastMessage = "Ready",
-    lastTestResult = "N/A",
-    saveStatus = "N/A",
-    rebindRole = nil,
-    rebindCandidates = {},
-    rebindCursor = 1,
-  },
-  safetyWarnings = {},
-  ignitionChecklist = {},
-  ignitionBlockers = {},
-  eventLog = {},
-  maxEventLog = 8,
-
-  update = {
-    localVersion = LOCAL_VERSION,
-    remoteVersion = "UNKNOWN",
-    status = UPDATE_ENABLED and "IDLE" or "DISABLED",
-    httpStatus = "UNKNOWN",
-    lastCheckResult = "Never",
-    lastApplyResult = "Never",
-    lastError = "",
-    available = false,
-    restartRequired = false,
-    downloaded = false,
-    manifestLoaded = false,
-    filesToUpdate = 0,
-    lastManifestError = "",
-    lastCheckClock = 0,
-    lastManifest = nil,
-  },
-
-  tick = 0,
-  debugHitboxes = false,
-})
-
-local hw = {
-  monitor = nil,
-  monitorName = nil,
-
-  reactor = nil,
-  reactorName = nil,
-
-  logic = nil,
-  logicName = nil,
-
-  laser = nil,
-  laserName = nil,
-
-  induction = nil,
-  inductionName = nil,
-
-  relays = {},
-
-  blockReaders = {},
-  readerRoles = {
-    deuterium = nil,
-    tritium = nil,
-    inventory = nil,
-    energy = nil,
-    active = {},
-    unknown = {},
-  }
-}
+local state = CoreState.new(CoreState.defaultRuntimeState(LOCAL_VERSION, UPDATE_ENABLED))
+local hw = CoreState.defaultHardwareState()
 
 local UI_PALETTE = {
   bgMain = colors.black,
@@ -2578,380 +2384,107 @@ function selectMonitorByIndex(index)
   pushEvent("Monitor changed")
 end
 
-function buildMonitorSelectionButtons(layout)
-  local boxW = clamp(layout.width - 6, 24, 60)
-  local x = math.floor((layout.width - boxW) / 2) + 1
-  local y0 = layout.top + 4
-  for i = 1, 4 do
-    local rowY = y0 + (i - 1) * 3
-    local rowAction = function() selectMonitorByIndex(i) end
-    addRowButton("mrow" .. i, x + 1, rowY, boxW - 2, 2, "", C.panelDark, C.text, rowAction)
-    addButton("m" .. i, x + boxW - 8, rowY, 6, 2, tostring(i), C.btnAction, nil, rowAction, { kind = "small" })
-  end
-  addButton("cancelMon", x + 1, layout.bottom - 4, boxW - 2, 4, "ANNULER", C.bad, nil, function() stopMonitorSelection() end)
-end
-
-function buildNavigationButtons(ctrl, bx, bw)
-  local navW = math.max(5, math.floor(bw / 6))
-  addButton("viewSup", bx, ctrl.y + 1, navW, 4, "SUP", state.currentView == "supervision" and C.btnOn or C.panelMid, nil, function() state.currentView = "supervision"; pushEvent("View supervision") end)
-  addButton("viewDiag", bx + navW, ctrl.y + 1, navW, 4, "DIAG", state.currentView == "diagnostic" and C.btnOn or C.panelMid, nil, function() state.currentView = "diagnostic"; pushEvent("View diagnostic") end)
-  addButton("viewMan", bx + (navW * 2), ctrl.y + 1, navW, 4, "MAN", state.currentView == "manual" and C.btnOn or C.panelMid, nil, function() state.currentView = "manual"; pushEvent("View manual") end)
-  addButton("viewInd", bx + (navW * 3), ctrl.y + 1, navW, 4, "IND", state.currentView == "induction" and C.btnOn or C.panelMid, nil, function() state.currentView = "induction"; pushEvent("View induction") end)
-  addButton("viewUpd", bx + (navW * 4), ctrl.y + 1, navW, 4, "UPD", state.currentView == "update" and C.btnOn or C.panelMid, nil, function() state.currentView = "update"; pushEvent("View update") end)
-  addButton("viewSetup", bx + (navW * 5), ctrl.y + 1, bw - (navW * 5), 4, "SET", state.currentView == "setup" and C.btnOn or C.panelMid, nil, function() state.currentView = "setup"; pushEvent("View setup") end)
-end
-
-local function getRoleCandidates(role)
-  local names = peripheral.getNames()
-  local list = {}
-  local expected = {
-    monitor = "monitor",
-    relay = "redstone_relay",
-    reader = "block_reader",
+local function buildButtonActions()
+  return {
+    selectMonitorByIndex = selectMonitorByIndex,
+    stopMonitorSelection = stopMonitorSelection,
+    startMonitorSelection = startMonitorSelection,
+    refreshNow = function()
+      refreshAll()
+      state.lastAction = "Refresh"
+    end,
+    setView = function(view)
+      state.currentView = view
+      pushEvent("View " .. view)
+    end,
+    canIgnite = canIgnite,
+    startReactorSequence = startReactorSequence,
+    stopManualReactor = function() stopReactorSequence("ARRET DEMANDE") end,
+    stopRequested = function() stopReactorSequence("ARRET DEMANDE") end,
+    toggleTritium = function() openTritium(not state.tOpen) end,
+    toggleDeuterium = function() openDeuterium(not state.dOpen) end,
+    toggleDTFuel = function()
+      local nextState = not state.dtOpen
+      openDTFuel(nextState)
+      if nextState then openSeparatedGases(false) end
+    end,
+    fireLaser = fireLaser,
+    checkForUpdate = function()
+      local ok, err = pcall(checkForUpdate)
+      if not ok then
+        state.update.lastError = tostring(err)
+        setUpdateState("FAILED", "Check crashed", "No apply")
+        pushEvent("Update failed")
+      end
+    end,
+    performUpdate = function()
+      local ok, result, err = pcall(performUpdate)
+      if not ok then
+        state.update.lastError = tostring(result)
+        setUpdateState("FAILED", nil, "Update crashed")
+        pushEvent("Update failed")
+      elseif result == false then
+        state.update.lastError = tostring(err or "No update available")
+        state.lastAction = "No update"
+      end
+    end,
+    toggleDebugHitboxes = function()
+      state.debugHitboxes = not state.debugHitboxes
+      state.lastAction = state.debugHitboxes and "Hitbox debug ON" or "Hitbox debug OFF"
+      pushEvent(state.lastAction)
+    end,
+    hasRollback = function()
+      return hasAnyRollbackBackup(rollbackTargetList(true))
+    end,
+    rollbackUpdate = function()
+      local ok, err = pcall(rollbackUpdate)
+      if not ok then
+        state.update.lastError = tostring(err)
+        setUpdateState("FAILED", nil, "Rollback crashed")
+        pushEvent("Update failed")
+      end
+    end,
+    runSetupTest = runSetupTest,
+    setupStartRebind = setupStartRebind,
+    setupApplySelection = setupApplySelection,
+    saveSetupConfig = saveSetupConfig,
+    runInstallerFromSetup = runInstallerFromSetup,
+    toggleMaster = function()
+      state.autoMaster = not state.autoMaster
+      if not state.autoMaster then
+        openDTFuel(false)
+        openSeparatedGases(false)
+        setLaserCharge(false)
+        state.ignitionSequencePending = false
+        state.status = "MASTER OFF"
+      else
+        state.status = "MASTER ON"
+      end
+      state.lastAction = "Toggle MASTER"
+    end,
+    toggleFusion = function()
+      state.fusionAuto = not state.fusionAuto
+      state.lastAction = "Toggle FUSION"
+    end,
+    toggleCharge = function()
+      state.chargeAuto = not state.chargeAuto
+      state.lastAction = "Toggle CHARGE"
+    end,
   }
-  for _, name in ipairs(names) do
-    local ptype = getTypeOf(name)
-    if role == "monitor" and ptype == expected.monitor then
-      table.insert(list, name)
-    elseif role == "relay" and ptype == expected.relay then
-      table.insert(list, name)
-    elseif role == "reader" and (ptype == expected.reader or contains(name, "block_reader")) then
-      table.insert(list, name)
-    elseif role == "device" and ptype ~= "monitor" and ptype ~= "redstone_relay" and ptype ~= "block_reader" then
-      table.insert(list, name)
-    end
-  end
-  table.sort(list)
-  return list
-end
-
-local function setupApplySelection(index)
-  local role = state.setup.rebindRole
-  local chosen = state.setup.rebindCandidates[index]
-  if not role or not chosen then return end
-  local w = state.setup.working
-
-  if role == "monitor" then
-    w.monitor.name = chosen
-  elseif role == "relayLaser" then
-    w.relays.laser.name = chosen
-  elseif role == "relayTritium" then
-    w.relays.tritium.name = chosen
-  elseif role == "relayDeuterium" then
-    w.relays.deuterium.name = chosen
-  elseif role == "readerTritium" then
-    w.readers.tritium = chosen
-  elseif role == "readerDeuterium" then
-    w.readers.deuterium = chosen
-  elseif role == "readerAux" then
-    w.readers.aux = chosen
-  elseif role == "reactorController" then
-    w.devices.reactorController = chosen
-  elseif role == "logicAdapter" then
-    w.devices.logicAdapter = chosen
-  elseif role == "laser" then
-    w.devices.laser = chosen
-  elseif role == "induction" then
-    w.devices.induction = chosen
-  end
-
-  state.setup.dirty = true
-  state.setup.lastMessage = "Rebind applied: " .. role
-  state.setup.rebindRole = nil
-  state.setup.rebindCandidates = {}
-  state.setup.rebindCursor = 1
-  refreshSetupDeviceStatus()
-end
-
-local function setupStartRebind(role)
-  local category = "device"
-  if role == "monitor" then category = "monitor"
-  elseif contains(role, "relay") then category = "relay"
-  elseif contains(role, "reader") then category = "reader" end
-
-  state.setup.rebindRole = role
-  state.setup.rebindCandidates = getRoleCandidates(category)
-  state.setup.rebindCursor = 1
-  state.setup.lastMessage = "Select device for " .. role
-end
-
-local function runSetupTest(testName)
-  local w = state.setup.working
-  local result = "FAIL"
-
-  local function relayPulse(relayName, side)
-    local relay = safePeripheral(relayName)
-    if not relay then return false, "NO DEVICE" end
-    if type(relay.setAnalogOutput) == "function" then
-      relay.setAnalogOutput(side, 15)
-      sleep(0.1)
-      relay.setAnalogOutput(side, 0)
-      return true, "OK"
-    end
-    if type(relay.setOutput) == "function" then
-      relay.setOutput(side, true)
-      sleep(0.1)
-      relay.setOutput(side, false)
-      return true, "OK"
-    end
-    return false, "NO RESPONSE"
-  end
-
-  if testName == "MONITOR" then
-    local ok = setupDeviceExists(w.monitor.name, "monitor")
-    result = ok and "OK" or "NO DEVICE"
-  elseif testName == "LAS" then
-    local _, status = relayPulse(w.relays.laser.name, w.relays.laser.side)
-    result = status
-  elseif testName == "T" then
-    local _, status = relayPulse(w.relays.tritium.name, w.relays.tritium.side)
-    result = status
-  elseif testName == "D" then
-    local _, status = relayPulse(w.relays.deuterium.name, w.relays.deuterium.side)
-    result = status
-  elseif testName == "READER T" then
-    result = hw.readerRoles.tritium and "OK" or "NO DEVICE"
-  elseif testName == "READER D" then
-    result = hw.readerRoles.deuterium and "OK" or "NO DEVICE"
-  elseif testName == "INDUCTION" then
-    result = hw.induction and (state.inductionFormed and "OK" or "NO RESPONSE") or "NO DEVICE"
-  elseif testName == "LASER" then
-    result = hw.laser and "OK" or "NO DEVICE"
-  end
-  state.setup.lastTestResult = testName .. " => " .. result
-  state.setup.lastMessage = "Test executed"
-end
-
-local function saveSetupConfig()
-  local candidate = normalizeSetupConfig(state.setup.working)
-  local okValid, errors = CoreConfig.validateConfig(candidate)
-  if not okValid then
-    state.setup.saveStatus = "INVALID CONFIG"
-    state.setup.lastMessage = table.concat(errors, " | ")
-    return
-  end
-
-  local okWrite = CoreConfig.writeFusionConfig(fs, CONFIG_FILE, candidate)
-  if not okWrite then
-    state.setup.saveStatus = "SAVE FAILED"
-    state.setup.lastMessage = "Unable to write config"
-    return
-  end
-
-  applyConfigToRuntime(candidate)
-  refreshSetupWorkingConfig(candidate)
-  refreshAll()
-  state.setup.saveStatus = "CONFIG SAVED"
-  state.setup.lastMessage = "Config reloaded"
-end
-
-local function runInstallerFromSetup()
-  if not fs.exists("install.lua") then
-    state.setup.lastMessage = "install.lua missing"
-    return
-  end
-  restoreTerm()
-  shell.run("install.lua")
-  setupMonitor()
-  loadRuntimeSetupConfig()
-  state.setup.lastMessage = "Installer completed"
-end
-
-function buildSetupButtons(ctrl, bx, bw)
-  local by = ctrl.y + 6
-  local half = math.max(6, math.floor((bw - 1) / 2))
-  addButton("setupTestMon", bx, by, half, 3, "TEST MON", C.btnAction, nil, function() runSetupTest("MONITOR") end)
-  addButton("setupTestLas", bx + half + 1, by, bw - half - 1, 3, "TEST LAS", C.btnAction, nil, function() runSetupTest("LAS") end)
-  addButton("setupTestT", bx, by + 4, half, 3, "TEST T", C.btnAction, nil, function() runSetupTest("T") end)
-  addButton("setupTestD", bx + half + 1, by + 4, bw - half - 1, 3, "TEST D", C.btnAction, nil, function() runSetupTest("D") end)
-  addButton("setupTestRT", bx, by + 8, half, 3, "TEST R-T", C.btnAction, nil, function() runSetupTest("READER T") end)
-  addButton("setupTestRD", bx + half + 1, by + 8, bw - half - 1, 3, "TEST R-D", C.btnAction, nil, function() runSetupTest("READER D") end)
-  addButton("setupTestInd", bx, by + 12, half, 3, "TEST IND", C.btnAction, nil, function() runSetupTest("INDUCTION") end)
-  addButton("setupTestLaser", bx + half + 1, by + 12, bw - half - 1, 3, "TEST LASER", C.btnAction, nil, function() runSetupTest("LASER") end)
-
-  addButton("setupBindMon", bx, by + 16, half, 3, "BIND MON", C.panelMid, nil, function() setupStartRebind("monitor") end)
-  addButton("setupBindReactor", bx + half + 1, by + 16, bw - half - 1, 3, "BIND CTRL", C.panelMid, nil, function() setupStartRebind("reactorController") end)
-  addButton("setupBindLogic", bx, by + 20, half, 3, "BIND LOGIC", C.panelMid, nil, function() setupStartRebind("logicAdapter") end)
-  addButton("setupBindLaser", bx + half + 1, by + 20, bw - half - 1, 3, "BIND LASER", C.panelMid, nil, function() setupStartRebind("laser") end)
-  addButton("setupBindInd", bx, by + 24, half, 3, "BIND IND", C.panelMid, nil, function() setupStartRebind("induction") end)
-  addButton("setupBindRelayL", bx + half + 1, by + 24, bw - half - 1, 3, "BIND R-LAS", C.panelMid, nil, function() setupStartRebind("relayLaser") end)
-  addButton("setupBindRelayT", bx, by + 28, half, 3, "BIND R-T", C.panelMid, nil, function() setupStartRebind("relayTritium") end)
-  addButton("setupBindRelayD", bx + half + 1, by + 28, bw - half - 1, 3, "BIND R-D", C.panelMid, nil, function() setupStartRebind("relayDeuterium") end)
-  addButton("setupBindReaderT", bx, by + 32, half, 3, "BIND RD-T", C.panelMid, nil, function() setupStartRebind("readerTritium") end)
-  addButton("setupBindReaderD", bx + half + 1, by + 32, bw - half - 1, 3, "BIND RD-D", C.panelMid, nil, function() setupStartRebind("readerDeuterium") end)
-  addButton("setupBindReaderA", bx, by + 36, bw, 3, "BIND RD-AUX", C.panelMid, nil, function() setupStartRebind("readerAux") end)
-
-  addButton("setupSave", bx, by + 40, half, 3, "SAVE CONFIG", C.ok, nil, function() saveSetupConfig() end)
-  addButton("setupInstaller", bx + half + 1, by + 40, bw - half - 1, 3, "RUN INSTALLER", C.warn, nil, function() runInstallerFromSetup() end)
-
-  if state.setup.rebindRole and #state.setup.rebindCandidates > 0 then
-    local listY = ctrl.y + 6
-    for i = 1, math.min(3, #state.setup.rebindCandidates) do
-      local idx = i
-      local name = state.setup.rebindCandidates[i]
-      addButton("setupSel" .. i, bx, listY + ((i - 1) * 4), bw, 3, shortText("-> " .. name, bw - 2), C.info, nil, function() setupApplySelection(idx) end)
-    end
-  end
-end
-
-function buildRefreshButton(ctrl, bx, bw)
-  addButton("refreshNow", bx, ctrl.y + 6, bw, 4, "REFRESH", C.btnAction, nil, function()
-    refreshAll()
-    state.lastAction = "Refresh"
-  end)
-end
-
-function buildUpdateButtons(bx, bw, baseY)
-  addButton("updCheck", bx, baseY, bw, 4, "CHECK", C.btnAction, nil, function()
-    local ok, err = pcall(checkForUpdate)
-    if not ok then
-      state.update.lastError = tostring(err)
-      setUpdateState("FAILED", "Check crashed", "No apply")
-      pushEvent("Update failed")
-    end
-  end)
-
-  addButton("updApply", bx, baseY + 5, bw, 4, "UPDATE", state.update.available and C.warn or C.inactive, nil, function()
-    local ok, result, err = pcall(performUpdate)
-    if not ok then
-      state.update.lastError = tostring(result)
-      setUpdateState("FAILED", nil, "Update crashed")
-      pushEvent("Update failed")
-    elseif result == false then
-      state.update.lastError = tostring(err or "No update available")
-      state.lastAction = "No update"
-    end
-  end)
-
-  addButton("updDebug", bx, baseY + 10, bw, 4, state.debugHitboxes and "DEBUG ON" or "DEBUG OFF", state.debugHitboxes and C.info or C.panelMid, nil, function()
-    state.debugHitboxes = not state.debugHitboxes
-    state.lastAction = state.debugHitboxes and "Hitbox debug ON" or "Hitbox debug OFF"
-    pushEvent(state.lastAction)
-  end)
-
-  local splitGap = 1
-  local splitW = math.max(8, math.floor((bw - splitGap) / 2))
-  addButton("updRollback", bx, baseY + 15, splitW, 4, "ROLLBACK", hasAnyRollbackBackup(rollbackTargetList(true)) and C.bad or C.inactive, nil, function()
-    local ok, err = pcall(rollbackUpdate)
-    if not ok then
-      state.update.lastError = tostring(err)
-      setUpdateState("FAILED", nil, "Rollback crashed")
-      pushEvent("Update failed")
-    end
-  end)
-
-  addButton("monitor", bx + splitW + splitGap, baseY + 15, bw - splitW - splitGap, 4, "MONITOR", C.btnWarn, nil, function() startMonitorSelection() end)
-end
-
-function buildManualButtons(bx, bw, baseY)
-  drawBigButton("manualStart", bx, baseY, bw, "DEMARRAGE", canIgnite() and C.warn or C.inactive, function() startReactorSequence() end)
-  drawBigButton("manualStop", bx, baseY + 7, bw, "ARRET", C.bad, function() stopReactorSequence("ARRET DEMANDE") end)
-  addButton("manualT", bx, baseY + 14, bw, 5, "T LOCK", state.tOpen and C.tritium or C.inactive, nil, function() openTritium(not state.tOpen) end)
-  addButton("manualDT", bx, baseY + 20, bw, 5, "DT LOCK", state.dtOpen and C.dtFuel or C.inactive, nil, function()
-    local nextState = not state.dtOpen
-    openDTFuel(nextState)
-    if nextState then openSeparatedGases(false) end
-  end)
-  addButton("manualD", bx, baseY + 26, bw, 5, "D LOCK", state.dOpen and C.deuterium or C.inactive, nil, function() openDeuterium(not state.dOpen) end)
-  addButton("manualPulse", bx, baseY + 32, bw, 5, "PULSE LAS", C.warn, nil, function() fireLaser() end)
-  addButton("monitor", bx, baseY + 38, bw, 4, "MONITOR", C.btnWarn, nil, function() startMonitorSelection() end)
-  addButton("manualBack", bx, baseY + 43, bw, 4, "RETOUR SUP", C.btnAction, nil, function() state.currentView = "supervision"; pushEvent("View supervision") end)
-end
-
-function buildSupervisorCoreButtons(layout, bx, by, bw, bh, bGap)
-  addButton("master", bx, by, bw, bh, "MASTER", state.autoMaster and C.btnOn or C.btnOff, nil, function()
-    state.autoMaster = not state.autoMaster
-    if not state.autoMaster then
-      openDTFuel(false)
-      openSeparatedGases(false)
-      setLaserCharge(false)
-      state.ignitionSequencePending = false
-      state.status = "MASTER OFF"
-    else
-      state.status = "MASTER ON"
-    end
-    state.lastAction = "Toggle MASTER"
-  end)
-
-  addButton("fusion", bx, by + (bh + bGap), bw, bh, "FUSION", state.fusionAuto and C.btnOn or C.btnOff, nil, function()
-    state.fusionAuto = not state.fusionAuto
-    state.lastAction = "Toggle FUSION"
-  end)
-
-  addButton("charge", bx, by + (bh + bGap) * 2, bw, bh, "CHARGE", state.chargeAuto and C.btnOn or C.btnOff, nil, function()
-    state.chargeAuto = not state.chargeAuto
-    state.lastAction = "Toggle CHARGE"
-  end)
-
-  drawBigButton("demarrage", bx, by + (bh + bGap) * 3, bw, "DEMARRAGE", canIgnite() and C.warn or C.inactive, function() startReactorSequence() end)
-  addButton("monitor", bx, by + (bh + bGap) * 3 + 7, bw, 4, "MONITOR", C.btnWarn, nil, function() startMonitorSelection() end)
-  addButton("arret", bx, by + (bh + bGap) * 3 + 12, bw, 4, "ARRET", C.bad, nil, function() stopReactorSequence("ARRET DEMANDE") end)
-
-  local center = layout.center
-  if not center or layout.mode == "compact" or state.currentView ~= "supervision" then return end
-
-  local innerX = center.x + 2
-  local innerW = center.w - 4
-  local barY = center.y + center.h - 5
-  local btnH = 5
-  local gap = 3
-  local btnW = math.max(10, math.floor((innerW - (gap * 2)) / 3))
-  local totalW = (btnW * 3) + (gap * 2)
-  local startX = innerX + math.max(0, math.floor((innerW - totalW) / 2))
-
-  addButton("lock_t", startX, barY, btnW, btnH, "T LOCK", state.tOpen and C.tritium or C.inactive, C.btnText, function()
-    openTritium(not state.tOpen)
-  end)
-
-  addButton("lock_dt", startX + btnW + gap, barY, btnW, btnH, "DT LOCK", state.dtOpen and C.dtFuel or C.inactive, C.btnText, function()
-    local nextState = not state.dtOpen
-    openDTFuel(nextState)
-    if nextState then openSeparatedGases(false) end
-  end)
-
-  addButton("lock_d", startX + (btnW + gap) * 2, barY, btnW, btnH, "D LOCK", state.dOpen and C.deuterium or C.inactive, C.btnText, function()
-    openDeuterium(not state.dOpen)
-  end)
 end
 
 function buildButtons(layout)
   buttons = {}
-  if state.choosingMonitor then
-    buildMonitorSelectionButtons(layout)
-    return
-  end
-
-  local ctrl = layout.right or layout.left
-  local bx = ctrl.x + 2
-  local bw = math.max(12, ctrl.w - 4)
-  local by = ctrl.y + 10
-  local bh = (layout.mode == "compact") and 4 or 5
-  local bGap = 2
-
-  buildNavigationButtons(ctrl, bx, bw)
-  buildRefreshButton(ctrl, bx, bw)
-
-  if state.currentView == "update" then
-    buildUpdateButtons(bx, bw, by)
-    return
-  end
-
-  if state.currentView == "setup" then
-    buildSetupButtons(ctrl, bx, bw)
-    return
-  end
-
-  if state.currentView == "diagnostic" or state.currentView == "induction" then
-    drawBigButton("monitor", bx, ctrl.y + 12, bw, "MONITOR", C.btnWarn, function() startMonitorSelection() end)
-    return
-  end
-
-  if state.currentView == "manual" then
-    buildManualButtons(bx, bw, by)
-    return
-  end
-
-  buildSupervisorCoreButtons(layout, bx, by, bw, bh, bGap)
+  UIComponents.buildButtons({
+    state = state,
+    C = C,
+    clamp = clamp,
+    shortText = shortText,
+    addButton = addButton,
+    addRowButton = addRowButton,
+    drawBigButton = drawBigButton,
+    actions = buildButtonActions(),
+  }, layout)
 end
 
 function getCurrentInputSource()
@@ -3003,7 +2536,7 @@ function getInductionFillRatio()
 end
 
 local function buildUIViewContext()
-  return {
+  return UIViews.buildContext({
     C = C,
     state = state,
     hw = hw,
@@ -3038,7 +2571,7 @@ local function buildUIViewContext()
     hasAnyRollbackBackup = hasAnyRollbackBackup,
     rollbackTargetList = rollbackTargetList,
     getSetupStatusRows = getSetupStatusRows,
-  }
+  })
 end
 
 function drawMonitorSelection(layout)
