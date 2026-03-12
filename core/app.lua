@@ -19,6 +19,11 @@ function M.run()
   local CoreState = require("core.state")
   local CoreReactor = require("core.reactor")
   local CoreInduction = require("core.induction")
+  local CoreAlerts = require("core.alerts")
+  local CoreActions = require("core.actions")
+  local CoreStartup = require("core.startup")
+  local CoreRuntimeLoop = require("core.runtime_loop")
+  local CoreRuntimeRefresh = require("core.runtime_refresh")
   local RuntimeConfig = require("core.runtime_config")
   local IoDevices = require("io.devices")
   local IoReaders = require("io.readers")
@@ -413,12 +418,22 @@ function M.run()
   end
 
 
-  local reactorPhase
-  local phaseColor
-  local getRuntimeFuelMode
-  local isRuntimeFuelOk
-  local computeSafetyWarnings
-  local collectSafetyWarnings
+  local runtimeAlerts = CoreAlerts.build({
+    state = state,
+    hw = hw,
+    CFG = CFG,
+    C = C,
+    contains = contains,
+    toNumber = toNumber,
+    CoreReactor = CoreReactor,
+  })
+
+  local reactorPhase = runtimeAlerts.reactorPhase
+  local phaseColor = runtimeAlerts.phaseColor
+  local getRuntimeFuelMode = runtimeAlerts.getRuntimeFuelMode
+  local isRuntimeFuelOk = runtimeAlerts.isRuntimeFuelOk
+  local computeSafetyWarnings = runtimeAlerts.computeSafetyWarnings
+  local collectSafetyWarnings = runtimeAlerts.computeSafetyWarnings
 
   local function drawHeaderBarSprite(title, status)
     local function drawHeaderSegment(x, y, w, label, value, tone)
@@ -500,50 +515,13 @@ function M.run()
     drawMainFooter()
   end
 
-  getRuntimeFuelMode = function()
-    local dt = state.dtOpen == true
-    local d = state.dOpen == true
-    local t = state.tOpen == true
-
-    if dt and not d and not t then return "DT" end
-    if (not dt) and d and t then return "D+T" end
-    if dt and (d or t) then return "HYBRID" end
-    return "STARVED"
+  local function drawHeader(title, status)
+    drawHeaderBarSprite(title, status)
   end
 
-  isRuntimeFuelOk = function()
-    return (state.dOpen and state.tOpen) or state.dtOpen
-  end
-
-  reactorPhase = function()
-    if state.alert == "DANGER" then return "SAFE STOP" end
-    if not state.reactorPresent then return "OFFLINE" end
-    if not state.reactorFormed then return "UNFORMED" end
-    if state.ignition then
-      if isRuntimeFuelOk() then
-        local mode = getRuntimeFuelMode()
-        return mode == "HYBRID" and "RUNNING / HYBRID" or ("RUNNING / " .. mode)
-      end
-      return "RUNNING / STARVED"
-    end
-    if #state.ignitionBlockers > 0 then return "BLOCKED" end
-    if state.ignitionSequencePending then return "FIRING" end
-    if state.laserChargeOn or state.laserLineOn then return "CHARGING" end
-
-    local threshold = toNumber(CFG and CFG.ignitionLaserEnergyThreshold, 0)
-    local laserEnergy = toNumber(state.laserEnergy, 0)
-    if laserEnergy >= threshold and threshold > 0 then return "READY" end
-
-    return "READY"
-  end
-
-  phaseColor = function(phase)
-    if contains(phase, "RUNNING") and not contains(phase, "STARVED") then return C.ok end
-    if phase == "RUNNING" or phase == "IGNITED" then return C.ok end
-    if phase == "READY" then return C.warn end
-    if phase == "CHARGING" or phase == "FIRING" then return C.warn end
-    if phase == "SAFE STOP" or phase == "OFFLINE" or phase == "UNFORMED" or phase == "BLOCKED" or contains(phase, "STARVED") then return C.bad end
-    return C.dim
+  local function drawFooter(layout)
+    local currentViewName = UIViews.resolveViewName(state.currentView)
+    drawFooterBarSprite()
   end
 
   local function pushEvent(message)
@@ -553,92 +531,6 @@ function M.run()
     while #state.eventLog > (state.maxEventLog or 8) do
       table.remove(state.eventLog)
     end
-  end
-
-  local function getIgnitionChecklist()
-    local list = {
-      { key = "LAS >= 2 GFE", ok = state.laserEnergy >= CFG.ignitionLaserEnergyThreshold, wait = state.laserPresent },
-      { key = "T OPEN", ok = state.tOpen },
-      { key = "D OPEN", ok = state.dOpen },
-      { key = "REACTOR FORMED", ok = state.reactorPresent and state.reactorFormed },
-      { key = "SAFETY OK", ok = #state.safetyWarnings == 0 and state.alert ~= "DANGER" },
-    }
-    return list
-  end
-
-  local function getIgnitionBlockers()
-    local blockers = {}
-    for _, item in ipairs(getIgnitionChecklist()) do
-      if not item.ok then
-        table.insert(blockers, item.key)
-      end
-    end
-    return blockers
-  end
-
-  local function canIgnite()
-    if not CoreReactor.canIgnite(state) then return false end
-    return #getIgnitionBlockers() == 0
-  end
-
-  computeSafetyWarnings = function()
-    local warnings = {}
-    local critical = false
-
-    if not state.reactorPresent then
-      table.insert(warnings, "REACTOR ABSENT")
-      critical = true
-    elseif not state.reactorFormed then
-      table.insert(warnings, "REACTOR UNFORMED")
-    end
-
-    if (not state.ignition) and state.laserEnergy < CFG.ignitionLaserEnergyThreshold then
-      table.insert(warnings, "LAS BELOW 2 GFE")
-    end
-    if state.ignition then
-      if not isRuntimeFuelOk() then
-        table.insert(warnings, "RUNTIME FUEL FAIL")
-        table.insert(warnings, "NO FUEL FLOW")
-        table.insert(warnings, "STARVED")
-      end
-    else
-      if not state.tOpen then table.insert(warnings, "TANK T CLOSED") end
-      if not state.dOpen then table.insert(warnings, "TANK D CLOSED") end
-    end
-
-    if not hw.readerRoles.deuterium or not hw.readerRoles.tritium then
-      table.insert(warnings, "FUEL SENSOR FAIL")
-    end
-    if not hw.readerRoles.inventory then
-      table.insert(warnings, "READER AUX FAIL")
-    end
-
-    if not hw.relays[CFG.actions.laser_charge.relay]
-      or not hw.relays[CFG.actions.deuterium.relay]
-      or not hw.relays[CFG.actions.tritium.relay] then
-      table.insert(warnings, "CONTROL LINE FAIL")
-      critical = true
-    end
-
-    if (not state.ignition) and #state.ignitionBlockers > 0 then
-      table.insert(warnings, "IGNITION BLOCKED")
-    end
-
-    if #hw.readerRoles.unknown > 0 then table.insert(warnings, "FALLBACK DETECTION") end
-    return warnings, critical
-  end
-
-  collectSafetyWarnings = function()
-    return computeSafetyWarnings()
-  end
-
-  local function drawHeader(title, status)
-    drawHeaderBarSprite(title, status)
-  end
-
-  local function drawFooter(layout)
-    local currentViewName = UIViews.resolveViewName(state.currentView)
-    drawFooterBarSprite()
   end
 
   local function drawKeyValue(x, y, key, value, keyColor, valueColor, maxVal)
@@ -1691,395 +1583,46 @@ function M.run()
     return IoRelays.readRelayOutputState(CFG.actions, hw.relays, actionName, fallback, toNumber)
   end
 
-  local function setLaserCharge(on)
-    if state.laserChargeOn == on then return end
-    relayWrite("laser_charge", on)
-    state.laserChargeOn = on
-    state.lastAction = on and "Charge laser ON" or "Charge laser OFF"
-    pushEvent(state.lastAction)
-  end
+  local runtimeRefresh = CoreRuntimeRefresh.build({
+    state = state,
+    hw = hw,
+    CFG = CFG,
+    tryMethods = tryMethods,
+    safeCall = safeCall,
+    toNumber = toNumber,
+    clamp = clamp,
+    normalizePortMode = normalizePortMode,
+    scanPeripherals = scanPeripherals,
+    scanBlockReaders = scanBlockReaders,
+    readChemicalFromReader = readChemicalFromReader,
+    readActiveFromReader = readActiveFromReader,
+    readRelayOutputState = readRelayOutputState,
+    refreshSetupDeviceStatus = refreshSetupDeviceStatus,
+    pushEvent = pushEvent,
+  })
 
-  local function fireLaser()
-    if CFG.actions.laser_fire and relayWrite("laser_fire", true) then
-      state.lastAction = "Pulse LAS"
-      pushEvent("Pulse LAS")
-    else
-      state.lastAction = "Laser pulse non cable"
-      pushEvent("Pulse LAS FAIL")
-    end
-  end
+  local refreshAll = runtimeRefresh.refreshAll
 
-  local function openDTFuel(on)
-    if state.dtOpen == on then return end
-    if CFG.actions.dt_fuel then
-      relayWrite("dt_fuel", on)
-    end
-    state.dtOpen = on
-    state.lastAction = on and "DT OPEN" or "DT CLOSED"
-    pushEvent(state.lastAction)
-  end
+  local runtimeActions = CoreActions.build({
+    state = state,
+    CFG = CFG,
+    relayWrite = relayWrite,
+    pushEvent = pushEvent,
+    runtimeAlerts = runtimeAlerts,
+  })
 
-  local function openDeuterium(on)
-    if state.dOpen == on then return end
-    if CFG.actions.deuterium then
-      relayWrite("deuterium", on)
-    end
-    state.dOpen = on
-    pushEvent(on and "D line OPEN" or "D line CLOSED")
-  end
-
-  local function openTritium(on)
-    if state.tOpen == on then return end
-    if CFG.actions.tritium then
-      relayWrite("tritium", on)
-    end
-    state.tOpen = on
-    pushEvent(on and "T line OPEN" or "T line CLOSED")
-  end
-
-  local function openSeparatedGases(on)
-    openDeuterium(on)
-    openTritium(on)
-    state.lastAction = on and "Ouverture tanks separes" or "Fermeture tanks separes"
-  end
-
-  local function hardStop(reason)
-    openDTFuel(false)
-    openSeparatedGases(false)
-    setLaserCharge(false)
-    state.ignitionSequencePending = false
-    state.status = reason or "EMERGENCY STOP"
-    state.alert = "DANGER"
-    state.lastAction = "Arret securite"
-    pushEvent("Emergency stop")
-  end
-
-  local function detectReactorFormed()
-    if hw.logic then
-      local ok, formed = tryMethods(hw.logic, { "isFormed", "getFormed" })
-      if ok then return formed == true end
-    end
-
-    if hw.reactor then
-      local okPlasma, plasma = tryMethods(hw.reactor, { "getPlasmaTemperature", "getPlasmaTemp", "getPlasmaHeat" })
-      local okIgn, ign = tryMethods(hw.reactor, { "isIgnited", "getIgnitionStatus" })
-      if okPlasma and plasma ~= nil then return true end
-      if okIgn and ign ~= nil then return true end
-    end
-
-    return false
-  end
-
-  local function readLaser()
-    state.laserPresent = hw.laser ~= nil
-    if not hw.laser then
-      state.laserEnergy = 0
-      state.laserMax = 1
-      state.laserPct = 0
-      return
-    end
-
-    local okE, e = tryMethods(hw.laser, { "getEnergy", "getEnergyStored", "getStored" })
-    local okM, m = tryMethods(hw.laser, { "getMaxEnergy", "getMaxEnergyStored", "getCapacity" })
-
-    state.laserEnergy = toNumber(e, 0)
-    state.laserMax = math.max(1, toNumber(m, 1))
-    state.laserPct = clamp((state.laserEnergy * 100) / state.laserMax, 0, 100)
-  end
-
-  local function readReactor()
-    state.reactorPresent = hw.reactor ~= nil or hw.logic ~= nil
-    state.reactorFormed = detectReactorFormed()
-
-    if hw.logic then
-      local okIgn, ign = tryMethods(hw.logic, { "isIgnited" })
-      if okIgn then state.ignition = (ign == true) end
-
-      local okPlasma, plasma = tryMethods(hw.logic, { "getPlasmaTemperature", "getPlasmaTemp", "getPlasmaHeat" })
-      if okPlasma then state.plasmaTemp = toNumber(plasma, 0) end
-
-      local okIgnTemp, ignTemp = tryMethods(hw.logic, { "getIgnitionTemperature", "getIgnitionTemp" })
-      if okIgnTemp then
-        state.ignitionTemp = toNumber(ignTemp, 0)
-        state.minTemp = state.ignitionTemp + 10000
-      end
-
-      local okCase, caseTemp = tryMethods(hw.logic, { "getCaseTemperature", "getCasingTemperature" })
-      if okCase then state.caseTemp = toNumber(caseTemp, 0) end
-    elseif hw.reactor then
-      local okIgn, ign = tryMethods(hw.reactor, { "isIgnited", "getIgnitionStatus" })
-      state.ignition = okIgn and (ign == true or ign == "true") or false
-
-      local okPlasma, plasma = tryMethods(hw.reactor, { "getPlasmaTemperature", "getPlasmaTemp", "getPlasmaHeat" })
-      state.plasmaTemp = toNumber(plasma, 0)
-
-      local okIgnTemp, ignTemp = tryMethods(hw.reactor, { "getIgnitionTemperature", "getIgnitionTemp" })
-      state.ignitionTemp = toNumber(ignTemp, 0)
-      state.minTemp = state.ignitionTemp + 10000
-
-      local okCase, caseTemp = tryMethods(hw.reactor, { "getCaseTemperature", "getCasingTemperature" })
-      state.caseTemp = toNumber(caseTemp, 0)
-    else
-      state.ignition = false
-      state.plasmaTemp = 0
-      state.ignitionTemp = 0
-      state.caseTemp = 0
-    end
-
-    if state.ignition then
-      state.ignitionSequencePending = false
-    elseif state.ignitionSequencePending and ((os.clock() - state.lastIgnitionAttempt) > CFG.ignitionRetryDelay) then
-      state.ignitionSequencePending = false
-    end
-  end
-
-  local function readInductionStatus()
-    state.inductionPresent = hw.induction ~= nil
-    state.inductionFormed = false
-    state.inductionEnergy = 0
-    state.inductionMax = 1
-    state.inductionPct = 0
-    state.inductionNeeded = 0
-    state.inductionInput = 0
-    state.inductionOutput = 0
-    state.inductionTransferCap = 0
-    state.inductionCells = 0
-    state.inductionProviders = 0
-    state.inductionLength = 0
-    state.inductionHeight = 0
-    state.inductionWidth = 0
-    state.inductionPortMode = "UNKNOWN"
-
-    state.energyPresent = state.inductionPresent
-    state.energyKnown = false
-    state.energyStored = 0
-    state.energyMax = 1
-    state.energyPct = 0
-
-    if not hw.induction then return end
-
-    local okFormed, formed = safeCall(hw.induction, "isFormed")
-    local okEnergy, energy = safeCall(hw.induction, "getEnergy")
-    local okMax, maxEnergy = safeCall(hw.induction, "getMaxEnergy")
-    local okPct, pct = safeCall(hw.induction, "getEnergyFilledPercentage")
-    local okNeed, needed = safeCall(hw.induction, "getEnergyNeeded")
-    local okIn, lastInput = safeCall(hw.induction, "getLastInput")
-    local okOut, lastOutput = safeCall(hw.induction, "getLastOutput")
-    local okCap, transferCap = safeCall(hw.induction, "getTransferCap")
-    local okCells, cells = safeCall(hw.induction, "getInstalledCells")
-    local okProv, providers = safeCall(hw.induction, "getInstalledProviders")
-    local okLen, length = safeCall(hw.induction, "getLength")
-    local okHeight, height = safeCall(hw.induction, "getHeight")
-    local okWidth, width = safeCall(hw.induction, "getWidth")
-    local okPortMode, portMode = safeCall(hw.induction, "getMode")
-
-    state.inductionFormed = okFormed and formed == true or false
-    state.inductionEnergy = toNumber(energy, 0)
-    state.inductionMax = math.max(1, toNumber(maxEnergy, 1))
-    state.inductionNeeded = toNumber(needed, math.max(0, state.inductionMax - state.inductionEnergy))
-    state.inductionInput = toNumber(lastInput, 0)
-    state.inductionOutput = toNumber(lastOutput, 0)
-    state.inductionTransferCap = toNumber(transferCap, 0)
-    state.inductionCells = toNumber(cells, 0)
-    state.inductionProviders = toNumber(providers, 0)
-    state.inductionLength = toNumber(length, 0)
-    state.inductionHeight = toNumber(height, 0)
-    state.inductionWidth = toNumber(width, 0)
-    state.inductionPortMode = okPortMode and normalizePortMode(portMode) or "UNKNOWN"
-
-    if okPct then
-      local rawPct = toNumber(pct, 0)
-      if rawPct <= 1.0 then
-        rawPct = rawPct * 100
-      end
-      state.inductionPct = clamp(rawPct, 0, 100)
-    else
-      state.inductionPct = clamp((state.inductionEnergy * 100) / state.inductionMax, 0, 100)
-    end
-
-    state.energyKnown = okEnergy or okMax or okPct
-    state.energyStored = state.inductionEnergy
-    state.energyMax = state.inductionMax
-    state.energyPct = state.inductionPct
-  end
-
-  local function readReaders()
-    state.deuteriumName, state.deuteriumAmount = readChemicalFromReader(hw.readerRoles.deuterium)
-    state.tritiumName, state.tritiumAmount = readChemicalFromReader(hw.readerRoles.tritium)
-
-    local auxReader = hw.readerRoles.inventory or hw.readerRoles.active[1]
-    if auxReader then
-      state.auxPresent = true
-      local active, rs = readActiveFromReader(auxReader)
-      state.auxActive = active
-      state.auxRedstone = rs
-    else
-      state.auxPresent = false
-      state.auxActive = false
-      state.auxRedstone = 0
-    end
-
-    state.laserLineOn = readRelayOutputState("laser_charge", state.laserChargeOn)
-    state.dOpen = readRelayOutputState("deuterium", state.dOpen)
-    state.tOpen = readRelayOutputState("tritium", state.tOpen)
-  end
-
-  local function refreshAll()
-    local wasIgnited = state.ignition
-    scanPeripherals()
-    scanBlockReaders()
-    readLaser()
-    readReactor()
-    readInductionStatus()
-    readReaders()
-    if (not wasIgnited) and state.ignition then
-      pushEvent("Reactor running")
-    end
-    refreshSetupDeviceStatus()
-    state.tick = (state.tick or 0) + 1
-  end
-
-  local function updateAlerts()
-    state.ignitionChecklist = getIgnitionChecklist()
-    state.ignitionBlockers = getIgnitionBlockers()
-    local warnings, critical = computeSafetyWarnings()
-    state.safetyWarnings = warnings
-    local preStartBlocked = (not state.ignition) and (#state.ignitionBlockers > 0)
-    if critical then
-      state.alert = "DANGER"
-    elseif #warnings > 0 or preStartBlocked or (state.energyKnown and state.energyPct <= CFG.energyLowPct) then
-      state.alert = "WARN"
-    elseif state.ignition then
-      state.alert = "OK"
-    else
-      state.alert = "INFO"
-    end
-  end
-
-  local function startReactorSequence()
-    state.ignitionChecklist = getIgnitionChecklist()
-    state.ignitionBlockers = getIgnitionBlockers()
-
-    if state.ignitionSequencePending then
-      state.status = "FIRING"
-      return false
-    end
-
-    if not canIgnite() then
-      state.status = "BLOCKED"
-      state.lastAction = "Ignition refused"
-      pushEvent("Ignition refused")
-      return false
-    end
-
-    state.ignitionSequencePending = true
-    state.lastIgnitionAttempt = os.clock()
-    openDTFuel(false)
-    sleep(0.15)
-    fireLaser()
-    state.status = "FIRING"
-    state.lastAction = "Start sequence"
-    pushEvent("Ignition start sequence")
-    return true
-  end
-
-  local function stopReactorSequence(reason)
-    openDTFuel(false)
-    openSeparatedGases(false)
-    setLaserCharge(false)
-    state.ignitionSequencePending = false
-    state.status = reason or "ARRET"
-    state.lastAction = "Arret commande"
-    pushEvent("Reactor stop sequence")
-  end
-
-  local function triggerAutomaticIgnitionSequence()
-    return startReactorSequence()
-  end
-
-  local function autoChargeLaser()
-    if not state.chargeAuto then return end
-
-    if state.laserPct >= CFG.laserChargeStopPct then
-      if state.laserChargeOn then setLaserCharge(false) end
-    elseif state.laserPct <= CFG.laserChargeStartPct then
-      if not state.laserChargeOn then setLaserCharge(true) end
-    end
-  end
-
-  local function autoFusionControl()
-    if not state.fusionAuto then return end
-
-    if not state.reactorFormed then
-      state.status = "BLOCKED"
-      openDTFuel(false)
-      openSeparatedGases(false)
-      return
-    end
-
-    if (not state.ignition) and (not state.ignitionSequencePending) and state.laserEnergy >= CFG.ignitionLaserEnergyThreshold then
-      triggerAutomaticIgnitionSequence()
-      return
-    end
-
-    if state.energyKnown then
-      if state.energyPct <= CFG.energyLowPct then
-        if state.ignition and not state.dtOpen then
-          openDTFuel(true)
-          openSeparatedGases(false)
-          state.status = "Energie basse : D-T actif"
-        elseif not state.ignition then
-          state.status = state.ignitionSequencePending and "Ignition en attente" or "Attente seuil 2.0G"
-        end
-      elseif state.energyPct >= CFG.energyHighPct and state.ignition then
-        openDTFuel(false)
-        openSeparatedGases(false)
-        state.status = "Energie pleine : stop injection"
-      else
-        if state.ignition and not isRuntimeFuelOk() then
-          state.status = "RUNNING / STARVED"
-        else
-          state.status = state.ignition and ("RUNNING / " .. getRuntimeFuelMode()) or "READY"
-        end
-      end
-    else
-      if not state.ignition and not state.ignitionSequencePending and state.laserEnergy >= CFG.ignitionLaserEnergyThreshold then
-        triggerAutomaticIgnitionSequence()
-      else
-        if state.ignition and not isRuntimeFuelOk() then
-          state.status = "RUNNING / STARVED"
-        else
-          state.status = state.ignition and ("RUNNING / " .. getRuntimeFuelMode()) or (state.ignitionSequencePending and "FIRING" or "READY")
-        end
-      end
-    end
-  end
-
-  local function autoGasSanity()
-    if not state.gasAuto then return end
-    if (not state.ignition) and state.dtOpen and (state.dOpen or state.tOpen) then
-      openSeparatedGases(false)
-    end
-  end
-
-  local function autoSafety()
-    if not state.autoMaster then return end
-    if CFG.emergencyStopIfReactorMissing and not state.reactorPresent then
-      hardStop("Reactor absent")
-    end
-  end
-
-  local function fullAuto()
-    if not state.autoMaster then
-      updateAlerts()
-      return
-    end
-    autoSafety()
-    autoChargeLaser()
-    autoFusionControl()
-    autoGasSanity()
-    updateAlerts()
-  end
+  local setLaserCharge = runtimeActions.setLaserCharge
+  local fireLaser = runtimeActions.fireLaser
+  local openDTFuel = runtimeActions.openDTFuel
+  local openDeuterium = runtimeActions.openDeuterium
+  local openTritium = runtimeActions.openTritium
+  local openSeparatedGases = runtimeActions.openSeparatedGases
+  local hardStop = runtimeActions.hardStop
+  local canIgnite = runtimeAlerts.canIgnite
+  local startReactorSequence = runtimeActions.startReactorSequence
+  local stopReactorSequence = runtimeActions.stopReactorSequence
+  local triggerAutomaticIgnitionSequence = runtimeActions.triggerAutomaticIgnitionSequence
+  local fullAuto = runtimeActions.fullAuto
 
   function getHitboxBucket(source)
     return source == "monitor" and touchHitboxes.monitor or touchHitboxes.terminal
@@ -2805,120 +2348,42 @@ function M.run()
     state.uiDrawn = true
   end
 
-  local configOk = ensureConfigOrInstaller()
-  if not configOk then
-    restoreTerm()
+  local startupOk = CoreStartup.run({
+    state = state,
+    ensureConfigOrInstaller = ensureConfigOrInstaller,
+    restoreTerm = restoreTerm,
+    applyPremiumPalette = applyPremiumPalette,
+    readLocalVersionFile = readLocalVersionFile,
+    setupMonitor = setupMonitor,
+    refreshAll = refreshAll,
+    pushEvent = pushEvent,
+    UPDATE_ENABLED = UPDATE_ENABLED,
+    checkForUpdate = checkForUpdate,
+  })
+  if not startupOk then
     return
   end
 
-  applyPremiumPalette()
-  state.update.localVersion = readLocalVersionFile()
-  setupMonitor()
-  refreshAll()
-  state.status = "READY"
-  pushEvent("System ready")
-
-  if UPDATE_ENABLED then
-    local ok, err = pcall(checkForUpdate)
-    if not ok then
-      state.update.status = "FAILED"
-      state.update.lastCheckResult = "Startup check failed"
-      state.update.lastError = tostring(err)
-      state.update.httpStatus = "FAIL"
-      pushEvent("Update failed")
-    end
-  end
-
-  while state.running do
-    refreshAll()
-    fullAuto()
-    drawUI()
-
-    local timer = os.startTimer(CFG.refreshDelay)
-    local ev, p1, p2, p3 = os.pullEvent()
-
-    if ev == "char" then
-      local ch = string.lower(p1)
-
-      if state.choosingMonitor then
-        if ch == "1" then selectMonitorByIndex(1)
-        elseif ch == "2" then selectMonitorByIndex(2)
-        elseif ch == "3" then selectMonitorByIndex(3)
-        elseif ch == "4" then selectMonitorByIndex(4)
-        elseif ch == "q" or ch == "x" then stopMonitorSelection()
-        end
-      else
-        if ch == "q" then
-          state.running = false
-        elseif ch == "a" then
-          state.autoMaster = not state.autoMaster
-          if not state.autoMaster then
-            openDTFuel(false)
-            openSeparatedGases(false)
-            setLaserCharge(false)
-            state.ignitionSequencePending = false
-          end
-        elseif ch == "z" then
-          state.chargeAuto = not state.chargeAuto
-        elseif ch == "f" then
-          state.fusionAuto = not state.fusionAuto
-        elseif ch == "g" then
-          state.gasAuto = not state.gasAuto
-        elseif ch == "m" then
-          startMonitorSelection()
-        elseif ch == "1" then
-          state.currentView = "supervision"
-          pushEvent("View supervision")
-        elseif ch == "2" then
-          state.currentView = "diagnostic"
-          pushEvent("View diagnostic")
-        elseif ch == "3" then
-          state.currentView = "manual"
-          pushEvent("View manual")
-        elseif ch == "4" then
-          state.currentView = "induction"
-          pushEvent("View induction")
-        elseif ch == "5" then
-          state.currentView = "update"
-          pushEvent("View update")
-        elseif ch == "6" then
-          state.currentView = "setup"
-          pushEvent("View setup")
-        elseif ch == "i" then
-          triggerAutomaticIgnitionSequence()
-        elseif ch == "l" then
-          fireLaser()
-        elseif ch == "o" then
-          openDTFuel(true)
-        elseif ch == "p" then
-          openDTFuel(false)
-        end
-      end
-
-    elseif ev == "mouse_click" then
-      local _, x, y = p1, p2, p3
-      handleClick(x, y, "terminal")
-
-    elseif ev == "monitor_touch" then
-      local mon, x, y = p1, p2, p3
-      if mon == hw.monitorName then
-        handleClick(x, y, "monitor")
-      end
-
-    elseif ev == "monitor_resize" or ev == "term_resize" then
-      setupMonitor()
-      state.uiDrawn = false
-
-    elseif ev == "peripheral" or ev == "peripheral_detach" then
-      setupMonitor()
-      state.uiDrawn = false
-      if state.choosingMonitor then
-        state.monitorList = getMonitorCandidates()
-      end
-
-    elseif ev == "timer" and p1 == timer then
-    end
-  end
+  CoreRuntimeLoop.run({
+    state = state,
+    hw = hw,
+    CFG = CFG,
+    refreshAll = refreshAll,
+    fullAuto = fullAuto,
+    drawUI = drawUI,
+    handleClick = handleClick,
+    setupMonitor = setupMonitor,
+    getMonitorCandidates = getMonitorCandidates,
+    selectMonitorByIndex = selectMonitorByIndex,
+    stopMonitorSelection = stopMonitorSelection,
+    startMonitorSelection = startMonitorSelection,
+    openDTFuel = openDTFuel,
+    openSeparatedGases = openSeparatedGases,
+    setLaserCharge = setLaserCharge,
+    triggerAutomaticIgnitionSequence = triggerAutomaticIgnitionSequence,
+    fireLaser = fireLaser,
+    pushEvent = pushEvent,
+  })
 
   restoreTerm()
   term.setBackgroundColor(colors.black)
