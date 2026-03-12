@@ -160,4 +160,159 @@ function M.drawUpdateInfoPanel(ctx, infoPanel)
   ctx.writeAt(x, resultY + 6, ctx.shortText("Restart: " .. (state.update.restartRequired and "REQUIRED" or "NOT REQUIRED"), w - 3), state.update.restartRequired and C.warn or C.ok, C.panelDark)
 end
 
+
+function M.buildButtons(ctx, layout)
+  local state = ctx.state
+  local C = ctx.C
+  local addButton = ctx.addButton
+  local addRowButton = ctx.addRowButton
+  local drawBigButton = ctx.drawBigButton
+  local actions = ctx.actions
+
+  local function buildMonitorSelectionButtons()
+    local boxW = ctx.clamp(layout.width - 6, 24, 60)
+    local x = math.floor((layout.width - boxW) / 2) + 1
+    local y0 = layout.top + 4
+    for i = 1, 4 do
+      local rowY = y0 + (i - 1) * 3
+      local rowAction = function() actions.selectMonitorByIndex(i) end
+      addRowButton("mrow" .. i, x + 1, rowY, boxW - 2, 2, "", C.panelDark, C.text, rowAction)
+      addButton("m" .. i, x + boxW - 8, rowY, 6, 2, tostring(i), C.btnAction, nil, rowAction, { kind = "small" })
+    end
+    addButton("cancelMon", x + 1, layout.bottom - 4, boxW - 2, 4, "ANNULER", C.bad, nil, actions.stopMonitorSelection)
+  end
+
+  local function buildNavigationButtons(ctrl, bx, bw)
+    local navW = math.max(5, math.floor(bw / 6))
+    addButton("viewSup", bx, ctrl.y + 1, navW, 4, "SUP", state.currentView == "supervision" and C.btnOn or C.panelMid, nil, function() actions.setView("supervision") end)
+    addButton("viewDiag", bx + navW, ctrl.y + 1, navW, 4, "DIAG", state.currentView == "diagnostic" and C.btnOn or C.panelMid, nil, function() actions.setView("diagnostic") end)
+    addButton("viewMan", bx + (navW * 2), ctrl.y + 1, navW, 4, "MAN", state.currentView == "manual" and C.btnOn or C.panelMid, nil, function() actions.setView("manual") end)
+    addButton("viewInd", bx + (navW * 3), ctrl.y + 1, navW, 4, "IND", state.currentView == "induction" and C.btnOn or C.panelMid, nil, function() actions.setView("induction") end)
+    addButton("viewUpd", bx + (navW * 4), ctrl.y + 1, navW, 4, "UPD", state.currentView == "update" and C.btnOn or C.panelMid, nil, function() actions.setView("update") end)
+    addButton("viewSetup", bx + (navW * 5), ctrl.y + 1, bw - (navW * 5), 4, "SET", state.currentView == "setup" and C.btnOn or C.panelMid, nil, function() actions.setView("setup") end)
+  end
+
+  local function buildRefreshButton(ctrl, bx, bw)
+    addButton("refreshNow", bx, ctrl.y + 6, bw, 4, "REFRESH", C.btnAction, nil, actions.refreshNow)
+  end
+
+  local function buildUpdateButtons(bx, bw, baseY)
+    addButton("updCheck", bx, baseY, bw, 4, "CHECK", C.btnAction, nil, actions.checkForUpdate)
+    addButton("updApply", bx, baseY + 5, bw, 4, "UPDATE", state.update.available and C.warn or C.inactive, nil, actions.performUpdate)
+    addButton("updDebug", bx, baseY + 10, bw, 4, state.debugHitboxes and "DEBUG ON" or "DEBUG OFF", state.debugHitboxes and C.info or C.panelMid, nil, actions.toggleDebugHitboxes)
+    local splitGap = 1
+    local splitW = math.max(8, math.floor((bw - splitGap) / 2))
+    addButton("updRollback", bx, baseY + 15, splitW, 4, "ROLLBACK", actions.hasRollback() and C.bad or C.inactive, nil, actions.rollbackUpdate)
+    addButton("monitor", bx + splitW + splitGap, baseY + 15, bw - splitW - splitGap, 4, "MONITOR", C.btnWarn, nil, actions.startMonitorSelection)
+  end
+
+  local function buildManualButtons(bx, bw, baseY)
+    drawBigButton("manualStart", bx, baseY, bw, "DEMARRAGE", actions.canIgnite() and C.warn or C.inactive, actions.startReactorSequence)
+    drawBigButton("manualStop", bx, baseY + 7, bw, "ARRET", C.bad, actions.stopManualReactor)
+    addButton("manualT", bx, baseY + 14, bw, 5, "T LOCK", state.tOpen and C.tritium or C.inactive, nil, actions.toggleTritium)
+    addButton("manualDT", bx, baseY + 20, bw, 5, "DT LOCK", state.dtOpen and C.dtFuel or C.inactive, nil, actions.toggleDTFuel)
+    addButton("manualD", bx, baseY + 26, bw, 5, "D LOCK", state.dOpen and C.deuterium or C.inactive, nil, actions.toggleDeuterium)
+    addButton("manualPulse", bx, baseY + 32, bw, 5, "PULSE LAS", C.warn, nil, actions.fireLaser)
+    addButton("monitor", bx, baseY + 38, bw, 4, "MONITOR", C.btnWarn, nil, actions.startMonitorSelection)
+    addButton("manualBack", bx, baseY + 43, bw, 4, "RETOUR SUP", C.btnAction, nil, function() actions.setView("supervision") end)
+  end
+
+  local function buildSetupButtons(ctrl, bx, bw)
+    local by = ctrl.y + 6
+    local half = math.max(6, math.floor((bw - 1) / 2))
+    addButton("setupTestMon", bx, by, half, 3, "TEST MON", C.btnAction, nil, function() actions.runSetupTest("MONITOR") end)
+    addButton("setupTestLas", bx + half + 1, by, bw - half - 1, 3, "TEST LAS", C.btnAction, nil, function() actions.runSetupTest("LAS") end)
+    addButton("setupTestT", bx, by + 4, half, 3, "TEST T", C.btnAction, nil, function() actions.runSetupTest("T") end)
+    addButton("setupTestD", bx + half + 1, by + 4, bw - half - 1, 3, "TEST D", C.btnAction, nil, function() actions.runSetupTest("D") end)
+    addButton("setupTestRT", bx, by + 8, half, 3, "TEST R-T", C.btnAction, nil, function() actions.runSetupTest("READER T") end)
+    addButton("setupTestRD", bx + half + 1, by + 8, bw - half - 1, 3, "TEST R-D", C.btnAction, nil, function() actions.runSetupTest("READER D") end)
+    addButton("setupTestInd", bx, by + 12, half, 3, "TEST IND", C.btnAction, nil, function() actions.runSetupTest("INDUCTION") end)
+    addButton("setupTestLaser", bx + half + 1, by + 12, bw - half - 1, 3, "TEST LASER", C.btnAction, nil, function() actions.runSetupTest("LASER") end)
+    addButton("setupBindMon", bx, by + 16, half, 3, "BIND MON", C.panelMid, nil, function() actions.setupStartRebind("monitor") end)
+    addButton("setupBindReactor", bx + half + 1, by + 16, bw - half - 1, 3, "BIND CTRL", C.panelMid, nil, function() actions.setupStartRebind("reactorController") end)
+    addButton("setupBindLogic", bx, by + 20, half, 3, "BIND LOGIC", C.panelMid, nil, function() actions.setupStartRebind("logicAdapter") end)
+    addButton("setupBindLaser", bx + half + 1, by + 20, bw - half - 1, 3, "BIND LASER", C.panelMid, nil, function() actions.setupStartRebind("laser") end)
+    addButton("setupBindInd", bx, by + 24, half, 3, "BIND IND", C.panelMid, nil, function() actions.setupStartRebind("induction") end)
+    addButton("setupBindRelayL", bx + half + 1, by + 24, bw - half - 1, 3, "BIND R-LAS", C.panelMid, nil, function() actions.setupStartRebind("relayLaser") end)
+    addButton("setupBindRelayT", bx, by + 28, half, 3, "BIND R-T", C.panelMid, nil, function() actions.setupStartRebind("relayTritium") end)
+    addButton("setupBindRelayD", bx + half + 1, by + 28, bw - half - 1, 3, "BIND R-D", C.panelMid, nil, function() actions.setupStartRebind("relayDeuterium") end)
+    addButton("setupBindReaderT", bx, by + 32, half, 3, "BIND RD-T", C.panelMid, nil, function() actions.setupStartRebind("readerTritium") end)
+    addButton("setupBindReaderD", bx + half + 1, by + 32, bw - half - 1, 3, "BIND RD-D", C.panelMid, nil, function() actions.setupStartRebind("readerDeuterium") end)
+    addButton("setupBindReaderA", bx, by + 36, bw, 3, "BIND RD-AUX", C.panelMid, nil, function() actions.setupStartRebind("readerAux") end)
+    addButton("setupSave", bx, by + 40, half, 3, "SAVE CONFIG", C.ok, nil, actions.saveSetupConfig)
+    addButton("setupInstaller", bx + half + 1, by + 40, bw - half - 1, 3, "RUN INSTALLER", C.warn, nil, actions.runInstallerFromSetup)
+
+    if state.setup.rebindRole and #state.setup.rebindCandidates > 0 then
+      local listY = ctrl.y + 6
+      for i = 1, math.min(3, #state.setup.rebindCandidates) do
+        local idx = i
+        local name = state.setup.rebindCandidates[i]
+        addButton("setupSel" .. i, bx, listY + ((i - 1) * 4), bw, 3, ctx.shortText("-> " .. name, bw - 2), C.info, nil, function() actions.setupApplySelection(idx) end)
+      end
+    end
+  end
+
+  local function buildSupervisorCoreButtons(ctrl, bx, by, bw, bh, bGap)
+    addButton("master", bx, by, bw, bh, "MASTER", state.autoMaster and C.btnOn or C.btnOff, nil, actions.toggleMaster)
+    addButton("fusion", bx, by + (bh + bGap), bw, bh, "FUSION", state.fusionAuto and C.btnOn or C.btnOff, nil, actions.toggleFusion)
+    addButton("charge", bx, by + (bh + bGap) * 2, bw, bh, "CHARGE", state.chargeAuto and C.btnOn or C.btnOff, nil, actions.toggleCharge)
+    drawBigButton("demarrage", bx, by + (bh + bGap) * 3, bw, "DEMARRAGE", actions.canIgnite() and C.warn or C.inactive, actions.startReactorSequence)
+    addButton("monitor", bx, by + (bh + bGap) * 3 + 7, bw, 4, "MONITOR", C.btnWarn, nil, actions.startMonitorSelection)
+    addButton("arret", bx, by + (bh + bGap) * 3 + 12, bw, 4, "ARRET", C.bad, nil, actions.stopRequested)
+
+    local center = layout.center
+    if not center or layout.mode == "compact" or state.currentView ~= "supervision" then return end
+
+    local innerX = center.x + 2
+    local innerW = center.w - 4
+    local barY = center.y + center.h - 5
+    local btnH = 5
+    local gap = 3
+    local btnW = math.max(10, math.floor((innerW - (gap * 2)) / 3))
+    local totalW = (btnW * 3) + (gap * 2)
+    local startX = innerX + math.max(0, math.floor((innerW - totalW) / 2))
+
+    addButton("lock_t", startX, barY, btnW, btnH, "T LOCK", state.tOpen and C.tritium or C.inactive, C.btnText, actions.toggleTritium)
+    addButton("lock_dt", startX + btnW + gap, barY, btnW, btnH, "DT LOCK", state.dtOpen and C.dtFuel or C.inactive, C.btnText, actions.toggleDTFuel)
+    addButton("lock_d", startX + (btnW + gap) * 2, barY, btnW, btnH, "D LOCK", state.dOpen and C.deuterium or C.inactive, C.btnText, actions.toggleDeuterium)
+  end
+
+  if state.choosingMonitor then
+    buildMonitorSelectionButtons()
+    return
+  end
+
+  local ctrl = layout.right or layout.left
+  local bx = ctrl.x + 2
+  local bw = math.max(12, ctrl.w - 4)
+  local by = ctrl.y + 10
+  local bh = (layout.mode == "compact") and 4 or 5
+  local bGap = 2
+
+  buildNavigationButtons(ctrl, bx, bw)
+  buildRefreshButton(ctrl, bx, bw)
+
+  if state.currentView == "update" then
+    buildUpdateButtons(bx, bw, by)
+    return
+  end
+
+  if state.currentView == "setup" then
+    buildSetupButtons(ctrl, bx, bw)
+    return
+  end
+
+  if state.currentView == "diagnostic" or state.currentView == "induction" then
+    drawBigButton("monitor", bx, ctrl.y + 12, bw, "MONITOR", C.btnWarn, actions.startMonitorSelection)
+    return
+  end
+
+  if state.currentView == "manual" then
+    buildManualButtons(bx, bw, by)
+    return
+  end
+
+  buildSupervisorCoreButtons(ctrl, bx, by, bw, bh, bGap)
+end
+
 return M

@@ -2,6 +2,46 @@ local UIComponents = require("ui.components")
 
 local M = {}
 
+
+function M.buildContext(base)
+  return {
+    C = base.C,
+    state = base.state,
+    hw = base.hw,
+    CFG = base.CFG,
+    fs = base.fs,
+    UPDATE_ENABLED = base.UPDATE_ENABLED,
+    UPDATE_TEMP_DIR = base.UPDATE_TEMP_DIR,
+    UPDATE_MISSING_BACKUP_SUFFIX = base.UPDATE_MISSING_BACKUP_SUFFIX,
+    drawBox = base.drawBox,
+    writeAt = base.writeAt,
+    drawKeyValue = base.drawKeyValue,
+    drawBadge = base.drawBadge,
+    shortText = base.shortText,
+    clamp = base.clamp,
+    fmt = base.fmt,
+    formatMJ = base.formatMJ,
+    yesno = base.yesno,
+    reactorPhase = base.reactorPhase,
+    phaseColor = base.phaseColor,
+    getRuntimeFuelMode = base.getRuntimeFuelMode,
+    isRuntimeFuelOk = base.isRuntimeFuelOk,
+    statusColor = base.statusColor,
+    drawHeader = base.drawHeader,
+    drawFooter = base.drawFooter,
+    buildButtons = base.buildButtons,
+    drawButtons = base.drawButtons,
+    getCurrentInputSource = base.getCurrentInputSource,
+    drawControlPanel = base.drawControlPanel,
+    drawReactorDiagram = base.drawReactorDiagram,
+    drawInductionDiagram = base.drawInductionDiagram,
+    inductionStatus = base.inductionStatus,
+    hasAnyRollbackBackup = base.hasAnyRollbackBackup,
+    rollbackTargetList = base.rollbackTargetList,
+    getSetupStatusRows = base.getSetupStatusRows,
+  }
+end
+
 function M.resolveViewName(currentView)
   if currentView == "diagnostic" then return "DIAG" end
   if currentView == "manual" then return "MAN" end
