@@ -14,6 +14,27 @@ function M.shortText(txt, maxLen)
   return txt:sub(1, maxLen - 1) .. "…"
 end
 
+function M.drawValueBlock(ctx, x, y, w, label, value, unit, tone)
+  local C = ctx.C
+  if w < 12 then
+    ctx.drawKeyValue(x, y, label, tostring(value), C.dim, tone or C.text, w - 3)
+    return
+  end
+  ctx.writeAt(x, y, ctx.shortText(string.upper(label), w - 1), C.dim, C.panelDark)
+  local valText = tostring(value or "N/A")
+  if unit and unit ~= "" then
+    valText = valText .. " " .. unit
+  end
+  ctx.writeAt(x, y + 1, ctx.shortText(valText, w - 1), tone or C.text, C.panel)
+end
+
+function M.drawStateBlock(ctx, x, y, w, label, stateText)
+  local C = ctx.C
+  local tone = M.statusColor(stateText, C)
+  ctx.writeAt(x, y, ctx.shortText(string.upper(label), w - 1), C.dim, C.panelDark)
+  ctx.writeAt(x, y + 1, " " .. ctx.shortText(string.upper(tostring(stateText or "UNKNOWN")), w - 3) .. " ", C.text, tone)
+end
+
 function M.drawIoPanel(ctx, x, y, w, h)
   if h < 4 then return end
   local C = ctx.C
