@@ -2528,119 +2528,48 @@ function getInductionFillRatio()
   return CoreInduction.getFillRatio(state)
 end
 
+local function buildUIViewContext()
+  return {
+    C = C,
+    state = state,
+    hw = hw,
+    CFG = CFG,
+    fs = fs,
+    UPDATE_ENABLED = UPDATE_ENABLED,
+    UPDATE_BACKUP_FILE = UPDATE_BACKUP_FILE,
+    UPDATE_VERSION_BACKUP_FILE = UPDATE_VERSION_BACKUP_FILE,
+    UPDATE_TEMP_FILE = UPDATE_TEMP_FILE,
+    UPDATE_TEMP_VERSION_FILE = UPDATE_TEMP_VERSION_FILE,
+    drawBox = drawBox,
+    writeAt = writeAt,
+    drawKeyValue = drawKeyValue,
+    drawBadge = drawBadge,
+    shortText = shortText,
+    clamp = clamp,
+    fmt = fmt,
+    formatMJ = formatMJ,
+    yesno = yesno,
+    reactorPhase = reactorPhase,
+    phaseColor = phaseColor,
+    getRuntimeFuelMode = getRuntimeFuelMode,
+    isRuntimeFuelOk = isRuntimeFuelOk,
+    statusColor = statusColor,
+    drawHeader = drawHeader,
+    drawFooter = drawFooter,
+    buildButtons = buildButtons,
+    drawButtons = drawButtons,
+    getCurrentInputSource = getCurrentInputSource,
+    drawControlPanel = drawControlPanel,
+    drawReactorDiagram = drawReactorDiagram,
+    drawInductionDiagram = drawInductionDiagram,
+    inductionStatus = inductionStatus,
+  }
+end
+
 function drawMonitorSelection(layout)
-  term.setBackgroundColor(C.bg)
-  term.setTextColor(C.text)
-  term.clear()
-  drawHeader("FUSION SUPERVISOR", "MONITOR LINK")
-
-  local boxW = clamp(layout.width - 6, 26, 60)
-  local boxH = clamp(layout.height - 3, 12, layout.height)
-  local x = math.floor((layout.width - boxW) / 2) + 1
-  local y = layout.top + 1
-
-  drawBox(x, y, boxW, boxH, "MONITOR SELECTION", C.border)
-  writeAt(x + 2, y + 1, "Choisissez une sortie d'affichage", C.dim, C.panelDark)
-  writeAt(x + 2, y + 2, "IDX  NOM                      TAILLE", C.info, C.panelDark)
-
-  for i = 1, 4 do
-    local yy = y + 3 + (i - 1) * 3
-    local m = state.monitorList[i]
-    if m and yy + 1 < y + boxH - 2 then
-      local row = string.format("[%d]  %-22s %3dx%-3d", i, shortText(m.name, 22), m.w or 0, m.h or 0)
-      writeAt(x + 2, yy, shortText(row, boxW - 4), C.text, C.panelDark)
-      writeAt(x + 2, yy + 1, "TAP / TOUCHE " .. i .. " pour selectionner", C.dim, C.panelDark)
-    end
-  end
-
-  buildButtons(layout)
-  drawButtons(getCurrentInputSource())
-  drawFooter(layout)
+  UIViews.drawMonitorSelection(buildUIViewContext(), layout)
 end
 
-function drawIoPanel(x, y, w, h)
-  if h < 4 then return end
-  drawBox(x, y, w, h, "REAL I/O", C.border)
-  local rx = x + 2
-  local ry = y + 1
-  local maxY = y + h - 2
-  writeAt(rx, ry, "OUT", C.info, C.panelDark)
-  if ry + 1 <= maxY then drawKeyValue(rx, ry + 1, "LAS", yesno(state.laserLineOn), C.dim, state.laserLineOn and C.ok or C.warn, w - 6) end
-  if ry + 2 <= maxY then drawKeyValue(rx, ry + 2, "T", yesno(state.tOpen), C.dim, state.tOpen and C.tritium or C.warn, w - 6) end
-  if ry + 3 <= maxY then drawKeyValue(rx, ry + 3, "D", yesno(state.dOpen), C.dim, state.dOpen and C.deuterium or C.warn, w - 6) end
-  if ry + 4 <= maxY then drawKeyValue(rx, ry + 4, "DT", yesno(state.dtOpen), C.dim, state.dtOpen and C.dtFuel or C.warn, w - 6) end
-
-  if ry + 5 <= maxY then writeAt(rx, ry + 5, "SENSE", C.info, C.panelDark) end
-  if ry + 6 <= maxY then drawKeyValue(rx, ry + 6, "R-T", hw.readerRoles.tritium and "OK" or "FAIL", C.dim, hw.readerRoles.tritium and C.ok or C.bad, w - 6) end
-  if ry + 7 <= maxY then drawKeyValue(rx, ry + 7, "R-D", hw.readerRoles.deuterium and "OK" or "FAIL", C.dim, hw.readerRoles.deuterium and C.ok or C.bad, w - 6) end
-  if ry + 8 <= maxY then drawKeyValue(rx, ry + 8, "R-AUX", hw.readerRoles.inventory and "OK" or "FAIL", C.dim, hw.readerRoles.inventory and C.ok or C.bad, w - 6) end
-
-end
-
-function drawStatusPanel(panel)
-  drawBox(panel.x, panel.y, panel.w, panel.h, "REACTOR STATUS", C.border)
-  local x = panel.x + 2
-  local y = panel.y + 1
-  local w = panel.w - 3
-
-  local b1h = clamp(math.floor(panel.h * 0.23), 5, 7)
-  local b2h = clamp(math.floor(panel.h * 0.22), 5, 7)
-  local b3h = clamp(math.floor(panel.h * 0.26), 6, 8)
-  local b4h = panel.h - b1h - b2h - b3h - 3
-
-  drawBox(x, y, w, b1h, "PHASE", C.borderDim)
-  local phase = reactorPhase()
-  drawBadge(x + 2, y + 1, "STATE", phase, phaseColor(phase))
-  drawBadge(x + 2, y + 2, "CORE", state.reactorPresent and (state.reactorFormed and "FORMED" or "UNFORMED") or "OFFLINE")
-  if b1h > 5 then drawKeyValue(x + 2, y + 3, "Temp P", fmt(state.plasmaTemp), C.dim, C.info, w - 6) end
-
-  local y2 = y + b1h
-  if state.ignition then
-    drawBox(x, y2, w, b2h, "RUNTIME FUEL", C.borderDim)
-    local mode = getRuntimeFuelMode()
-    local flowOk = isRuntimeFuelOk()
-    local rows = {
-      { "Fuel Mode", mode, mode == "STARVED" and C.bad or C.ok },
-      { "Fuel Flow", flowOk and "OK" or "NO FLOW", flowOk and C.ok or C.bad },
-      { "D Line", state.dOpen and "OPEN" or "CLOSED", state.dOpen and C.deuterium or C.warn },
-      { "T Line", state.tOpen and "OPEN" or "CLOSED", state.tOpen and C.tritium or C.warn },
-      { "DT Line", state.dtOpen and "OPEN" or "CLOSED", state.dtOpen and C.dtFuel or C.warn },
-    }
-    for i = 1, math.min(#rows, b2h - 2) do
-      local r = rows[i]
-      drawKeyValue(x + 2, y2 + i, r[1], r[2], C.dim, r[3], w - 6)
-    end
-  else
-    drawBox(x, y2, w, b2h, "IGNITION CHECK", C.borderDim)
-    local checklist = state.ignitionChecklist or {}
-    for i = 1, math.min(#checklist, b2h - 2) do
-      local item = checklist[i]
-      local tone = item.ok and C.ok or (item.wait and C.warn or C.bad)
-      local mark = item.ok and "[OK]" or (item.wait and "[...]" or "[NO]")
-      writeAt(x + 2, y2 + i, shortText(mark .. " " .. item.key, w - 4), tone, C.panelDark)
-    end
-  end
-
-  local y3 = y2 + b2h
-  drawBox(x, y3, w, b3h, "SAFETY", C.borderDim)
-  local warnings = state.safetyWarnings or {}
-  if #warnings == 0 then
-    writeAt(x + 2, y3 + 1, "NO CRITICAL WARNING", C.ok, C.panelDark)
-  else
-    for i = 1, math.min(#warnings, b3h - 2) do
-      local blink = (state.tick % 6 < 3)
-      local tone = (i == 1 and blink) and C.bad or C.warn
-      writeAt(x + 2, y3 + i, shortText("- " .. warnings[i], w - 4), tone, C.panelDark)
-    end
-  end
-
-  local y4 = y3 + b3h
-  drawBox(x, y4, w, b4h, "EVENT LOG", C.borderDim)
-  local logs = state.eventLog or {}
-  for i = 1, math.min(#logs, b4h - 2) do
-    writeAt(x + 2, y4 + i, shortText(logs[i], w - 4), C.info, C.panelDark)
-  end
-end
 function drawControlPanel(panel, layout)
   drawBox(panel.x, panel.y, panel.w, panel.h, state.currentView == "manual" and "MANUAL CONTROL" or (state.currentView == "update" and "UPDATE COMMAND" or "CONTROL SYSTEM"), C.border)
   local x = panel.x + 2
@@ -2664,51 +2593,10 @@ function drawControlPanel(panel, layout)
   drawButtons(getCurrentInputSource())
 
   local yIo = yAction + actionH
-  drawIoPanel(x, yIo, w, ioH)
+  UIComponents.drawIoPanel(buildUIViewContext(), x, yIo, w, ioH)
 end
 
-function drawDiagnosticView(layout)
-  local left = layout.left
-  local center = layout.center
-  drawStatusPanel(left)
-  if not center then
-    drawControlPanel(layout.right, layout)
-    return
-  end
 
-  drawBox(center.x, center.y, center.w, center.h, "SYSTEM DIAGNOSTICS", C.border)
-  local x = center.x + 2
-  local y = center.y + 1
-  local maxY = center.y + center.h - 2
-  writeAt(x, y, "RESOLVED DEVICES", C.info, C.panelDark)
-
-  local rows = {
-    {"Reactor", hw.reactorName or "FAIL", hw.reactor ~= nil, "Fusion core control"},
-    {"Logic Adapter", hw.logicName or "FAIL", hw.logic ~= nil, "Ignition and injection status"},
-    {"Laser", hw.laserName or "FAIL", hw.laser ~= nil, "Ignition beam source"},
-    {"Induction Matrix", hw.inductionName or "FAIL", hw.induction ~= nil, "Battery / power buffer"},
-    {"Relay LAS", CFG.actions.laser_charge.relay .. "." .. CFG.actions.laser_charge.side, hw.relays[CFG.actions.laser_charge.relay] ~= nil, "Laser charge and fire line"},
-    {"Relay T", CFG.actions.tritium.relay .. "." .. CFG.actions.tritium.side, hw.relays[CFG.actions.tritium.relay] ~= nil, "Tritium valve line"},
-    {"Relay D", CFG.actions.deuterium.relay .. "." .. CFG.actions.deuterium.side, hw.relays[CFG.actions.deuterium.relay] ~= nil, "Deuterium valve line"},
-    {"Reader T", hw.readerRoles.tritium and hw.readerRoles.tritium.name or "FAIL", hw.readerRoles.tritium ~= nil, "Tritium tank read"},
-    {"Reader D", hw.readerRoles.deuterium and hw.readerRoles.deuterium.name or "FAIL", hw.readerRoles.deuterium ~= nil, "Deuterium tank read"},
-    {"Reader Aux", hw.readerRoles.inventory and hw.readerRoles.inventory.name or "FAIL", hw.readerRoles.inventory ~= nil, "Auxiliary inventory / feed"},
-    {"Monitor", hw.monitorName or "term", hw.monitorName ~= nil, "Touch interface"},
-  }
-
-  local rowStep = 2
-  for i, row in ipairs(rows) do
-    local yy = y + ((i - 1) * rowStep) + 1
-    if yy + 1 <= maxY then
-      local tone = row[3] and C.ok or C.bad
-      local head = string.format("%s | %s", row[2], row[3] and "OK" or "FAIL")
-      drawKeyValue(x, yy, row[1], shortText(head, 16), C.dim, tone, center.w - 6)
-      writeAt(x + 1, yy + 1, shortText("role: " .. row[4], center.w - 8), C.info, C.panelDark)
-    end
-  end
-
-  drawControlPanel(layout.right or layout.left, layout)
-end
 
 function inductionFillTone(status, pulse)
   if status == "CHARGING" then return pulse and C.info or C.energy end
@@ -2833,100 +2721,24 @@ function drawInductionDiagram(x, y, w, h)
   drawInductionProfileDecor(geo, status)
   drawInductionDiagramInfo(x, y, w, h, geo, status, tone)
 end
+function drawDiagnosticView(layout)
+  UIViews.drawDiagnosticView(buildUIViewContext(), layout)
+end
 
 function drawInductionView(layout)
-  local istat, statusTone = inductionStatus()
-  local left = layout.left
-  drawBox(left.x, left.y, left.w, left.h, "INDUCTION MATRIX", C.border)
-  local x = left.x + 2
-  local y = left.y + 2
-
-  drawKeyValue(x, y, "Online", state.inductionPresent and "ONLINE" or "OFFLINE", C.dim, state.inductionPresent and C.ok or C.bad, left.w - 6)
-  drawKeyValue(x, y + 1, "Formed", state.inductionFormed and "FORMED" or "UNFORMED", C.dim, state.inductionFormed and C.ok or C.warn, left.w - 6)
-  drawKeyValue(x, y + 2, "Global", istat, C.dim, statusTone, left.w - 6)
-
-  drawBox(x - 1, y + 4, left.w - 4, 9, "TECHNICAL", C.borderDim)
-  drawKeyValue(x, y + 5, "Stored", formatMJ(state.inductionEnergy), C.dim, C.energy, left.w - 6)
-  drawKeyValue(x, y + 6, "Max", formatMJ(state.inductionMax), C.dim, C.energy, left.w - 6)
-  drawKeyValue(x, y + 7, "Fill %", string.format("%.1f%%", state.inductionPct), C.dim, C.energy, left.w - 6)
-  drawKeyValue(x, y + 8, "Needed", formatMJ(state.inductionNeeded), C.dim, C.dim, left.w - 6)
-  drawKeyValue(x, y + 9, "Transfer Cap", formatMJ(state.inductionTransferCap), C.dim, C.info, left.w - 6)
-  drawKeyValue(x, y + 10, "Last In", formatMJ(state.inductionInput), C.dim, C.ok, left.w - 6)
-  drawKeyValue(x, y + 11, "Last Out", formatMJ(state.inductionOutput), C.dim, C.warn, left.w - 6)
-
-  drawBox(x - 1, y + 13, left.w - 4, 6, "STRUCTURE", C.borderDim)
-  drawKeyValue(x, y + 14, "Cells", tostring(state.inductionCells), C.dim, C.info, left.w - 6)
-  drawKeyValue(x, y + 15, "Providers", tostring(state.inductionProviders), C.dim, C.info, left.w - 6)
-  drawKeyValue(x, y + 16, "Dimensions", string.format("%dx%dx%d", state.inductionLength, state.inductionWidth, state.inductionHeight), C.dim, C.text, left.w - 6)
-  drawKeyValue(x, y + 17, "Port Mode", state.inductionPortMode, C.dim, C.info, left.w - 6)
-
-  if layout.center then
-    drawInductionDiagram(layout.center.x, layout.center.y, layout.center.w, layout.center.h)
-    drawControlPanel(layout.right or layout.left, layout)
-  else
-    local right = layout.right
-    drawInductionDiagram(right.x, right.y, right.w, right.h)
-  end
+  UIViews.drawInductionView(buildUIViewContext(), layout)
 end
 
 function drawManualView(layout)
-  if layout.center then
-    drawReactorDiagram(layout.center.x, layout.center.y, layout.center.w, layout.center.h)
-  end
-  drawStatusPanel(layout.left)
-  drawControlPanel(layout.right or layout.left, layout)
+  UIViews.drawManualView(buildUIViewContext(), layout)
 end
 
 function drawSupervisionView(layout)
-  if layout.mode == "compact" then
-    drawStatusPanel(layout.left)
-    drawControlPanel(layout.right, layout)
-    return
-  end
-  drawStatusPanel(layout.left)
-  drawReactorDiagram(layout.center.x, layout.center.y, layout.center.w, layout.center.h)
-  drawControlPanel(layout.right, layout)
+  UIViews.drawSupervisionView(buildUIViewContext(), layout)
 end
 
 function drawUpdateView(layout)
-  local infoPanel
-  local controlPanel
-
-  if layout.center then
-    drawStatusPanel(layout.left)
-    infoPanel = layout.center
-    controlPanel = layout.right or layout.left
-  else
-    infoPanel = layout.left
-    controlPanel = layout.right or layout.left
-  end
-
-  drawBox(infoPanel.x, infoPanel.y, infoPanel.w, infoPanel.h, "UPDATE CENTER", C.info)
-  local x = infoPanel.x + 2
-  local w = infoPanel.w - 4
-
-  drawBox(x - 1, infoPanel.y + 1, w, 6, "VERSIONS", C.borderDim)
-  drawKeyValue(x, infoPanel.y + 2, "Local", state.update.localVersion, C.dim, C.ok, w - 4)
-  drawKeyValue(x, infoPanel.y + 3, "Remote", state.update.remoteVersion, C.dim, C.info, w - 4)
-  drawKeyValue(x, infoPanel.y + 4, "Status", state.update.status, C.dim, statusColor(state.update.available and "WARN" or "OK"), w - 4)
-
-  drawBox(x - 1, infoPanel.y + 7, w, 6, "NETWORK", C.borderDim)
-  drawKeyValue(x, infoPanel.y + 8, "HTTP", state.update.httpStatus, C.dim, state.update.httpStatus == "OK" and C.ok or C.warn, w - 4)
-  drawKeyValue(x, infoPanel.y + 9, "Enabled", UPDATE_ENABLED and "YES" or "NO", C.dim, UPDATE_ENABLED and C.ok or C.bad, w - 4)
-  drawKeyValue(x, infoPanel.y + 10, "Error", state.update.lastError ~= "" and state.update.lastError or "None", C.dim, state.update.lastError ~= "" and C.bad or C.info, w - 4)
-
-  local resultY = infoPanel.y + 13
-  local resultH = math.max(9, infoPanel.h - 14)
-  drawBox(x - 1, resultY, w, resultH, "RESULT", C.borderDim)
-  writeAt(x, resultY + 1, shortText("Check: " .. tostring(state.update.lastCheckResult or "Never"), w - 3), C.info, C.panelDark)
-  writeAt(x, resultY + 2, shortText("Apply: " .. tostring(state.update.lastApplyResult or "Never"), w - 3), C.info, C.panelDark)
-  writeAt(x, resultY + 3, shortText("Backup LUA: " .. (fs.exists(UPDATE_BACKUP_FILE) and "AVAILABLE" or "MISSING"), w - 3), C.dim, C.panelDark)
-  writeAt(x, resultY + 4, shortText("Backup VER: " .. (fs.exists(UPDATE_VERSION_BACKUP_FILE) and "AVAILABLE" or "MISSING"), w - 3), C.dim, C.panelDark)
-  writeAt(x, resultY + 5, shortText("Temp LUA: " .. (fs.exists(UPDATE_TEMP_FILE) and "READY" or "EMPTY"), w - 3), C.dim, C.panelDark)
-  writeAt(x, resultY + 6, shortText("Temp VER: " .. (fs.exists(UPDATE_TEMP_VERSION_FILE) and "READY" or "EMPTY"), w - 3), C.dim, C.panelDark)
-  writeAt(x, resultY + 7, shortText("Restart: " .. (state.update.restartRequired and "REQUIRED" or "NOT REQUIRED"), w - 3), state.update.restartRequired and C.warn or C.ok, C.panelDark)
-
-  drawControlPanel(controlPanel, layout)
+  UIViews.drawUpdateView(buildUIViewContext(), layout)
 end
 
 local function drawUI()
