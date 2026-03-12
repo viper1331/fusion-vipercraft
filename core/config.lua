@@ -6,6 +6,7 @@ local VALID_VIEWS = {
   MAN = true,
   IND = true,
   UPDATE = true,
+  SETUP = true,
 }
 
 local VALID_SIDES = {
@@ -201,6 +202,46 @@ function M.validateConfig(config)
   end
 
   return #errors == 0, errors
+end
+
+function M.serializeValue(value, indent)
+  indent = indent or 0
+  local sp = string.rep("  ", indent)
+  local sp2 = string.rep("  ", indent + 1)
+
+  if type(value) == "table" then
+    local keys = {}
+    for k in pairs(value) do table.insert(keys, k) end
+    table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+
+    local parts = { "{" }
+    for _, key in ipairs(keys) do
+      local encodedKey
+      if type(key) == "string" and key:match("^[%a_][%w_]*$") then
+        encodedKey = key
+      else
+        encodedKey = "[" .. string.format("%q", tostring(key)) .. "]"
+      end
+      local encodedValue = M.serializeValue(value[key], indent + 1)
+      table.insert(parts, string.format("\n%s%s = %s,", sp2, encodedKey, encodedValue))
+    end
+    if #keys > 0 then table.insert(parts, "\n" .. sp) end
+    table.insert(parts, "}")
+    return table.concat(parts)
+  end
+
+  if type(value) == "string" then return string.format("%q", value) end
+  return tostring(value)
+end
+
+function M.writeFusionConfig(fsApi, configFile, config)
+  local h = fsApi.open(configFile, "w")
+  if not h then return false, "Unable to open " .. tostring(configFile) end
+  h.write("return ")
+  h.write(M.serializeValue(config, 0))
+  h.write("\n")
+  h.close()
+  return true
 end
 
 return M

@@ -7,6 +7,7 @@ function M.resolveViewName(currentView)
   if currentView == "manual" then return "MAN" end
   if currentView == "induction" then return "IND" end
   if currentView == "update" then return "UPDATE" end
+  if currentView == "setup" then return "SETUP" end
   return "SUP"
 end
 
@@ -162,6 +163,62 @@ function M.drawUpdateView(ctx, layout)
 
   UIComponents.drawUpdateInfoPanel(ctx, infoPanel)
   ctx.drawControlPanel(controlPanel, layout)
+end
+
+function M.drawSetupView(ctx, layout)
+  local C = ctx.C
+  local state = ctx.state
+  local setup = state.setup
+  if type(setup) ~= "table" or type(setup.working) ~= "table" then
+    ctx.drawBox(layout.left.x, layout.left.y, layout.left.w, layout.left.h, "SETUP / MAINTENANCE", C.border)
+    ctx.writeAt(layout.left.x + 2, layout.left.y + 2, "Setup config not loaded", C.warn, C.panelDark)
+    ctx.drawControlPanel(layout.right or layout.left, layout)
+    return
+  end
+
+  local left = layout.left
+  local center = layout.center
+  ctx.drawBox(left.x, left.y, left.w, left.h, "SETUP / MAINTENANCE", C.border)
+  local lx = left.x + 2
+  local ly = left.y + 2
+
+  ctx.drawKeyValue(lx, ly, "Monitor", setup.working.monitor.name, C.dim, setup.working.monitor.ok and C.ok or C.bad, left.w - 6)
+  ctx.drawKeyValue(lx, ly + 1, "Reactor", setup.working.devices.reactorController, C.dim, setup.deviceStatus.reactorController == "OK" and C.ok or C.bad, left.w - 6)
+  ctx.drawKeyValue(lx, ly + 2, "Logic", setup.working.devices.logicAdapter, C.dim, setup.deviceStatus.logicAdapter == "OK" and C.ok or C.bad, left.w - 6)
+  ctx.drawKeyValue(lx, ly + 3, "Laser", setup.working.devices.laser, C.dim, setup.deviceStatus.laser == "OK" and C.ok or C.bad, left.w - 6)
+  ctx.drawKeyValue(lx, ly + 4, "Induction", setup.working.devices.induction, C.dim, setup.deviceStatus.induction == "OK" and C.ok or C.bad, left.w - 6)
+
+  ctx.drawBox(lx - 1, ly + 6, left.w - 4, 10, "ACTIVE CONFIG", C.borderDim)
+  ctx.drawKeyValue(lx, ly + 7, "Relay LAS", setup.working.relays.laser.name .. "." .. setup.working.relays.laser.side, C.dim, setup.deviceStatus.relayLaser == "OK" and C.ok or C.warn, left.w - 6)
+  ctx.drawKeyValue(lx, ly + 8, "Relay T", setup.working.relays.tritium.name .. "." .. setup.working.relays.tritium.side, C.dim, setup.deviceStatus.relayTritium == "OK" and C.ok or C.warn, left.w - 6)
+  ctx.drawKeyValue(lx, ly + 9, "Relay D", setup.working.relays.deuterium.name .. "." .. setup.working.relays.deuterium.side, C.dim, setup.deviceStatus.relayDeuterium == "OK" and C.ok or C.warn, left.w - 6)
+  ctx.drawKeyValue(lx, ly + 10, "Reader T", setup.working.readers.tritium, C.dim, setup.deviceStatus.readerTritium == "OK" and C.ok or C.warn, left.w - 6)
+  ctx.drawKeyValue(lx, ly + 11, "Reader D", setup.working.readers.deuterium, C.dim, setup.deviceStatus.readerDeuterium == "OK" and C.ok or C.warn, left.w - 6)
+  ctx.drawKeyValue(lx, ly + 12, "Reader Aux", setup.working.readers.aux, C.dim, setup.deviceStatus.readerAux == "OK" and C.ok or C.warn, left.w - 6)
+  ctx.drawKeyValue(lx, ly + 13, "View", setup.working.ui.preferredView, C.dim, C.info, left.w - 6)
+  ctx.drawKeyValue(lx, ly + 14, "Scale", tostring(setup.working.monitor.scale), C.dim, C.info, left.w - 6)
+
+  if center then
+    ctx.drawBox(center.x, center.y, center.w, center.h, "DEVICE STATUS / TESTS", C.border)
+    local x = center.x + 2
+    local y = center.y + 1
+    local rows = ctx.getSetupStatusRows()
+    ctx.writeAt(x, y, "CONFIGURED ELEMENTS", C.info, C.panelDark)
+    for i = 1, math.min(#rows, 11) do
+      local row = rows[i]
+      local yy = y + i
+      local tone = row.status == "OK" and C.ok or (row.status == "MISSING" and C.bad or C.warn)
+      ctx.writeAt(x, yy, ctx.shortText(string.format("%-10s %-16s %-8s", row.role, row.name, row.status), center.w - 6), tone, C.panelDark)
+    end
+
+    local msgY = center.y + center.h - 6
+    ctx.drawBox(x - 1, msgY, center.w - 4, 5, "RESULT", C.borderDim)
+    ctx.writeAt(x, msgY + 1, ctx.shortText("TEST: " .. tostring(setup.lastTestResult or "N/A"), center.w - 6), C.info, C.panelDark)
+    ctx.writeAt(x, msgY + 2, ctx.shortText("SAVE: " .. tostring(setup.saveStatus or "N/A"), center.w - 6), setup.saveStatus == "CONFIG SAVED" and C.ok or C.warn, C.panelDark)
+    ctx.writeAt(x, msgY + 3, ctx.shortText("INFO: " .. tostring(setup.lastMessage or "Ready"), center.w - 6), C.dim, C.panelDark)
+  end
+
+  ctx.drawControlPanel(layout.right or layout.left, layout)
 end
 
 return M

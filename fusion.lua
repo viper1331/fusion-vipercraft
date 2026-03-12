@@ -172,6 +172,18 @@ local state = CoreState.new({
   alert = "INFO",
 
   currentView = "supervision",
+  setup = {
+    loaded = nil,
+    working = nil,
+    deviceStatus = {},
+    dirty = false,
+    lastMessage = "Ready",
+    lastTestResult = "N/A",
+    saveStatus = "N/A",
+    rebindRole = nil,
+    rebindCandidates = {},
+    rebindCursor = 1,
+  },
   safetyWarnings = {},
   ignitionChecklist = {},
   ignitionBlockers = {},
@@ -1171,12 +1183,38 @@ local function applyConfigToRuntime(config)
     elseif view == "MAN" then state.currentView = "manual"
     elseif view == "IND" then state.currentView = "induction"
     elseif view == "UPDATE" then state.currentView = "update"
+    elseif view == "SETUP" then state.currentView = "setup"
     end
   end
 
   if type(config.update) == "table" and config.update.enabled ~= nil then
     UPDATE_ENABLED = config.update.enabled and true or false
   end
+end
+
+local function cloneTable(input)
+  if type(input) ~= "table" then return input end
+  local out = {}
+  for k, v in pairs(input) do
+    out[k] = cloneTable(v)
+  end
+  return out
+end
+
+local function normalizeSetupConfig(config)
+  local base = CoreConfig.defaultFusionConfig(CFG, UPDATE_ENABLED)
+  local merged = CoreConfig.mergeDefaults(cloneTable(config or {}), base)
+  merged.ui.preferredView = string.upper(tostring(merged.ui.preferredView or "SUP"))
+  if merged.ui.preferredView == "CFG" then merged.ui.preferredView = "SETUP" end
+  return merged
+end
+
+local function refreshSetupWorkingConfig(config)
+  local normalized = normalizeSetupConfig(config)
+  state.setup.loaded = cloneTable(normalized)
+  state.setup.working = cloneTable(normalized)
+  state.setup.deviceStatus = {}
+  state.setup.dirty = false
 end
 
 local function ensureConfigOrInstaller()
@@ -1218,7 +1256,80 @@ local function ensureConfigOrInstaller()
   end
 
   applyConfigToRuntime(config)
+  refreshSetupWorkingConfig(config)
   return true, config
+end
+
+local function loadRuntimeSetupConfig()
+  local ok, config = loadFusionConfig()
+  if ok and type(config) == "table" then
+    refreshSetupWorkingConfig(config)
+  end
+end
+
+local function setupDeviceExists(name, expectedType)
+  if type(name) ~= "string" or trimText(name) == "" then return false, "INVALID" end
+  if not peripheral.isPresent(name) then return false, "MISSING" end
+  if not expectedType then return true, "OK" end
+  local ptype = getTypeOf(name)
+  if ptype == expectedType then return true, "OK" end
+  if expectedType == "block_reader" and contains(name, "block_reader") then return true, "OK" end
+  return false, "INVALID"
+end
+
+local function refreshSetupDeviceStatus()
+  local w = state.setup.working
+  if type(w) ~= "table" then return end
+  local ds = {}
+
+  local monitorOk, monitorStatus = setupDeviceExists(w.monitor.name, "monitor")
+  w.monitor.ok = monitorOk
+  ds.monitor = monitorStatus
+
+  local deviceTypes = {
+    reactorController = nil,
+    logicAdapter = nil,
+    laser = nil,
+    induction = nil,
+  }
+  for role, expected in pairs(deviceTypes) do
+    local _, status = setupDeviceExists(w.devices[role], expected)
+    ds[role] = status
+  end
+
+  local _, relayLaser = setupDeviceExists(w.relays.laser.name, "redstone_relay")
+  local _, relayTritium = setupDeviceExists(w.relays.tritium.name, "redstone_relay")
+  local _, relayDeuterium = setupDeviceExists(w.relays.deuterium.name, "redstone_relay")
+  ds.relayLaser = relayLaser
+  ds.relayTritium = relayTritium
+  ds.relayDeuterium = relayDeuterium
+
+  local _, readerTritium = setupDeviceExists(w.readers.tritium, "block_reader")
+  local _, readerDeuterium = setupDeviceExists(w.readers.deuterium, "block_reader")
+  local _, readerAux = setupDeviceExists(w.readers.aux, "block_reader")
+  ds.readerTritium = readerTritium
+  ds.readerDeuterium = readerDeuterium
+  ds.readerAux = readerAux
+
+  state.setup.deviceStatus = ds
+end
+
+local function getSetupStatusRows()
+  local w = state.setup.working or {}
+  local ds = state.setup.deviceStatus or {}
+  return {
+    { role = "Monitor", name = (w.monitor and w.monitor.name) or "N/A", status = ds.monitor or "INVALID" },
+    { role = "Reactor", name = (w.devices and w.devices.reactorController) or "N/A", status = ds.reactorController or "INVALID" },
+    { role = "Logic", name = (w.devices and w.devices.logicAdapter) or "N/A", status = ds.logicAdapter or "INVALID" },
+    { role = "Laser", name = (w.devices and w.devices.laser) or "N/A", status = ds.laser or "INVALID" },
+    { role = "Induction", name = (w.devices and w.devices.induction) or "N/A", status = ds.induction or "INVALID" },
+    { role = "Relay LAS", name = (w.relays and w.relays.laser and (w.relays.laser.name .. "." .. w.relays.laser.side)) or "N/A", status = ds.relayLaser or "INVALID" },
+    { role = "Relay T", name = (w.relays and w.relays.tritium and (w.relays.tritium.name .. "." .. w.relays.tritium.side)) or "N/A", status = ds.relayTritium or "INVALID" },
+    { role = "Relay D", name = (w.relays and w.relays.deuterium and (w.relays.deuterium.name .. "." .. w.relays.deuterium.side)) or "N/A", status = ds.relayDeuterium or "INVALID" },
+    { role = "Reader T", name = (w.readers and w.readers.tritium) or "N/A", status = ds.readerTritium or "INVALID" },
+    { role = "Reader D", name = (w.readers and w.readers.deuterium) or "N/A", status = ds.readerDeuterium or "INVALID" },
+    { role = "Reader Aux", name = (w.readers and w.readers.aux) or "N/A", status = ds.readerAux or "INVALID" },
+  }
 end
 
 local function setUpdateState(status, checkResult, applyResult)
@@ -2026,6 +2137,7 @@ local function refreshAll()
   if (not wasIgnited) and state.ignition then
     pushEvent("Reactor running")
   end
+  refreshSetupDeviceStatus()
   state.tick = (state.tick or 0) + 1
 end
 
@@ -2486,12 +2598,206 @@ function buildMonitorSelectionButtons(layout)
 end
 
 function buildNavigationButtons(ctrl, bx, bw)
-  local navW = math.max(6, math.floor(bw / 5))
+  local navW = math.max(5, math.floor(bw / 6))
   addButton("viewSup", bx, ctrl.y + 1, navW, 4, "SUP", state.currentView == "supervision" and C.btnOn or C.panelMid, nil, function() state.currentView = "supervision"; pushEvent("View supervision") end)
   addButton("viewDiag", bx + navW, ctrl.y + 1, navW, 4, "DIAG", state.currentView == "diagnostic" and C.btnOn or C.panelMid, nil, function() state.currentView = "diagnostic"; pushEvent("View diagnostic") end)
   addButton("viewMan", bx + (navW * 2), ctrl.y + 1, navW, 4, "MAN", state.currentView == "manual" and C.btnOn or C.panelMid, nil, function() state.currentView = "manual"; pushEvent("View manual") end)
   addButton("viewInd", bx + (navW * 3), ctrl.y + 1, navW, 4, "IND", state.currentView == "induction" and C.btnOn or C.panelMid, nil, function() state.currentView = "induction"; pushEvent("View induction") end)
-  addButton("viewUpd", bx + (navW * 4), ctrl.y + 1, bw - (navW * 4), 4, "UPD", state.currentView == "update" and C.btnOn or C.panelMid, nil, function() state.currentView = "update"; pushEvent("View update") end)
+  addButton("viewUpd", bx + (navW * 4), ctrl.y + 1, navW, 4, "UPD", state.currentView == "update" and C.btnOn or C.panelMid, nil, function() state.currentView = "update"; pushEvent("View update") end)
+  addButton("viewSetup", bx + (navW * 5), ctrl.y + 1, bw - (navW * 5), 4, "SET", state.currentView == "setup" and C.btnOn or C.panelMid, nil, function() state.currentView = "setup"; pushEvent("View setup") end)
+end
+
+local function getRoleCandidates(role)
+  local names = peripheral.getNames()
+  local list = {}
+  local expected = {
+    monitor = "monitor",
+    relay = "redstone_relay",
+    reader = "block_reader",
+  }
+  for _, name in ipairs(names) do
+    local ptype = getTypeOf(name)
+    if role == "monitor" and ptype == expected.monitor then
+      table.insert(list, name)
+    elseif role == "relay" and ptype == expected.relay then
+      table.insert(list, name)
+    elseif role == "reader" and (ptype == expected.reader or contains(name, "block_reader")) then
+      table.insert(list, name)
+    elseif role == "device" and ptype ~= "monitor" and ptype ~= "redstone_relay" and ptype ~= "block_reader" then
+      table.insert(list, name)
+    end
+  end
+  table.sort(list)
+  return list
+end
+
+local function setupApplySelection(index)
+  local role = state.setup.rebindRole
+  local chosen = state.setup.rebindCandidates[index]
+  if not role or not chosen then return end
+  local w = state.setup.working
+
+  if role == "monitor" then
+    w.monitor.name = chosen
+  elseif role == "relayLaser" then
+    w.relays.laser.name = chosen
+  elseif role == "relayTritium" then
+    w.relays.tritium.name = chosen
+  elseif role == "relayDeuterium" then
+    w.relays.deuterium.name = chosen
+  elseif role == "readerTritium" then
+    w.readers.tritium = chosen
+  elseif role == "readerDeuterium" then
+    w.readers.deuterium = chosen
+  elseif role == "readerAux" then
+    w.readers.aux = chosen
+  elseif role == "reactorController" then
+    w.devices.reactorController = chosen
+  elseif role == "logicAdapter" then
+    w.devices.logicAdapter = chosen
+  elseif role == "laser" then
+    w.devices.laser = chosen
+  elseif role == "induction" then
+    w.devices.induction = chosen
+  end
+
+  state.setup.dirty = true
+  state.setup.lastMessage = "Rebind applied: " .. role
+  state.setup.rebindRole = nil
+  state.setup.rebindCandidates = {}
+  state.setup.rebindCursor = 1
+  refreshSetupDeviceStatus()
+end
+
+local function setupStartRebind(role)
+  local category = "device"
+  if role == "monitor" then category = "monitor"
+  elseif contains(role, "relay") then category = "relay"
+  elseif contains(role, "reader") then category = "reader" end
+
+  state.setup.rebindRole = role
+  state.setup.rebindCandidates = getRoleCandidates(category)
+  state.setup.rebindCursor = 1
+  state.setup.lastMessage = "Select device for " .. role
+end
+
+local function runSetupTest(testName)
+  local w = state.setup.working
+  local result = "FAIL"
+
+  local function relayPulse(relayName, side)
+    local relay = safePeripheral(relayName)
+    if not relay then return false, "NO DEVICE" end
+    if type(relay.setAnalogOutput) == "function" then
+      relay.setAnalogOutput(side, 15)
+      sleep(0.1)
+      relay.setAnalogOutput(side, 0)
+      return true, "OK"
+    end
+    if type(relay.setOutput) == "function" then
+      relay.setOutput(side, true)
+      sleep(0.1)
+      relay.setOutput(side, false)
+      return true, "OK"
+    end
+    return false, "NO RESPONSE"
+  end
+
+  if testName == "MONITOR" then
+    local ok = setupDeviceExists(w.monitor.name, "monitor")
+    result = ok and "OK" or "NO DEVICE"
+  elseif testName == "LAS" then
+    local _, status = relayPulse(w.relays.laser.name, w.relays.laser.side)
+    result = status
+  elseif testName == "T" then
+    local _, status = relayPulse(w.relays.tritium.name, w.relays.tritium.side)
+    result = status
+  elseif testName == "D" then
+    local _, status = relayPulse(w.relays.deuterium.name, w.relays.deuterium.side)
+    result = status
+  elseif testName == "READER T" then
+    result = hw.readerRoles.tritium and "OK" or "NO DEVICE"
+  elseif testName == "READER D" then
+    result = hw.readerRoles.deuterium and "OK" or "NO DEVICE"
+  elseif testName == "INDUCTION" then
+    result = hw.induction and (state.inductionFormed and "OK" or "NO RESPONSE") or "NO DEVICE"
+  elseif testName == "LASER" then
+    result = hw.laser and "OK" or "NO DEVICE"
+  end
+  state.setup.lastTestResult = testName .. " => " .. result
+  state.setup.lastMessage = "Test executed"
+end
+
+local function saveSetupConfig()
+  local candidate = normalizeSetupConfig(state.setup.working)
+  local okValid, errors = CoreConfig.validateConfig(candidate)
+  if not okValid then
+    state.setup.saveStatus = "INVALID CONFIG"
+    state.setup.lastMessage = table.concat(errors, " | ")
+    return
+  end
+
+  local okWrite = CoreConfig.writeFusionConfig(fs, CONFIG_FILE, candidate)
+  if not okWrite then
+    state.setup.saveStatus = "SAVE FAILED"
+    state.setup.lastMessage = "Unable to write config"
+    return
+  end
+
+  applyConfigToRuntime(candidate)
+  refreshSetupWorkingConfig(candidate)
+  refreshAll()
+  state.setup.saveStatus = "CONFIG SAVED"
+  state.setup.lastMessage = "Config reloaded"
+end
+
+local function runInstallerFromSetup()
+  if not fs.exists("install.lua") then
+    state.setup.lastMessage = "install.lua missing"
+    return
+  end
+  restoreTerm()
+  shell.run("install.lua")
+  setupMonitor()
+  loadRuntimeSetupConfig()
+  state.setup.lastMessage = "Installer completed"
+end
+
+function buildSetupButtons(ctrl, bx, bw)
+  local by = ctrl.y + 6
+  local half = math.max(6, math.floor((bw - 1) / 2))
+  addButton("setupTestMon", bx, by, half, 3, "TEST MON", C.btnAction, nil, function() runSetupTest("MONITOR") end)
+  addButton("setupTestLas", bx + half + 1, by, bw - half - 1, 3, "TEST LAS", C.btnAction, nil, function() runSetupTest("LAS") end)
+  addButton("setupTestT", bx, by + 4, half, 3, "TEST T", C.btnAction, nil, function() runSetupTest("T") end)
+  addButton("setupTestD", bx + half + 1, by + 4, bw - half - 1, 3, "TEST D", C.btnAction, nil, function() runSetupTest("D") end)
+  addButton("setupTestRT", bx, by + 8, half, 3, "TEST R-T", C.btnAction, nil, function() runSetupTest("READER T") end)
+  addButton("setupTestRD", bx + half + 1, by + 8, bw - half - 1, 3, "TEST R-D", C.btnAction, nil, function() runSetupTest("READER D") end)
+  addButton("setupTestInd", bx, by + 12, half, 3, "TEST IND", C.btnAction, nil, function() runSetupTest("INDUCTION") end)
+  addButton("setupTestLaser", bx + half + 1, by + 12, bw - half - 1, 3, "TEST LASER", C.btnAction, nil, function() runSetupTest("LASER") end)
+
+  addButton("setupBindMon", bx, by + 16, half, 3, "BIND MON", C.panelMid, nil, function() setupStartRebind("monitor") end)
+  addButton("setupBindReactor", bx + half + 1, by + 16, bw - half - 1, 3, "BIND CTRL", C.panelMid, nil, function() setupStartRebind("reactorController") end)
+  addButton("setupBindLogic", bx, by + 20, half, 3, "BIND LOGIC", C.panelMid, nil, function() setupStartRebind("logicAdapter") end)
+  addButton("setupBindLaser", bx + half + 1, by + 20, bw - half - 1, 3, "BIND LASER", C.panelMid, nil, function() setupStartRebind("laser") end)
+  addButton("setupBindInd", bx, by + 24, half, 3, "BIND IND", C.panelMid, nil, function() setupStartRebind("induction") end)
+  addButton("setupBindRelayL", bx + half + 1, by + 24, bw - half - 1, 3, "BIND R-LAS", C.panelMid, nil, function() setupStartRebind("relayLaser") end)
+  addButton("setupBindRelayT", bx, by + 28, half, 3, "BIND R-T", C.panelMid, nil, function() setupStartRebind("relayTritium") end)
+  addButton("setupBindRelayD", bx + half + 1, by + 28, bw - half - 1, 3, "BIND R-D", C.panelMid, nil, function() setupStartRebind("relayDeuterium") end)
+  addButton("setupBindReaderT", bx, by + 32, half, 3, "BIND RD-T", C.panelMid, nil, function() setupStartRebind("readerTritium") end)
+  addButton("setupBindReaderD", bx + half + 1, by + 32, bw - half - 1, 3, "BIND RD-D", C.panelMid, nil, function() setupStartRebind("readerDeuterium") end)
+  addButton("setupBindReaderA", bx, by + 36, bw, 3, "BIND RD-AUX", C.panelMid, nil, function() setupStartRebind("readerAux") end)
+
+  addButton("setupSave", bx, by + 40, half, 3, "SAVE CONFIG", C.ok, nil, function() saveSetupConfig() end)
+  addButton("setupInstaller", bx + half + 1, by + 40, bw - half - 1, 3, "RUN INSTALLER", C.warn, nil, function() runInstallerFromSetup() end)
+
+  if state.setup.rebindRole and #state.setup.rebindCandidates > 0 then
+    local listY = ctrl.y + 6
+    for i = 1, math.min(3, #state.setup.rebindCandidates) do
+      local idx = i
+      local name = state.setup.rebindCandidates[i]
+      addButton("setupSel" .. i, bx, listY + ((i - 1) * 4), bw, 3, shortText("-> " .. name, bw - 2), C.info, nil, function() setupApplySelection(idx) end)
+    end
+  end
 end
 
 function buildRefreshButton(ctrl, bx, bw)
@@ -2636,6 +2942,11 @@ function buildButtons(layout)
     return
   end
 
+  if state.currentView == "setup" then
+    buildSetupButtons(ctrl, bx, bw)
+    return
+  end
+
   if state.currentView == "diagnostic" or state.currentView == "induction" then
     drawBigButton("monitor", bx, ctrl.y + 12, bw, "MONITOR", C.btnWarn, function() startMonitorSelection() end)
     return
@@ -2732,6 +3043,7 @@ local function buildUIViewContext()
     inductionStatus = inductionStatus,
     hasAnyRollbackBackup = hasAnyRollbackBackup,
     rollbackTargetList = rollbackTargetList,
+    getSetupStatusRows = getSetupStatusRows,
   }
 end
 
@@ -2740,7 +3052,10 @@ function drawMonitorSelection(layout)
 end
 
 function drawControlPanel(panel, layout)
-  drawBox(panel.x, panel.y, panel.w, panel.h, state.currentView == "manual" and "MANUAL CONTROL" or (state.currentView == "update" and "UPDATE COMMAND" or "CONTROL SYSTEM"), C.border)
+  drawBox(panel.x, panel.y, panel.w, panel.h,
+    state.currentView == "manual" and "MANUAL CONTROL"
+      or (state.currentView == "update" and "UPDATE COMMAND"
+      or (state.currentView == "setup" and "SETUP COMMAND" or "CONTROL SYSTEM")), C.border)
   local x = panel.x + 2
   local w = panel.w - 3
 
@@ -2910,6 +3225,10 @@ function drawUpdateView(layout)
   UIViews.drawUpdateView(buildUIViewContext(), layout)
 end
 
+function drawSetupView(layout)
+  UIViews.drawSetupView(buildUIViewContext(), layout)
+end
+
 local function drawUI()
   local tw, th = term.getSize()
   local layout = computeLayout(tw, th)
@@ -2939,6 +3258,8 @@ local function drawUI()
     drawInductionView(layout)
   elseif state.currentView == "update" then
     drawUpdateView(layout)
+  elseif state.currentView == "setup" then
+    drawSetupView(layout)
   else
     drawSupervisionView(layout)
   end
@@ -3023,6 +3344,9 @@ while state.running do
       elseif ch == "5" then
         state.currentView = "update"
         pushEvent("View update")
+      elseif ch == "6" then
+        state.currentView = "setup"
+        pushEvent("View setup")
       elseif ch == "i" then
         triggerAutomaticIgnitionSequence()
       elseif ch == "l" then
