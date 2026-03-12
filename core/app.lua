@@ -1128,6 +1128,15 @@ function M.run()
       return false, nil, "Manifest files list is empty"
     end
 
+    -- Règle release: fusion.lua et fusion.version doivent toujours être publiés ensemble.
+    -- Le manifeste porte la version publiée et doit inclure ces deux fichiers.
+    if not seen["fusion.lua"] then
+      return false, nil, "Manifest must include fusion.lua"
+    end
+    if not seen["fusion.version"] then
+      return false, nil, "Manifest must include fusion.version"
+    end
+
     local preserve = {}
     if type(decoded.preserve) == "table" then
       for _, item in ipairs(decoded.preserve) do
@@ -1143,14 +1152,22 @@ function M.run()
     }, nil
   end
 
-  local function validateDownloadedContent(path, content)
+  local function validateDownloadedContent(path, content, expectedVersion)
     local normalized = normalizePath(path)
     if type(content) ~= "string" or #trimText(content) == 0 then
       return false, "Downloaded file is empty: " .. normalized
     end
 
     if normalized == "fusion.version" then
-      return validateVersionString(trimText(content))
+      local normalizedVersion = trimText(content)
+      local validVersion, versionErr = validateVersionString(normalizedVersion)
+      if not validVersion then
+        return false, versionErr or "fusion.version invalid"
+      end
+      if type(expectedVersion) == "string" and trimText(expectedVersion) ~= "" and normalizedVersion ~= trimText(expectedVersion) then
+        return false, "Version mismatch: manifest " .. trimText(expectedVersion) .. " vs fusion.version " .. normalizedVersion
+      end
+      return true, nil
     end
 
     if normalized:match("%.lua$") then
@@ -1256,6 +1273,17 @@ function M.run()
     state.update.lastCheckClock = os.clock()
     pushEvent("Manifest loaded " .. manifest.version)
 
+    local localVersion = trimText(state.update.localVersion)
+    local validLocalVersion, localVersionErr = validateVersionString(localVersion)
+    if not validLocalVersion then
+      state.update.available = false
+      state.update.lastError = localVersionErr or "Local version invalid"
+      setUpdateState("FAILED", "Check failed: " .. state.update.lastError, nil)
+      pushEvent("Update failed")
+      return false, state.update.lastError
+    end
+    state.update.localVersion = localVersion
+
     local cmp = compareVersions(state.update.localVersion, manifest.version)
     if cmp == 1 then
       state.update.available = true
@@ -1307,7 +1335,7 @@ function M.run()
           return false, state.update.lastError
         end
 
-        local valid, reason = validateDownloadedContent(filePath, body)
+        local valid, reason = validateDownloadedContent(filePath, body, manifest.version)
         if not valid then
           state.update.lastError = reason or ("Validation failed: " .. filePath)
           setUpdateState("FAILED", nil, "Validation failed")
@@ -1377,7 +1405,7 @@ function M.run()
           return false, state.update.lastError
         end
 
-        local valid, reason = validateDownloadedContent(normalized, tempBody)
+        local valid, reason = validateDownloadedContent(normalized, tempBody, manifest.version)
         if not valid then
           state.update.lastError = reason or ("Invalid temp file: " .. normalized)
           setUpdateState("FAILED", nil, "Apply failed")
