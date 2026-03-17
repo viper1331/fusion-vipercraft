@@ -8,6 +8,7 @@ function M.new()
     preferredLaser = "laserAmplifier_1",
     preferredInduction = "inductionPort_1",
 
+    uiScale = 1.0,
     monitorScale = 0.5,
     refreshDelay = 0.20,
 

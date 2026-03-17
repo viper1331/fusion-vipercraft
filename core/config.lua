@@ -6,6 +6,8 @@ local VALID_VIEWS = {
   MAN = true,
   IND = true,
   UPDATE = true,
+  CFG = true,
+  CONFIG = true,
   SETUP = true,
 }
 
@@ -61,6 +63,7 @@ function M.defaultFusionConfig(CFG, updateEnabled)
     },
     ui = {
       preferredView = "SUP",
+      scale = CFG.uiScale or 1.0,
       touchEnabled = true,
       refreshDelay = CFG.refreshDelay,
     },
@@ -119,6 +122,7 @@ function M.applyConfigToRuntime(config, CFG)
 
   CFG.preferredMonitor = config.monitor and config.monitor.name or CFG.preferredMonitor
   CFG.monitorScale = M.sanitizeMonitorScale(config.monitor and config.monitor.scale, CFG.monitorScale)
+  CFG.uiScale = M.sanitizeUiScale(config.ui and config.ui.scale, CFG.uiScale or 1.0)
   CFG.refreshDelay = M.sanitizeRefreshDelay(config.ui and config.ui.refreshDelay, CFG.refreshDelay)
 
   CFG.preferredReactor = config.devices and config.devices.reactorController or CFG.preferredReactor
@@ -144,6 +148,14 @@ function M.sanitizeMonitorScale(value, fallback)
   if numeric < 0.5 then return 0.5 end
   if numeric > 5 then return 5 end
   return math.floor(numeric * 2 + 0.5) / 2
+end
+
+function M.sanitizeUiScale(value, fallback)
+  local numeric = tonumber(value)
+  if numeric == nil then return fallback end
+  if numeric < 0.5 then return 0.5 end
+  if numeric > 2 then return 2 end
+  return math.floor(numeric * 10 + 0.5) / 10
 end
 
 function M.sanitizeRefreshDelay(value, fallback)
@@ -187,6 +199,10 @@ function M.validateConfig(config)
   local preferredView = config.ui and config.ui.preferredView
   if type(preferredView) ~= "string" or not VALID_VIEWS[preferredView] then
     table.insert(errors, "ui.preferredView is invalid")
+  end
+
+  if tonumber(config.ui and config.ui.scale) == nil then
+    table.insert(errors, "ui.scale is invalid")
   end
 
   local relaySides = {

@@ -48,6 +48,9 @@ local function handleMainChar(ch, api)
     state.currentView = "update"
     api.pushEvent("View update")
   elseif ch == "6" then
+    state.currentView = "config"
+    api.pushEvent("View config")
+  elseif ch == "7" then
     state.currentView = "setup"
     api.pushEvent("View setup")
   elseif ch == "i" then

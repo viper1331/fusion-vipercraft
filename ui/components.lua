@@ -183,13 +183,14 @@ function M.buildButtons(ctx, layout)
   end
 
   local function buildNavigationButtons(ctrl, bx, bw)
-    local navW = math.max(5, math.floor(bw / 6))
+    local navW = math.max(6, math.floor(bw / 7))
     addButton("viewSup", bx, ctrl.y + 1, navW, 4, "SUP", state.currentView == "supervision" and C.btnOn or C.panelMid, nil, function() actions.setView("supervision") end)
     addButton("viewDiag", bx + navW, ctrl.y + 1, navW, 4, "DIAG", state.currentView == "diagnostic" and C.btnOn or C.panelMid, nil, function() actions.setView("diagnostic") end)
     addButton("viewMan", bx + (navW * 2), ctrl.y + 1, navW, 4, "MAN", state.currentView == "manual" and C.btnOn or C.panelMid, nil, function() actions.setView("manual") end)
     addButton("viewInd", bx + (navW * 3), ctrl.y + 1, navW, 4, "IND", state.currentView == "induction" and C.btnOn or C.panelMid, nil, function() actions.setView("induction") end)
     addButton("viewUpd", bx + (navW * 4), ctrl.y + 1, navW, 4, "UPD", state.currentView == "update" and C.btnOn or C.panelMid, nil, function() actions.setView("update") end)
-    addButton("viewSetup", bx + (navW * 5), ctrl.y + 1, bw - (navW * 5), 4, "SET", state.currentView == "setup" and C.btnOn or C.panelMid, nil, function() actions.setView("setup") end)
+    addButton("viewCfg", bx + (navW * 5), ctrl.y + 1, navW, 4, "CFG", state.currentView == "config" and C.btnOn or C.panelMid, nil, function() actions.setView("config") end)
+    addButton("viewSetup", bx + (navW * 6), ctrl.y + 1, bw - (navW * 6), 4, "SET", state.currentView == "setup" and C.btnOn or C.panelMid, nil, function() actions.setView("setup") end)
   end
 
   local function buildRefreshButton(ctrl, bx, bw)
@@ -252,6 +253,18 @@ function M.buildButtons(ctx, layout)
     end
   end
 
+  local function buildConfigButtons(ctrl, bx, bw)
+    local by = ctrl.y + 6
+    local half = math.max(6, math.floor((bw - 1) / 2))
+    addButton("cfgUiDown", bx, by, half, 4, "UI -", C.panelMid, nil, function() actions.adjustDisplayScale(-0.1) end)
+    addButton("cfgUiUp", bx + half + 1, by, bw - half - 1, 4, "UI +", C.btnAction, nil, function() actions.adjustDisplayScale(0.1) end)
+    addButton("cfgTextDown", bx, by + 5, half, 4, "TXT -", C.panelMid, nil, function() actions.adjustTextScale(-0.5) end)
+    addButton("cfgTextUp", bx + half + 1, by + 5, bw - half - 1, 4, "TXT +", C.btnAction, nil, function() actions.adjustTextScale(0.5) end)
+    addButton("cfgSave", bx, by + 10, bw, 4, "SAVE CONFIG", C.ok, nil, actions.saveSetupConfig)
+    addButton("cfgReload", bx, by + 15, bw, 4, "RELOAD", C.btnWarn, nil, actions.reloadSetupConfig)
+    addButton("monitor", bx, by + 20, bw, 4, "MONITOR", C.btnWarn, nil, actions.startMonitorSelection)
+  end
+
   local function buildSupervisorCoreButtons(ctrl, bx, by, bw, bh, bGap)
     addButton("master", bx, by, bw, bh, "MASTER", state.autoMaster and C.btnOn or C.btnOff, nil, actions.toggleMaster)
     addButton("fusion", bx, by + (bh + bGap), bw, bh, "FUSION", state.fusionAuto and C.btnOn or C.btnOff, nil, actions.toggleFusion)
@@ -299,6 +312,11 @@ function M.buildButtons(ctx, layout)
 
   if state.currentView == "setup" then
     buildSetupButtons(ctrl, bx, bw)
+    return
+  end
+
+  if state.currentView == "config" then
+    buildConfigButtons(ctrl, bx, bw)
     return
   end
 

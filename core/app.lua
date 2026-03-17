@@ -542,18 +542,28 @@ function M.run()
   end
 
   local function computeLayout(tw, th)
+    local uiScale = CoreConfig.sanitizeUiScale(CFG.uiScale, 1.0)
+    local scaledTw = math.floor((tw / uiScale) + 0.5)
+    local scaledTh = math.floor((th / uiScale) + 0.5)
+
     local minW, minH = 34, 14
-    if tw < minW or th < minH then
-      return { tooSmall = true, minW = minW, minH = minH, mode = "tiny" }
+    if scaledTw < minW or scaledTh < minH then
+      return {
+        tooSmall = true,
+        minW = math.ceil(minW * uiScale),
+        minH = math.ceil(minH * uiScale),
+        mode = "tiny",
+        uiScale = uiScale,
+      }
     end
 
     local mode = "compact"
-    if tw >= 58 and th >= 19 then mode = "standard" end
-    if tw >= 74 and th >= 26 then mode = "large" end
+    if scaledTw >= 58 and scaledTh >= 19 then mode = "standard" end
+    if scaledTw >= 74 and scaledTh >= 26 then mode = "large" end
 
     local top, bottom = 2, th - 1
     local h = bottom - top + 1
-    local layout = { mode = mode, top = top, bottom = bottom, height = h, width = tw, tooSmall = false }
+    local layout = { mode = mode, top = top, bottom = bottom, height = h, width = tw, tooSmall = false, uiScale = uiScale }
 
     if mode == "compact" then
       local lw = clamp(math.floor(tw * 0.54), 18, tw - 14)
@@ -873,6 +883,7 @@ function M.run()
       elseif view == "MAN" then state.currentView = "manual"
       elseif view == "IND" then state.currentView = "induction"
       elseif view == "UPDATE" then state.currentView = "update"
+      elseif view == "CFG" or view == "CONFIG" then state.currentView = "config"
       elseif view == "SETUP" then state.currentView = "setup"
       end
     end
@@ -895,7 +906,9 @@ function M.run()
     local base = CoreConfig.defaultFusionConfig(CFG, UPDATE_ENABLED)
     local merged = CoreConfig.mergeDefaults(cloneTable(config or {}), base)
     merged.ui.preferredView = string.upper(tostring(merged.ui.preferredView or "SUP"))
-    if merged.ui.preferredView == "CFG" then merged.ui.preferredView = "SETUP" end
+    if merged.ui.preferredView == "CONFIG" then merged.ui.preferredView = "CFG" end
+    merged.ui.scale = CoreConfig.sanitizeUiScale(merged.ui.scale, base.ui.scale or 1.0)
+    merged.monitor.scale = CoreConfig.sanitizeMonitorScale(merged.monitor.scale, base.monitor.scale or 0.5)
     return merged
   end
 
@@ -2080,7 +2093,7 @@ function M.run()
 
     local id = tostring(button.id or "")
     if button.disabled then return styles.button.disabled end
-    if id == "setupSave" then return styles.button.success end
+    if id == "setupSave" or id == "cfgSave" then return styles.button.success end
     if id == "setupInstaller" or id == "arret" or id == "manualStop" then return styles.button.danger end
     if button.bg == C.btnWarn then return styles.button.danger end
     if button.bg == C.tritium then return styles.button.fuelT end
@@ -2291,6 +2304,256 @@ function M.run()
     pushEvent("Monitor changed")
   end
 
+  local function ensureSetupWorking()
+    if type(state.setup) ~= "table" then
+      state.setup = {}
+    end
+
+    if type(state.setup.working) ~= "table" then
+      loadRuntimeSetupConfig()
+    end
+
+    if type(state.setup.working) ~= "table" then
+      refreshSetupWorkingConfig(CoreConfig.defaultFusionConfig(CFG, UPDATE_ENABLED))
+    end
+
+    return state.setup.working
+  end
+
+  local function applySetupScaleRuntime(working)
+    if type(working) ~= "table" then return end
+    if type(working.ui) ~= "table" then working.ui = {} end
+    if type(working.monitor) ~= "table" then working.monitor = {} end
+
+    CFG.uiScale = CoreConfig.sanitizeUiScale(working.ui.scale, CFG.uiScale or 1.0)
+    CFG.monitorScale = CoreConfig.sanitizeMonitorScale(working.monitor.scale, CFG.monitorScale or 0.5)
+    working.ui.scale = CFG.uiScale
+    working.monitor.scale = CFG.monitorScale
+
+    IoMonitor.setupMonitor(nativeTerm, hw, CFG, C)
+    state.uiDrawn = false
+  end
+
+  local function saveSetupConfig()
+    local working = ensureSetupWorking()
+    if type(working) ~= "table" then return false end
+
+    local normalized = normalizeSetupConfig(working)
+    local valid, errors = CoreConfig.validateConfig(normalized)
+    if not valid then
+      state.setup.saveStatus = "CONFIG INVALID"
+      state.setup.lastMessage = table.concat(errors or { "Invalid configuration" }, "; ")
+      state.lastAction = "Config save failed"
+      pushEvent("Config invalid")
+      return false
+    end
+
+    local ok, err = CoreConfig.writeFusionConfig(fs, CONFIG_FILE, normalized)
+    if not ok then
+      state.setup.saveStatus = "SAVE FAILED"
+      state.setup.lastMessage = tostring(err or "Write failed")
+      state.lastAction = "Config save failed"
+      pushEvent("Config save failed")
+      return false
+    end
+
+    refreshSetupWorkingConfig(normalized)
+    applyConfigToRuntime(normalized)
+    refreshSetupDeviceStatus()
+    setupMonitor()
+
+    state.setup.saveStatus = "CONFIG SAVED"
+    state.setup.lastMessage = "Configuration saved"
+    state.setup.dirty = false
+    state.lastAction = "Config saved"
+    pushEvent("Config saved")
+    return true
+  end
+
+  local function reloadSetupConfig()
+    local ok, config, err = loadFusionConfig()
+    if not ok or type(config) ~= "table" then
+      state.setup.saveStatus = "RELOAD FAILED"
+      state.setup.lastMessage = tostring(err or "Config missing")
+      state.lastAction = "Reload failed"
+      pushEvent("Reload failed")
+      return false
+    end
+
+    applyConfigToRuntime(config)
+    refreshSetupWorkingConfig(config)
+    refreshSetupDeviceStatus()
+    setupMonitor()
+
+    state.setup.saveStatus = "CONFIG RELOADED"
+    state.setup.lastMessage = "Configuration reloaded"
+    state.setup.dirty = false
+    state.lastAction = "Config reloaded"
+    pushEvent("Config reloaded")
+    return true
+  end
+
+  local function adjustDisplayScale(delta)
+    local working = ensureSetupWorking()
+    local uiCfg = working.ui or {}
+    working.ui = uiCfg
+
+    local current = CoreConfig.sanitizeUiScale(uiCfg.scale, CFG.uiScale or 1.0)
+    local tw, th = term.getSize()
+    local maxBySurface = math.min(2.0, tw / 34, th / 14)
+    if maxBySurface < 0.5 then maxBySurface = 0.5 end
+    local desired = current + (delta or 0)
+    if desired > maxBySurface then desired = maxBySurface end
+    local nextScale = CoreConfig.sanitizeUiScale(desired, current)
+    uiCfg.scale = nextScale
+    state.setup.dirty = true
+    state.setup.lastMessage = string.format("UI scale %.1fx", nextScale)
+    state.lastAction = "UI scale " .. string.format("%.1fx", nextScale)
+    applySetupScaleRuntime(working)
+    pushEvent(state.lastAction)
+  end
+
+  local function adjustTextScale(delta)
+    local working = ensureSetupWorking()
+    local monitorCfg = working.monitor or {}
+    working.monitor = monitorCfg
+
+    local current = CoreConfig.sanitizeMonitorScale(monitorCfg.scale, CFG.monitorScale or 0.5)
+    local nextScale = CoreConfig.sanitizeMonitorScale(current + (delta or 0), current)
+    monitorCfg.scale = nextScale
+    state.setup.dirty = true
+    state.setup.lastMessage = string.format("Text scale %.1fx", nextScale)
+    state.lastAction = "Text scale " .. string.format("%.1fx", nextScale)
+    applySetupScaleRuntime(working)
+    pushEvent(state.lastAction)
+  end
+
+  local function runSetupTest(target)
+    local w = ensureSetupWorking()
+    refreshSetupDeviceStatus()
+    local ds = state.setup.deviceStatus or {}
+    local lookup = {
+      ["MONITOR"] = ds.monitor,
+      ["LAS"] = ds.relayLaser,
+      ["T"] = ds.relayTritium,
+      ["D"] = ds.relayDeuterium,
+      ["READER T"] = ds.readerTritium,
+      ["READER D"] = ds.readerDeuterium,
+      ["INDUCTION"] = ds.induction,
+      ["LASER"] = ds.laser,
+    }
+    local status = lookup[target] or "UNKNOWN"
+    local ok = status == "OK"
+    state.setup.lastTestResult = tostring(target or "TEST") .. ": " .. status
+    state.setup.lastMessage = ok and "Test successful" or ("Test failed: " .. status)
+    state.lastAction = "Setup test " .. tostring(target or "")
+    if type(w) == "table" and type(w.monitor) == "table" then
+      w.monitor.ok = (ds.monitor == "OK")
+    end
+    pushEvent(state.setup.lastTestResult)
+    return ok
+  end
+
+  local function rebindRolePath(role)
+    local map = {
+      monitor = { "monitor", "name" },
+      reactorController = { "devices", "reactorController" },
+      logicAdapter = { "devices", "logicAdapter" },
+      laser = { "devices", "laser" },
+      induction = { "devices", "induction" },
+      relayLaser = { "relays", "laser", "name" },
+      relayTritium = { "relays", "tritium", "name" },
+      relayDeuterium = { "relays", "deuterium", "name" },
+      readerTritium = { "readers", "tritium" },
+      readerDeuterium = { "readers", "deuterium" },
+      readerAux = { "readers", "aux" },
+    }
+    return map[role]
+  end
+
+  local function setupCandidates(role)
+    local all = peripheral.getNames() or {}
+    table.sort(all)
+
+    local candidates = {}
+    for _, name in ipairs(all) do
+      local ptype = getTypeOf(name)
+      if role == "monitor" then
+        if ptype == "monitor" then table.insert(candidates, name) end
+      elseif role == "relayLaser" or role == "relayTritium" or role == "relayDeuterium" then
+        if ptype == "redstone_relay" or contains(name, "relay") then table.insert(candidates, name) end
+      elseif role == "readerTritium" or role == "readerDeuterium" or role == "readerAux" then
+        if ptype == "block_reader" or contains(name, "block_reader") then table.insert(candidates, name) end
+      else
+        table.insert(candidates, name)
+      end
+    end
+
+    return candidates
+  end
+
+  local function setupStartRebind(role)
+    ensureSetupWorking()
+    state.setup.rebindRole = role
+    state.setup.rebindCandidates = setupCandidates(role)
+    state.setup.rebindCursor = 1
+    state.setup.lastMessage = "Select device for " .. tostring(role)
+    state.lastAction = "Rebind " .. tostring(role)
+    pushEvent("Rebind " .. tostring(role))
+  end
+
+  local function setupApplySelection(index)
+    local role = state.setup.rebindRole
+    local candidates = state.setup.rebindCandidates or {}
+    local selected = candidates[index]
+    if not role or not selected then return end
+
+    local working = ensureSetupWorking()
+    local path = rebindRolePath(role)
+    if type(path) ~= "table" then return end
+
+    local cursor = working
+    for i = 1, #path - 1 do
+      local key = path[i]
+      if type(cursor[key]) ~= "table" then cursor[key] = {} end
+      cursor = cursor[key]
+    end
+    cursor[path[#path]] = selected
+
+    state.setup.dirty = true
+    state.setup.rebindRole = nil
+    state.setup.rebindCandidates = {}
+    state.setup.lastMessage = role .. " -> " .. selected
+    state.lastAction = "Rebind applied"
+    refreshSetupDeviceStatus()
+    pushEvent("Rebind " .. tostring(role))
+  end
+
+  local function runInstallerFromSetup()
+    if not fs.exists("install.lua") then
+      state.setup.lastMessage = "install.lua missing"
+      state.lastAction = "Installer missing"
+      pushEvent("Installer missing")
+      return false
+    end
+
+    restoreTerm()
+    local ok, err = pcall(shell.run, "install.lua")
+    if not ok then
+      state.setup.lastMessage = "Installer failed: " .. tostring(err)
+      state.lastAction = "Installer failed"
+      pushEvent("Installer failed")
+      return false
+    end
+
+    reloadSetupConfig()
+    refreshAll()
+    state.setup.lastMessage = "Installer executed"
+    state.lastAction = "Installer run"
+    pushEvent("Installer run")
+    return true
+  end
+
   local function buildButtonActions()
     return {
       selectMonitorByIndex = selectMonitorByIndex,
@@ -2354,7 +2617,10 @@ function M.run()
       runSetupTest = runSetupTest,
       setupStartRebind = setupStartRebind,
       setupApplySelection = setupApplySelection,
+      adjustDisplayScale = adjustDisplayScale,
+      adjustTextScale = adjustTextScale,
       saveSetupConfig = saveSetupConfig,
+      reloadSetupConfig = reloadSetupConfig,
       runInstallerFromSetup = runInstallerFromSetup,
       toggleMaster = function()
         state.autoMaster = not state.autoMaster
@@ -2489,7 +2755,8 @@ function M.run()
     drawBox(panel.x, panel.y, panel.w, panel.h,
       state.currentView == "manual" and "MANUAL CONTROL"
         or (state.currentView == "update" and "UPDATE COMMAND"
-        or (state.currentView == "setup" and "SETUP COMMAND" or "CONTROL SYSTEM")), C.border)
+        or (state.currentView == "config" and "CONFIG COMMAND"
+        or (state.currentView == "setup" and "SETUP COMMAND" or "CONTROL SYSTEM"))), C.border)
     local x = panel.x + 2
     local w = panel.w - 3
 
@@ -2659,6 +2926,10 @@ function M.run()
     UIViews.drawUpdateView(buildUIViewContext(), layout)
   end
 
+  function drawConfigView(layout)
+    UIViews.drawConfigView(buildUIViewContext(), layout)
+  end
+
   function drawSetupView(layout)
     UIViews.drawSetupView(buildUIViewContext(), layout)
   end
@@ -2692,6 +2963,8 @@ function M.run()
       drawInductionView(layout)
     elseif state.currentView == "update" then
       drawUpdateView(layout)
+    elseif state.currentView == "config" then
+      drawConfigView(layout)
     elseif state.currentView == "setup" then
       drawSetupView(layout)
     else
