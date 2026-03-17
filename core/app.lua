@@ -58,45 +58,45 @@ function M.run()
   local hw = CoreState.defaultHardwareState()
 
   local UI_PALETTE = {
-    bgMain = colors.black,
-    bgElevated = colors.gray,
-    frameOuter = colors.lightGray,
-    frameInner = colors.lightBlue,
+    bgMain = colors.white,
+    bgElevated = colors.lightGray,
+    frameOuter = colors.lightBlue,
+    frameInner = colors.cyan,
     frameDim = colors.gray,
-    textMain = colors.white,
-    textDim = colors.lightGray,
+    textMain = colors.black,
+    textDim = colors.gray,
     accentOk = colors.green,
     accentWarn = colors.orange,
     accentBad = colors.red,
     accentInfo = colors.cyan,
     accentViolet = colors.purple,
     accentLaser = colors.yellow,
-    headerBg = colors.gray,
-    footerBg = colors.gray,
-    buttonNeutral = colors.gray,
-    buttonActive = colors.lightBlue,
-    buttonPressed = colors.black,
+    headerBg = colors.lightGray,
+    footerBg = colors.lightGray,
+    buttonNeutral = colors.lightGray,
+    buttonActive = colors.cyan,
+    buttonPressed = colors.gray,
     buttonDanger = colors.red,
     buttonFuelT = colors.green,
-    buttonFuelD = colors.red,
+    buttonFuelD = colors.orange,
     buttonFuelDT = colors.purple,
     buttonSuccess = colors.lime,
   }
 
   local styles = {
     panel = {
-      default = { bg = UI_PALETTE.bgMain, header = UI_PALETTE.bgElevated, border = UI_PALETTE.frameDim, trim = UI_PALETTE.bgElevated, accent = UI_PALETTE.frameInner, text = UI_PALETTE.textMain },
-      accent = { bg = UI_PALETTE.bgMain, header = UI_PALETTE.bgElevated, border = UI_PALETTE.frameDim, trim = UI_PALETTE.bgElevated, accent = UI_PALETTE.frameInner, text = UI_PALETTE.textMain },
+      default = { bg = UI_PALETTE.bgMain, header = UI_PALETTE.bgElevated, border = UI_PALETTE.frameInner, trim = UI_PALETTE.bgMain, accent = UI_PALETTE.frameInner, text = UI_PALETTE.textMain },
+      accent = { bg = UI_PALETTE.bgMain, header = UI_PALETTE.bgElevated, border = UI_PALETTE.frameOuter, trim = UI_PALETTE.bgMain, accent = UI_PALETTE.frameInner, text = UI_PALETTE.textMain },
     },
     button = {
-      primary = { face = UI_PALETTE.buttonActive, rimLight = UI_PALETTE.textMain, rimDark = UI_PALETTE.bgMain, trim = UI_PALETTE.frameInner, text = UI_PALETTE.bgMain },
-      secondary = { face = UI_PALETTE.buttonNeutral, rimLight = UI_PALETTE.frameOuter, rimDark = UI_PALETTE.bgMain, trim = UI_PALETTE.frameDim, text = UI_PALETTE.textMain },
-      danger = { face = UI_PALETTE.buttonDanger, rimLight = UI_PALETTE.accentWarn, rimDark = UI_PALETTE.bgMain, trim = UI_PALETTE.frameOuter, text = UI_PALETTE.textMain },
-      fuelT = { face = UI_PALETTE.buttonFuelT, rimLight = UI_PALETTE.accentOk, rimDark = UI_PALETTE.bgMain, trim = UI_PALETTE.frameOuter, text = UI_PALETTE.textMain },
-      fuelD = { face = UI_PALETTE.buttonFuelD, rimLight = UI_PALETTE.accentWarn, rimDark = UI_PALETTE.bgMain, trim = UI_PALETTE.frameOuter, text = UI_PALETTE.textMain },
-      fuelDT = { face = UI_PALETTE.buttonFuelDT, rimLight = UI_PALETTE.frameInner, rimDark = UI_PALETTE.bgMain, trim = UI_PALETTE.frameOuter, text = UI_PALETTE.textMain },
-      success = { face = UI_PALETTE.buttonSuccess, rimLight = UI_PALETTE.textMain, rimDark = UI_PALETTE.bgMain, trim = UI_PALETTE.accentOk, text = UI_PALETTE.bgMain },
-      disabled = { face = UI_PALETTE.frameDim, rimLight = UI_PALETTE.bgElevated, rimDark = UI_PALETTE.bgMain, trim = UI_PALETTE.bgMain, text = UI_PALETTE.textDim },
+      primary = { face = UI_PALETTE.buttonActive, border = UI_PALETTE.frameOuter, text = UI_PALETTE.textMain },
+      secondary = { face = UI_PALETTE.buttonNeutral, border = UI_PALETTE.frameOuter, text = UI_PALETTE.textMain },
+      danger = { face = UI_PALETTE.buttonDanger, border = UI_PALETTE.frameOuter, text = UI_PALETTE.textMain },
+      fuelT = { face = UI_PALETTE.buttonFuelT, border = UI_PALETTE.frameOuter, text = UI_PALETTE.textMain },
+      fuelD = { face = UI_PALETTE.buttonFuelD, border = UI_PALETTE.frameOuter, text = UI_PALETTE.textMain },
+      fuelDT = { face = UI_PALETTE.buttonFuelDT, border = UI_PALETTE.frameOuter, text = UI_PALETTE.textMain },
+      success = { face = UI_PALETTE.buttonSuccess, border = UI_PALETTE.frameOuter, text = UI_PALETTE.textMain },
+      disabled = { face = UI_PALETTE.bgElevated, border = UI_PALETTE.frameDim, text = UI_PALETTE.textDim },
     },
   }
 
@@ -114,7 +114,7 @@ function M.run()
     bad = UI_PALETTE.accentBad,
     info = UI_PALETTE.accentInfo,
     border = UI_PALETTE.frameInner,
-    borderDim = UI_PALETTE.frameDim,
+    borderDim = UI_PALETTE.frameOuter,
     energy = UI_PALETTE.accentLaser,
     fuel = UI_PALETTE.accentWarn,
     headerBg = UI_PALETTE.headerBg,
@@ -182,10 +182,11 @@ function M.run()
 
   function ui.frame(x, y, w, h, border, inner)
     if w < 2 or h < 2 then return end
-    ui.hline(x, y, w, border or C.border)
-    ui.hline(x, y + h - 1, w, border or C.borderDim)
-    ui.vline(x, y + 1, h - 2, border or C.border)
-    ui.vline(x + w - 1, y + 1, h - 2, border or C.borderDim)
+    local stroke = border or C.border
+    ui.hline(x, y, w, stroke)
+    ui.hline(x, y + h - 1, w, stroke)
+    ui.vline(x, y + 1, h - 2, stroke)
+    ui.vline(x + w - 1, y + 1, h - 2, stroke)
     if w > 2 and h > 2 then
       ui.fill(x + 1, y + 1, w - 2, h - 2, inner or C.panelDark)
     end
@@ -193,14 +194,9 @@ function M.run()
 
   function ui.panel(x, y, w, h, title, style)
     local skin = style or styles.panel.default
-    local accent = skin.accent or skin.border
-    ui.frame(x, y, w, h, skin.border, skin.trim)
+    ui.frame(x, y, w, h, skin.border, skin.bg)
     if w > 2 and h > 2 then
       ui.fill(x + 1, y + 1, w - 2, h - 2, skin.bg)
-    end
-    if h >= 4 and w >= 8 then
-      ui.vline(x + 1, y + 1, h - 2, accent)
-      ui.vline(x + w - 2, y + 1, h - 2, skin.trim)
     end
     if title and #title > 0 and w > 8 then
       local headerTitle = string.upper(title)
@@ -223,19 +219,19 @@ function M.run()
   local function applyPremiumPalette()
     Theme.applyPremiumPalette(C)
     if not term.isColor or not term.isColor() then return end
-    pcall(term.setPaletteColor, colors.black, 0.03, 0.04, 0.05)
-    pcall(term.setPaletteColor, colors.gray, 0.15, 0.18, 0.20)
-    pcall(term.setPaletteColor, colors.lightGray, 0.36, 0.40, 0.42)
-    pcall(term.setPaletteColor, colors.white, 0.90, 0.92, 0.92)
-    pcall(term.setPaletteColor, colors.blue, 0.10, 0.23, 0.33)
-    pcall(term.setPaletteColor, colors.lightBlue, 0.18, 0.56, 0.72)
-    pcall(term.setPaletteColor, colors.cyan, 0.26, 0.69, 0.74)
-    pcall(term.setPaletteColor, colors.green, 0.19, 0.62, 0.31)
-    pcall(term.setPaletteColor, colors.lime, 0.44, 0.78, 0.42)
-    pcall(term.setPaletteColor, colors.red, 0.78, 0.20, 0.18)
-    pcall(term.setPaletteColor, colors.orange, 0.88, 0.56, 0.18)
-    pcall(term.setPaletteColor, colors.yellow, 0.90, 0.74, 0.23)
-    pcall(term.setPaletteColor, colors.purple, 0.52, 0.34, 0.68)
+    pcall(term.setPaletteColor, colors.black, 0.08, 0.08, 0.08)
+    pcall(term.setPaletteColor, colors.gray, 0.53, 0.53, 0.53)
+    pcall(term.setPaletteColor, colors.lightGray, 0.88, 0.86, 0.82)
+    pcall(term.setPaletteColor, colors.white, 0.96, 0.95, 0.92)
+    pcall(term.setPaletteColor, colors.blue, 0.14, 0.40, 0.55)
+    pcall(term.setPaletteColor, colors.lightBlue, 0.39, 0.78, 0.90)
+    pcall(term.setPaletteColor, colors.cyan, 0.33, 0.85, 0.85)
+    pcall(term.setPaletteColor, colors.green, 0.33, 0.74, 0.28)
+    pcall(term.setPaletteColor, colors.lime, 0.58, 0.86, 0.37)
+    pcall(term.setPaletteColor, colors.red, 0.92, 0.33, 0.33)
+    pcall(term.setPaletteColor, colors.orange, 0.94, 0.72, 0.34)
+    pcall(term.setPaletteColor, colors.yellow, 0.95, 0.86, 0.43)
+    pcall(term.setPaletteColor, colors.purple, 0.86, 0.50, 0.90)
   end
 
   local function centerText(y, text, tc, bc)
@@ -389,27 +385,14 @@ function M.run()
   local function drawBox(x, y, w, h, title, accent)
     if w < 4 or h < 3 then return end
     local skin = styles.panel.default
-    if accent and accent ~= C.border then
-      skin = {
-        bg = styles.panel.default.bg,
-        header = styles.panel.default.header,
-        border = styles.panel.default.border,
-        trim = styles.panel.default.trim,
-        accent = accent,
-        text = styles.panel.default.text,
-      }
-    end
-
-    ui.frame(x, y, w, h, skin.border, skin.bg)
+    local borderColor = accent or skin.border
+    ui.frame(x, y, w, h, borderColor, skin.bg)
     if w > 2 and h > 2 then
       ui.fill(x + 1, y + 1, w - 2, h - 2, skin.bg)
     end
-    if h >= 4 then
-      ui.hline(x + 1, y + 1, w - 2, skin.trim)
-      ui.vline(x + 1, y + 1, h - 2, skin.accent or skin.border)
-    end
     if title and #title > 0 and w > 10 then
       local t = shortText(string.upper(title), w - 6)
+      ui.hline(x + 1, y, w - 2, skin.header)
       ui.write(x + 2, y, " " .. t .. " ", skin.text, skin.header)
     end
   end
@@ -439,10 +422,13 @@ function M.run()
   local function drawHeaderBarSprite(title, status)
     local function drawHeaderSegment(x, y, w, label, value, tone)
       if w < 6 then return end
-      ui.hline(x, y, w, C.bg)
-      ui.hline(x + 1, y, w - 2, C.headerBg)
-      local txt = shortText(string.format("%s:%s", label, tostring(value or "N/A")), math.max(1, w - 4))
-      ui.write(x + 2, y, txt, tone or C.text, C.headerBg)
+      ui.hline(x, y, w, C.headerBg)
+      ui.write(x, y, " ", C.text, C.border)
+      if w >= 2 then
+        ui.write(x + w - 1, y, " ", C.text, C.border)
+      end
+      local txt = shortText(string.format("%s:%s", label, tostring(value or "N/A")), math.max(1, w - 2))
+      ui.write(x + 1, y, txt, tone or C.text, C.headerBg)
     end
 
     local function drawMainHeader(headerTitle, headerStatus)
@@ -453,9 +439,9 @@ function M.run()
       local mainAlert = headerStatus or state.alert or "INFO"
       local firstWarn = warnings[1] or "NONE"
 
-      ui.hline(1, 1, tw, C.bg)
+      ui.hline(1, 1, tw, C.headerBg)
       if tw < 44 then
-        ui.write(2, 1, shortText("SYS " .. headerTitle .. " " .. string.upper(state.currentView), tw - 2), C.headerText, C.bg)
+        ui.write(2, 1, shortText("SYS " .. headerTitle .. " " .. string.upper(state.currentView), tw - 2), C.headerText, C.headerBg)
         return
       end
 
@@ -483,16 +469,19 @@ function M.run()
   local function drawFooterBarSprite()
     local function drawFooterSegment(x, y, w, key, value, tone, bg)
       if w < 6 then return end
-      local txt = shortText(key .. " " .. tostring(value), math.max(1, w - 3))
-      ui.hline(x, y, w, C.bg)
-      ui.hline(x + 1, y, w - 2, bg)
-      ui.write(x + 2, y, txt, tone or C.text, bg)
+      local txt = shortText(key .. " " .. tostring(value), math.max(1, w - 2))
+      ui.hline(x, y, w, bg)
+      ui.write(x, y, " ", C.text, C.border)
+      if w >= 2 then
+        ui.write(x + w - 1, y, " ", C.text, C.border)
+      end
+      ui.write(x + 1, y, txt, tone or C.text, bg)
     end
 
     local function drawMainFooter()
       local tw, th = term.getSize()
       local bg = C.footerBg
-      ui.hline(1, th, tw, C.bg)
+      ui.hline(1, th, tw, bg)
       local phase = reactorPhase()
       local labels = {
         { key = "ACT", value = shortText(state.lastAction, 14), tone = C.text },
@@ -503,7 +492,7 @@ function M.run()
         { key = "FUEL", value = "D " .. formatFuelLevel(state.deuteriumAmount) .. " T " .. formatFuelLevel(state.tritiumAmount), tone = C.fuel },
       }
 
-      local gap = 1
+      local gap = 0
       local segW = math.max(10, math.floor((tw - ((#labels - 1) * gap)) / #labels))
       local x = 1
       for i, seg in ipairs(labels) do
@@ -2136,7 +2125,7 @@ function M.run()
   end
 
   function drawButtonLabel(button, textColor, faceColor, isPressed)
-    local textOffset = isPressed and 1 or 0
+    local textOffset = 0
     local lx = button.x + math.max(1, math.floor((button.w - #button.label) / 2)) + textOffset
     local ly = button.y + math.floor((button.h - 1) / 2) + textOffset
     lx = clamp(lx, button.x + 1, button.x + button.w - #button.label)
@@ -2148,20 +2137,18 @@ function M.run()
     local skin = style or resolveButtonStyle(button)
     ui.fill(button.x, button.y, button.w, button.h, skin.face)
     if button.w >= 3 and button.h >= 3 then
-      ui.hline(button.x, button.y, button.w, skin.rimLight)
-      ui.hline(button.x, button.y + button.h - 1, button.w, skin.rimDark)
-      ui.vline(button.x, button.y + 1, button.h - 2, skin.rimLight)
-      ui.vline(button.x + button.w - 1, button.y + 1, button.h - 2, skin.rimDark)
-      if button.h >= 4 then
-        ui.hline(button.x + 1, button.y + 1, math.max(1, button.w - 2), skin.trim)
-      end
+      local stroke = skin.border or skin.rimLight or C.border
+      ui.hline(button.x, button.y, button.w, stroke)
+      ui.hline(button.x, button.y + button.h - 1, button.w, stroke)
+      ui.vline(button.x, button.y + 1, button.h - 2, stroke)
+      ui.vline(button.x + button.w - 1, button.y + 1, button.h - 2, stroke)
     end
     return skin.face, skin.text
   end
 
   function drawButtonPressedSprite(button, style)
     local skin = style or resolveButtonStyle(button)
-    local pressed = { face = UI_PALETTE.buttonPressed, rimLight = skin.rimLight, rimDark = skin.rimDark, trim = skin.face, text = skin.text }
+    local pressed = { face = UI_PALETTE.buttonPressed, border = skin.border or C.border, text = skin.text }
     return drawButtonSprite(button, pressed)
   end
 
@@ -2175,26 +2162,24 @@ function M.run()
 
   function drawTabSprite(x, y, w, h, label, isActive, isPressed)
     local face = isActive and C.info or C.panelMid
-    local top = isActive and C.text or C.borderDim
-    local bottom = isActive and C.border or C.bg
+    local stroke = isActive and C.border or C.borderDim
     if isPressed then
       face = C.panel
-      top = C.borderDim
-      bottom = C.bg
+      stroke = C.border
     end
 
     ui.fill(x, y, w, h, face)
-    ui.hline(x, y, w, top)
-    ui.hline(x, y + h - 1, w, bottom)
+    ui.hline(x, y, w, stroke)
+    ui.hline(x, y + h - 1, w, stroke)
     if w >= 3 then
-      ui.vline(x, y, h, top)
-      ui.vline(x + w - 1, y, h, bottom)
+      ui.vline(x, y, h, stroke)
+      ui.vline(x + w - 1, y, h, stroke)
     end
 
     local txt = shortText(label, math.max(1, w - 2))
     local tx = x + math.max(1, math.floor((w - #txt) / 2))
-    local ty = y + math.floor((h - 1) / 2) + (isPressed and 1 or 0)
-    ui.write(tx, ty, txt, isActive and C.bg or C.text, face)
+    local ty = y + math.floor((h - 1) / 2)
+    ui.write(tx, ty, txt, isActive and C.text or C.dim, face)
   end
 
   function drawTabBar(button, isPressed)
