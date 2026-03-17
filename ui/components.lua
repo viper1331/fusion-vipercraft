@@ -86,9 +86,12 @@ function M.drawStatusPanel(ctx, panel)
     ctx.drawBox(x, y2, w, b2h, "RUNTIME FUEL", C.borderDim)
     local mode = ctx.getRuntimeFuelMode()
     local flowOk = ctx.isRuntimeFuelOk()
+    local injText = tostring(math.floor(tonumber(state.injectionRate) or 0))
     local rows = {
       { "Fuel Mode", mode, mode == "STARVED" and C.bad or C.ok },
       { "Fuel Flow", flowOk and "OK" or "NO FLOW", flowOk and C.ok or C.bad },
+      { "Injection", injText, state.injectionWritable and C.info or C.warn },
+      { "Hohlraum", state.hohlraumPresent and "PRESENT" or "MISSING", state.hohlraumPresent and C.ok or C.bad },
       { "D Line", state.dOpen and "OPEN" or "CLOSED", state.dOpen and C.deuterium or C.warn },
       { "T Line", state.tOpen and "OPEN" or "CLOSED", state.tOpen and C.tritium or C.warn },
       { "DT Line", state.dtOpen and "OPEN" or "CLOSED", state.dtOpen and C.dtFuel or C.warn },
@@ -265,7 +268,11 @@ function M.buildButtons(ctx, layout)
         if i == #rowItems then
           wBtn = math.max(minWidths[i], (bx + bw) - x)
         end
-        addButton(item.id, x, y, wBtn, rowH, item.label, item.bg, item.fg, item.action, { hitPadX = 0, hitPadY = 0 })
+        addButton(item.id, x, y, wBtn, rowH, item.label, item.bg, item.fg, item.action, {
+          hitPadX = 0,
+          hitPadY = 0,
+          disabled = item.disabled and true or false,
+        })
         x = x + wBtn + gapX
       end
 
@@ -316,6 +323,9 @@ function M.buildButtons(ctx, layout)
   end
 
   local function buildManualButtons()
+    local injAvailable = state.injectionWritable == true
+    local injLabel = "INJ " .. tostring(math.floor(tonumber(state.injectionRate) or 0))
+
     addGridRow({
       { id = "manualStart", label = "DEMARRAGE", bg = actions.canIgnite() and C.warn or C.inactive, action = actions.startReactorSequence },
     }, 2, 0)
@@ -326,6 +336,11 @@ function M.buildButtons(ctx, layout)
       { id = "manualT", label = "T LOCK", bg = state.tOpen and C.tritium or C.inactive, action = actions.toggleTritium },
       { id = "manualDT", label = "DT LOCK", bg = state.dtOpen and C.dtFuel or C.inactive, action = actions.toggleDTFuel },
       { id = "manualD", label = "D LOCK", bg = state.dOpen and C.deuterium or C.inactive, action = actions.toggleDeuterium },
+    }, 2, 1)
+    addGridRow({
+      { id = "manualInjDown", label = "INJ -", bg = injAvailable and C.panelMid or C.inactive, action = function() actions.adjustInjectionRate(-1) end, disabled = not injAvailable },
+      { id = "manualInjValue", label = injLabel, bg = C.panel, action = function() end, disabled = true },
+      { id = "manualInjUp", label = "INJ +", bg = injAvailable and C.btnAction or C.inactive, action = function() actions.adjustInjectionRate(1) end, disabled = not injAvailable },
     }, 2, 1)
     addGridRow({
       { id = "manualPulse", label = "PULSE LAS", bg = C.warn, action = actions.fireLaser },
@@ -404,10 +419,18 @@ function M.buildButtons(ctx, layout)
   end
 
   local function buildSupervisorCoreButtons()
+    local injAvailable = state.injectionWritable == true
+    local injLabel = "INJ " .. tostring(math.floor(tonumber(state.injectionRate) or 0))
+
     addGridRow({
       { id = "master", label = "MASTER", bg = state.autoMaster and C.btnOn or C.btnOff, action = actions.toggleMaster },
       { id = "fusion", label = "FUSION", bg = state.fusionAuto and C.btnOn or C.btnOff, action = actions.toggleFusion },
       { id = "charge", label = "CHARGE", bg = state.chargeAuto and C.btnOn or C.btnOff, action = actions.toggleCharge },
+    }, 2, 1)
+    addGridRow({
+      { id = "injDown", label = "INJ -", bg = injAvailable and C.panelMid or C.inactive, action = function() actions.adjustInjectionRate(-1) end, disabled = not injAvailable },
+      { id = "injValue", label = injLabel, bg = C.panel, action = function() end, disabled = true },
+      { id = "injUp", label = "INJ +", bg = injAvailable and C.btnAction or C.inactive, action = function() actions.adjustInjectionRate(1) end, disabled = not injAvailable },
     }, 2, 1)
     if y + 2 <= maxY then
       drawBigButton("demarrage", bx, y, bw, "DEMARRAGE", actions.canIgnite() and C.warn or C.inactive, actions.startReactorSequence)

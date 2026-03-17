@@ -41,6 +41,95 @@ function M.build(api)
     state.laserPct = clamp((state.laserEnergy * 100) / state.laserMax, 0, 100)
   end
 
+  local function parseHohlraumPayload(payload)
+    local count = 0
+    local name = nil
+
+    if type(payload) == "table" then
+      count = math.floor(toNumber(payload.count or payload.amount or payload.Count, 0))
+      name = payload.name or payload.id or payload.displayName or payload.item or payload.itemName
+
+      if type(payload.stack) == "table" then
+        name = name or payload.stack.name or payload.stack.id or payload.stack.displayName
+        if count <= 0 then
+          count = math.floor(toNumber(payload.stack.count or payload.stack.amount, 0))
+        end
+      end
+
+      if type(payload[1]) == "table" then
+        local first = payload[1]
+        name = name or first.name or first.id or first.displayName
+        if count <= 0 then
+          count = math.floor(toNumber(first.count or first.amount, 0))
+        end
+      end
+    elseif type(payload) == "string" then
+      name = payload
+    end
+
+    local lower = string.lower(tostring(name or ""))
+    if count <= 0 and lower:find("hohlraum", 1, true) then
+      count = 1
+    end
+    if count > 0 and (name == nil or tostring(name) == "") then
+      name = "mekanismgenerators:hohlraum"
+    end
+
+    local present = false
+    if count > 0 then
+      if lower == "" or lower:find("hohlraum", 1, true) then
+        present = true
+      end
+    end
+
+    return present, math.max(0, count), tostring(name or "N/A")
+  end
+
+  local function detectHohlraumFromControllerInventory()
+    if not hw.reactor then return false, 0, "N/A" end
+
+    local total = 0
+    local nameFound = nil
+
+    local okList, listed = safeCall(hw.reactor, "list")
+    if okList and type(listed) == "table" then
+      for _, stack in pairs(listed) do
+        if type(stack) == "table" then
+          local name = tostring(stack.name or stack.id or "")
+          local count = math.floor(toNumber(stack.count, 0))
+          if count > 0 and string.lower(name):find("hohlraum", 1, true) then
+            total = total + count
+            nameFound = nameFound or name
+          end
+        end
+      end
+      if total > 0 then
+        return true, total, tostring(nameFound or "mekanismgenerators:hohlraum")
+      end
+    end
+
+    local okSize, size = safeCall(hw.reactor, "size")
+    if okSize and type(size) == "number" and size > 0 then
+      local maxSlots = math.floor(size)
+      for slot = 1, maxSlots do
+        local okDetail, detail = safeCall(hw.reactor, "getItemDetail", slot)
+        if okDetail and type(detail) == "table" then
+          local name = tostring(detail.name or detail.id or "")
+          local count = math.floor(toNumber(detail.count, 0))
+          if count > 0 and string.lower(name):find("hohlraum", 1, true) then
+            total = total + count
+            nameFound = nameFound or name
+          end
+        end
+      end
+      if total > 0 then
+        return true, total, tostring(nameFound or "mekanismgenerators:hohlraum")
+      end
+    end
+
+    return false, 0, "N/A"
+  end
+
   local function readReactor()
     state.reactorPresent = hw.reactor ~= nil or hw.logic ~= nil
     -- Reset explicite: evite les valeurs stale si un appel peripherique echoue.
@@ -48,6 +137,13 @@ function M.build(api)
     state.plasmaTemp = 0
     state.ignitionTemp = 0
     state.caseTemp = 0
+    state.hohlraumPresent = false
+    state.hohlraumCount = 0
+    state.hohlraumName = "N/A"
+    state.injectionRate = 0
+    state.injectionMin = 0
+    state.injectionMax = 98
+    state.injectionWritable = false
 
     local formed = false
     local formedFromLogic = false
@@ -74,6 +170,19 @@ function M.build(api)
       local okCase, caseTemp = tryMethods(hw.logic, { "getCaseTemperature", "getCasingTemperature" })
       if okCase then state.caseTemp = toNumber(caseTemp, 0) end
 
+      local okInjRate, injRate = tryMethods(hw.logic, { "getInjectionRate" })
+      if okInjRate then
+        state.injectionRate = math.floor(toNumber(injRate, 0) + 0.5)
+      end
+      state.injectionWritable = type(hw.logic.setInjectionRate) == "function"
+
+      local okHohlraum, hohlraum = tryMethods(hw.logic, { "getHohlraum" })
+      if okHohlraum then
+        state.hohlraumPresent, state.hohlraumCount, state.hohlraumName = parseHohlraumPayload(hohlraum)
+      elseif hw.reactor then
+        state.hohlraumPresent, state.hohlraumCount, state.hohlraumName = detectHohlraumFromControllerInventory()
+      end
+
       if not formedFromLogic then
         formed = state.ignition or state.plasmaTemp > 0
       end
@@ -91,9 +200,27 @@ function M.build(api)
       local _, caseTemp = tryMethods(hw.reactor, { "getCaseTemperature", "getCasingTemperature" })
       state.caseTemp = toNumber(caseTemp, 0)
       formed = state.ignition or state.plasmaTemp > 0
+
+      local okInjRate, injRate = tryMethods(hw.reactor, { "getInjectionRate" })
+      if okInjRate then
+        state.injectionRate = math.floor(toNumber(injRate, 0) + 0.5)
+      end
+      state.injectionWritable = type(hw.reactor.setInjectionRate) == "function"
+
+      local okHohlraum, hohlraum = tryMethods(hw.reactor, { "getHohlraum" })
+      if okHohlraum then
+        state.hohlraumPresent, state.hohlraumCount, state.hohlraumName = parseHohlraumPayload(hohlraum)
+      else
+        state.hohlraumPresent, state.hohlraumCount, state.hohlraumName = detectHohlraumFromControllerInventory()
+      end
     else
       formed = false
     end
+
+    state.injectionMin = math.max(0, math.floor(toNumber(state.injectionMin, 0)))
+    state.injectionMax = math.max(state.injectionMin, math.floor(toNumber(state.injectionMax, 98)))
+    state.injectionRate = clamp(math.floor(toNumber(state.injectionRate, 0)), state.injectionMin, state.injectionMax)
+    state.hohlraumCount = math.max(0, math.floor(toNumber(state.hohlraumCount, 0)))
 
     state.reactorFormed = formed
 

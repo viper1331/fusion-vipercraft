@@ -23,12 +23,28 @@ function M.build(api)
   end
 
   function actions.fireLaser()
+    -- Une fois la fusion engagee, on bloque les pulses manuels
+    -- pour eviter de consommer un nouveau hohlraum.
+    if state.ignition then
+      state.lastAction = "Pulse LAS bloque (reacteur actif)"
+      pushEvent("Pulse LAS blocked")
+      return false
+    end
+
+    if not state.hohlraumPresent then
+      state.lastAction = "Pulse LAS bloque (hohlraum absent)"
+      pushEvent("Pulse LAS blocked")
+      return false
+    end
+
     if CFG.actions.laser_fire and relayWrite("laser_fire", true) then
       state.lastAction = "Pulse LAS"
       pushEvent("Pulse LAS")
+      return true
     else
       state.lastAction = "Laser pulse non cable"
       pushEvent("Pulse LAS FAIL")
+      return false
     end
   end
 
@@ -90,6 +106,13 @@ function M.build(api)
       state.status = "BLOCKED"
       state.lastAction = "Ignition refused"
       pushEvent("Ignition refused")
+      return false
+    end
+
+    if not state.hohlraumPresent then
+      state.status = "BLOCKED"
+      state.lastAction = "Ignition refusee: hohlraum absent"
+      pushEvent("Ignition refused (hohlraum)")
       return false
     end
 

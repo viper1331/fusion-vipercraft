@@ -66,6 +66,7 @@ function M.build(api)
       { key = "LAS >= 2 GFE", ok = state.laserEnergy >= CFG.ignitionLaserEnergyThreshold, wait = state.laserPresent },
       { key = "T OPEN", ok = state.tOpen },
       { key = "D OPEN", ok = state.dOpen },
+      { key = "HOHLRAUM PRESENT", ok = state.hohlraumPresent },
       { key = "REACTOR FORMED", ok = state.reactorPresent and state.reactorFormed },
       { key = "SAFETY OK", ok = #state.safetyWarnings == 0 and state.alert ~= "DANGER" },
     }
@@ -109,6 +110,7 @@ function M.build(api)
     else
       if not state.tOpen then table.insert(warnings, "TANK T CLOSED") end
       if not state.dOpen then table.insert(warnings, "TANK D CLOSED") end
+      if not state.hohlraumPresent then table.insert(warnings, "HOHLRAUM ABSENT") end
     end
 
     if not hw.readerRoles.deuterium or not hw.readerRoles.tritium then

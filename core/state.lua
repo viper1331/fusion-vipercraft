@@ -27,6 +27,13 @@ function M.defaultRuntimeState(localVersion, updateEnabled)
     plasmaTemp = 0,
     ignitionTemp = 0,
     caseTemp = 0,
+    hohlraumPresent = false,
+    hohlraumCount = 0,
+    hohlraumName = "N/A",
+    injectionRate = 0,
+    injectionMin = 0,
+    injectionMax = 98,
+    injectionWritable = false,
 
     laserPresent = false,
     laserEnergy = 0,

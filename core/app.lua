@@ -2419,6 +2419,42 @@ function M.run()
     pushEvent(state.lastAction)
   end
 
+  local function setInjectionRate(targetRate)
+    local target = hw.logic or hw.reactor
+    if not target or type(target.setInjectionRate) ~= "function" then
+      state.lastAction = "Injection indisponible"
+      pushEvent("Injection unavailable")
+      return false
+    end
+
+    local minRate = toNumber(state.injectionMin, 0)
+    local maxRate = math.max(minRate, toNumber(state.injectionMax, 98))
+    local desired = clamp(math.floor(toNumber(targetRate, state.injectionRate) + 0.5), minRate, maxRate)
+
+    local okSet = safeCall(target, "setInjectionRate", desired)
+    if not okSet then
+      state.lastAction = "Set injection echec"
+      pushEvent("Injection set failed")
+      return false
+    end
+
+    local okRead, confirmed = safeCall(target, "getInjectionRate")
+    if okRead then
+      state.injectionRate = clamp(math.floor(toNumber(confirmed, desired) + 0.5), minRate, maxRate)
+    else
+      state.injectionRate = desired
+    end
+
+    state.lastAction = "Injection " .. tostring(state.injectionRate)
+    pushEvent(state.lastAction)
+    return true
+  end
+
+  local function adjustInjectionRate(delta)
+    local current = toNumber(state.injectionRate, 0)
+    return setInjectionRate(current + toNumber(delta, 0))
+  end
+
   local function buildButtonActions()
     return {
       selectMonitorByIndex = selectMonitorByIndex,
@@ -2490,6 +2526,7 @@ function M.run()
       setupApplySelection = setupApplySelection,
       adjustDisplayScale = adjustDisplayScale,
       adjustTextScale = adjustTextScale,
+      adjustInjectionRate = adjustInjectionRate,
       setDisplayOutput = setDisplayOutput,
       saveSetupConfig = saveSetupConfig,
       reloadSetupConfig = reloadSetupConfig,
