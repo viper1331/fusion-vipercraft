@@ -185,6 +185,7 @@ local state = {
   status = "Bienvenue dans l'assistant d'installation Fusion.",
   setupName = "Fusion ViperCraft",
   uiScale = 1.0,
+  outputMode = "monitor",
   monitorScale = 0.5,
   preferredView = "SUP",
   touchEnabled = true,
@@ -798,6 +799,7 @@ local function buildConfig()
     ui = {
       preferredView = state.preferredView,
       scale = state.uiScale,
+      output = state.outputMode,
       touchEnabled = state.touchEnabled,
       refreshDelay = 0.20,
     },

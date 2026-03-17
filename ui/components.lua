@@ -256,13 +256,29 @@ function M.buildButtons(ctx, layout)
   local function buildConfigButtons(ctrl, bx, bw)
     local by = ctrl.y + 6
     local half = math.max(6, math.floor((bw - 1) / 2))
+    local outputMode = "monitor"
+    if type(state.setup) == "table" and type(state.setup.working) == "table" and type(state.setup.working.ui) == "table" then
+      outputMode = string.lower(tostring(state.setup.working.ui.output or "monitor"))
+    end
+    if outputMode ~= "terminal" and outputMode ~= "both" and outputMode ~= "monitor" then
+      outputMode = "monitor"
+    end
+
     addButton("cfgUiDown", bx, by, half, 4, "UI -", C.panelMid, nil, function() actions.adjustDisplayScale(-0.1) end)
     addButton("cfgUiUp", bx + half + 1, by, bw - half - 1, 4, "UI +", C.btnAction, nil, function() actions.adjustDisplayScale(0.1) end)
     addButton("cfgTextDown", bx, by + 5, half, 4, "TXT -", C.panelMid, nil, function() actions.adjustTextScale(-0.5) end)
     addButton("cfgTextUp", bx + half + 1, by + 5, bw - half - 1, 4, "TXT +", C.btnAction, nil, function() actions.adjustTextScale(0.5) end)
-    addButton("cfgSave", bx, by + 10, bw, 4, "SAVE CONFIG", C.ok, nil, actions.saveSetupConfig)
-    addButton("cfgReload", bx, by + 15, bw, 4, "RELOAD", C.btnWarn, nil, actions.reloadSetupConfig)
-    addButton("monitor", bx, by + 20, bw, 4, "MONITOR", C.btnWarn, nil, actions.startMonitorSelection)
+
+    local gap = 1
+    local third = math.max(6, math.floor((bw - (gap * 2)) / 3))
+    local outY = by + 10
+    addButton("cfgOutTerm", bx, outY, third, 4, "TERM", outputMode == "terminal" and C.btnOn or C.panelMid, nil, function() actions.setDisplayOutput("terminal") end)
+    addButton("cfgOutMon", bx + third + gap, outY, third, 4, "MON", outputMode == "monitor" and C.btnOn or C.panelMid, nil, function() actions.setDisplayOutput("monitor") end)
+    addButton("cfgOutBoth", bx + ((third + gap) * 2), outY, bw - ((third + gap) * 2), 4, "BOTH", outputMode == "both" and C.btnOn or C.panelMid, nil, function() actions.setDisplayOutput("both") end)
+
+    addButton("cfgSave", bx, by + 15, bw, 4, "SAVE CONFIG", C.ok, nil, actions.saveSetupConfig)
+    addButton("cfgReload", bx, by + 20, bw, 4, "RELOAD", C.btnWarn, nil, actions.reloadSetupConfig)
+    addButton("monitor", bx, by + 25, bw, 4, "MONITOR", C.btnWarn, nil, actions.startMonitorSelection)
   end
 
   local function buildSupervisorCoreButtons(ctrl, bx, by, bw, bh, bGap)

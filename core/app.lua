@@ -49,6 +49,7 @@ function M.run()
   local buttons = {}
   local touchHitboxes = { terminal = {}, monitor = {} }
   local pressedButtons = {}
+  local currentDrawSource = "terminal"
   local pressedEffectDuration = 0.18
 
   local HITBOX_DEFAULTS = runtime.hitboxDefaults
@@ -908,6 +909,7 @@ function M.run()
     merged.ui.preferredView = string.upper(tostring(merged.ui.preferredView or "SUP"))
     if merged.ui.preferredView == "CONFIG" then merged.ui.preferredView = "CFG" end
     merged.ui.scale = CoreConfig.sanitizeUiScale(merged.ui.scale, base.ui.scale or 1.0)
+    merged.ui.output = CoreConfig.sanitizeDisplayOutput(merged.ui.output, base.ui.output or "monitor")
     merged.monitor.scale = CoreConfig.sanitizeMonitorScale(merged.monitor.scale, base.monitor.scale or 0.5)
     return merged
   end
@@ -1258,8 +1260,11 @@ function M.run()
     applyConfigToRuntime(normalized)
     refreshSetupWorkingConfig(normalized)
     refreshSetupDeviceStatus()
+    setupMonitor()
     setup.saveStatus = "CONFIG SAVED"
     setup.lastMessage = "Configuration saved"
+    state.lastAction = "Config saved"
+    setup.dirty = false
     pushEvent("Config saved")
     return true
   end
@@ -1303,14 +1308,17 @@ function M.run()
       applyConfigToRuntime(config)
       refreshSetupWorkingConfig(config)
       refreshSetupDeviceStatus()
+      setupMonitor()
       setup.saveStatus = "CONFIG RELOADED"
       setup.lastMessage = "Installer complete"
+      state.lastAction = "Installer complete"
       pushEvent("Installer complete")
       return true
     end
 
     setup.saveStatus = "INSTALL DONE"
     setup.lastMessage = "Installer complete, reload failed: " .. tostring(configErr or "Unknown")
+    state.lastAction = "Installer done"
     pushEvent("Installer complete")
     return false
   end
@@ -1899,6 +1907,25 @@ function M.run()
     IoMonitor.setupMonitor(nativeTerm, hw, CFG, C)
   end
 
+  local function resolveDisplayOutputMode()
+    local mode = CoreConfig.sanitizeDisplayOutput(CFG.displayOutput, "monitor")
+    if mode ~= "terminal" and not hw.monitor then
+      return "terminal"
+    end
+    return mode
+  end
+
+  local function isSourceEnabled(source)
+    local mode = resolveDisplayOutputMode()
+    if source == "terminal" then
+      return mode == "terminal" or mode == "both"
+    end
+    if source == "monitor" then
+      return mode == "monitor" or mode == "both"
+    end
+    return false
+  end
+
   local function restoreTerm()
     term.redirect(nativeTerm)
     term.setCursorBlink(false)
@@ -2326,48 +2353,14 @@ function M.run()
     if type(working.monitor) ~= "table" then working.monitor = {} end
 
     CFG.uiScale = CoreConfig.sanitizeUiScale(working.ui.scale, CFG.uiScale or 1.0)
+    CFG.displayOutput = CoreConfig.sanitizeDisplayOutput(working.ui.output, CFG.displayOutput or "monitor")
     CFG.monitorScale = CoreConfig.sanitizeMonitorScale(working.monitor.scale, CFG.monitorScale or 0.5)
     working.ui.scale = CFG.uiScale
+    working.ui.output = CFG.displayOutput
     working.monitor.scale = CFG.monitorScale
 
     IoMonitor.setupMonitor(nativeTerm, hw, CFG, C)
     state.uiDrawn = false
-  end
-
-  local function saveSetupConfig()
-    local working = ensureSetupWorking()
-    if type(working) ~= "table" then return false end
-
-    local normalized = normalizeSetupConfig(working)
-    local valid, errors = CoreConfig.validateConfig(normalized)
-    if not valid then
-      state.setup.saveStatus = "CONFIG INVALID"
-      state.setup.lastMessage = table.concat(errors or { "Invalid configuration" }, "; ")
-      state.lastAction = "Config save failed"
-      pushEvent("Config invalid")
-      return false
-    end
-
-    local ok, err = CoreConfig.writeFusionConfig(fs, CONFIG_FILE, normalized)
-    if not ok then
-      state.setup.saveStatus = "SAVE FAILED"
-      state.setup.lastMessage = tostring(err or "Write failed")
-      state.lastAction = "Config save failed"
-      pushEvent("Config save failed")
-      return false
-    end
-
-    refreshSetupWorkingConfig(normalized)
-    applyConfigToRuntime(normalized)
-    refreshSetupDeviceStatus()
-    setupMonitor()
-
-    state.setup.saveStatus = "CONFIG SAVED"
-    state.setup.lastMessage = "Configuration saved"
-    state.setup.dirty = false
-    state.lastAction = "Config saved"
-    pushEvent("Config saved")
-    return true
   end
 
   local function reloadSetupConfig()
@@ -2428,130 +2421,18 @@ function M.run()
     pushEvent(state.lastAction)
   end
 
-  local function runSetupTest(target)
-    local w = ensureSetupWorking()
-    refreshSetupDeviceStatus()
-    local ds = state.setup.deviceStatus or {}
-    local lookup = {
-      ["MONITOR"] = ds.monitor,
-      ["LAS"] = ds.relayLaser,
-      ["T"] = ds.relayTritium,
-      ["D"] = ds.relayDeuterium,
-      ["READER T"] = ds.readerTritium,
-      ["READER D"] = ds.readerDeuterium,
-      ["INDUCTION"] = ds.induction,
-      ["LASER"] = ds.laser,
-    }
-    local status = lookup[target] or "UNKNOWN"
-    local ok = status == "OK"
-    state.setup.lastTestResult = tostring(target or "TEST") .. ": " .. status
-    state.setup.lastMessage = ok and "Test successful" or ("Test failed: " .. status)
-    state.lastAction = "Setup test " .. tostring(target or "")
-    if type(w) == "table" and type(w.monitor) == "table" then
-      w.monitor.ok = (ds.monitor == "OK")
-    end
-    pushEvent(state.setup.lastTestResult)
-    return ok
-  end
-
-  local function rebindRolePath(role)
-    local map = {
-      monitor = { "monitor", "name" },
-      reactorController = { "devices", "reactorController" },
-      logicAdapter = { "devices", "logicAdapter" },
-      laser = { "devices", "laser" },
-      induction = { "devices", "induction" },
-      relayLaser = { "relays", "laser", "name" },
-      relayTritium = { "relays", "tritium", "name" },
-      relayDeuterium = { "relays", "deuterium", "name" },
-      readerTritium = { "readers", "tritium" },
-      readerDeuterium = { "readers", "deuterium" },
-      readerAux = { "readers", "aux" },
-    }
-    return map[role]
-  end
-
-  local function setupCandidates(role)
-    local all = peripheral.getNames() or {}
-    table.sort(all)
-
-    local candidates = {}
-    for _, name in ipairs(all) do
-      local ptype = getTypeOf(name)
-      if role == "monitor" then
-        if ptype == "monitor" then table.insert(candidates, name) end
-      elseif role == "relayLaser" or role == "relayTritium" or role == "relayDeuterium" then
-        if ptype == "redstone_relay" or contains(name, "relay") then table.insert(candidates, name) end
-      elseif role == "readerTritium" or role == "readerDeuterium" or role == "readerAux" then
-        if ptype == "block_reader" or contains(name, "block_reader") then table.insert(candidates, name) end
-      else
-        table.insert(candidates, name)
-      end
-    end
-
-    return candidates
-  end
-
-  local function setupStartRebind(role)
-    ensureSetupWorking()
-    state.setup.rebindRole = role
-    state.setup.rebindCandidates = setupCandidates(role)
-    state.setup.rebindCursor = 1
-    state.setup.lastMessage = "Select device for " .. tostring(role)
-    state.lastAction = "Rebind " .. tostring(role)
-    pushEvent("Rebind " .. tostring(role))
-  end
-
-  local function setupApplySelection(index)
-    local role = state.setup.rebindRole
-    local candidates = state.setup.rebindCandidates or {}
-    local selected = candidates[index]
-    if not role or not selected then return end
-
+  local function setDisplayOutput(mode)
     local working = ensureSetupWorking()
-    local path = rebindRolePath(role)
-    if type(path) ~= "table" then return end
+    local uiCfg = working.ui or {}
+    working.ui = uiCfg
 
-    local cursor = working
-    for i = 1, #path - 1 do
-      local key = path[i]
-      if type(cursor[key]) ~= "table" then cursor[key] = {} end
-      cursor = cursor[key]
-    end
-    cursor[path[#path]] = selected
-
+    local nextMode = CoreConfig.sanitizeDisplayOutput(mode, CFG.displayOutput or "monitor")
+    uiCfg.output = nextMode
     state.setup.dirty = true
-    state.setup.rebindRole = nil
-    state.setup.rebindCandidates = {}
-    state.setup.lastMessage = role .. " -> " .. selected
-    state.lastAction = "Rebind applied"
-    refreshSetupDeviceStatus()
-    pushEvent("Rebind " .. tostring(role))
-  end
-
-  local function runInstallerFromSetup()
-    if not fs.exists("install.lua") then
-      state.setup.lastMessage = "install.lua missing"
-      state.lastAction = "Installer missing"
-      pushEvent("Installer missing")
-      return false
-    end
-
-    restoreTerm()
-    local ok, err = pcall(shell.run, "install.lua")
-    if not ok then
-      state.setup.lastMessage = "Installer failed: " .. tostring(err)
-      state.lastAction = "Installer failed"
-      pushEvent("Installer failed")
-      return false
-    end
-
-    reloadSetupConfig()
-    refreshAll()
-    state.setup.lastMessage = "Installer executed"
-    state.lastAction = "Installer run"
-    pushEvent("Installer run")
-    return true
+    state.setup.lastMessage = "Display output: " .. string.upper(nextMode)
+    state.lastAction = "Output " .. string.upper(nextMode)
+    applySetupScaleRuntime(working)
+    pushEvent(state.lastAction)
   end
 
   local function buildButtonActions()
@@ -2619,6 +2500,7 @@ function M.run()
       setupApplySelection = setupApplySelection,
       adjustDisplayScale = adjustDisplayScale,
       adjustTextScale = adjustTextScale,
+      setDisplayOutput = setDisplayOutput,
       saveSetupConfig = saveSetupConfig,
       reloadSetupConfig = reloadSetupConfig,
       runInstallerFromSetup = runInstallerFromSetup,
@@ -2661,7 +2543,7 @@ function M.run()
   end
 
   function getCurrentInputSource()
-    return term.current() == nativeTerm and "terminal" or "monitor"
+    return currentDrawSource
   end
 
   function drawButtons(source)
@@ -2673,6 +2555,9 @@ function M.run()
   end
 
   function handleClick(x, y, source)
+    if not isSourceEnabled(source) then
+      return false
+    end
     local bucket = getHitboxBucket(source)
     for i = #bucket, 1, -1 do
       local hit = bucket[i]
@@ -2935,43 +2820,65 @@ function M.run()
   end
 
   local function drawUI()
-    local tw, th = term.getSize()
-    local layout = computeLayout(tw, th)
+    local function drawSurface(source, surface)
+      term.redirect(surface)
+      currentDrawSource = source
+      clearHitboxes(source)
 
-    term.setBackgroundColor(C.bg)
-    term.setTextColor(C.text)
-    term.clear()
+      local tw, th = term.getSize()
+      local layout = computeLayout(tw, th)
 
-    if layout.tooSmall then
-      centerText(math.max(2, math.floor(th / 2) - 1), "Ecran trop petit", C.bad, C.bg)
-      centerText(math.max(3, math.floor(th / 2)), "Minimum recommande: " .. layout.minW .. "x" .. layout.minH, C.warn, C.bg)
-      return
+      term.setBackgroundColor(C.bg)
+      term.setTextColor(C.text)
+      term.clear()
+
+      if layout.tooSmall then
+        centerText(math.max(2, math.floor(th / 2) - 1), "Ecran trop petit", C.bad, C.bg)
+        centerText(math.max(3, math.floor(th / 2)), "Minimum recommande: " .. layout.minW .. "x" .. layout.minH, C.warn, C.bg)
+        return
+      end
+
+      if state.choosingMonitor then
+        drawMonitorSelection(layout)
+        return
+      end
+
+      drawHeader("FUSION SUPERVISOR", state.status)
+
+      if state.currentView == "diagnostic" then
+        drawDiagnosticView(layout)
+      elseif state.currentView == "manual" then
+        drawManualView(layout)
+      elseif state.currentView == "induction" then
+        drawInductionView(layout)
+      elseif state.currentView == "update" then
+        drawUpdateView(layout)
+      elseif state.currentView == "config" then
+        drawConfigView(layout)
+      elseif state.currentView == "setup" then
+        drawSetupView(layout)
+      else
+        drawSupervisionView(layout)
+      end
+
+      drawFooter(layout)
     end
 
-    if state.choosingMonitor then
-      drawMonitorSelection(layout)
-      return
-    end
-
-    drawHeader("FUSION SUPERVISOR", state.status)
-
-    if state.currentView == "diagnostic" then
-      drawDiagnosticView(layout)
-    elseif state.currentView == "manual" then
-      drawManualView(layout)
-    elseif state.currentView == "induction" then
-      drawInductionView(layout)
-    elseif state.currentView == "update" then
-      drawUpdateView(layout)
-    elseif state.currentView == "config" then
-      drawConfigView(layout)
-    elseif state.currentView == "setup" then
-      drawSetupView(layout)
+    local mode = resolveDisplayOutputMode()
+    if mode == "monitor" and hw.monitor then
+      drawSurface("monitor", hw.monitor)
+      clearHitboxes("terminal")
+    elseif mode == "both" and hw.monitor then
+      drawSurface("terminal", nativeTerm)
+      drawSurface("monitor", hw.monitor)
     else
-      drawSupervisionView(layout)
+      drawSurface("terminal", nativeTerm)
+      clearHitboxes("monitor")
     end
 
-    drawFooter(layout)
+    currentDrawSource = "terminal"
+    term.redirect(nativeTerm)
+    term.setCursorBlink(false)
     state.uiDrawn = true
   end
 

@@ -236,26 +236,36 @@ function M.drawConfigView(ctx, layout)
   local working = setup.working
   local uiScale = tonumber(working.ui and working.ui.scale) or 1.0
   local textScale = tonumber(working.monitor and working.monitor.scale) or 0.5
+  local outputMode = string.lower(tostring(working.ui and working.ui.output or "monitor"))
   local appliedUiScale = tonumber(ctx.CFG.uiScale) or uiScale
   local appliedTextScale = tonumber(ctx.CFG.monitorScale) or textScale
+  local appliedOutputMode = string.lower(tostring(ctx.CFG.displayOutput or outputMode))
 
-  ctx.drawBox(x - 1, y, w + 2, 8, "CURRENT VALUES", C.borderDim)
+  local function outputLabel(mode)
+    if mode == "terminal" then return "TERMINAL" end
+    if mode == "both" then return "TERMINAL + MON" end
+    return "MONITOR"
+  end
+
+  ctx.drawBox(x - 1, y, w + 2, 10, "CURRENT VALUES", C.borderDim)
   ctx.drawKeyValue(x, y + 1, "UI Scale", string.format("%.1fx", uiScale), C.dim, C.info, w)
   ctx.drawKeyValue(x, y + 2, "Text Scale", string.format("%.1fx", textScale), C.dim, C.info, w)
-  ctx.drawKeyValue(x, y + 3, "Applied UI", string.format("%.1fx", appliedUiScale), C.dim, C.ok, w)
-  ctx.drawKeyValue(x, y + 4, "Applied TXT", string.format("%.1fx", appliedTextScale), C.dim, C.ok, w)
-  ctx.drawKeyValue(x, y + 5, "State", setup.dirty and "MODIFIED" or "SAVED", C.dim, setup.dirty and C.warn or C.ok, w)
+  ctx.drawKeyValue(x, y + 3, "Output", outputLabel(outputMode), C.dim, C.info, w)
+  ctx.drawKeyValue(x, y + 4, "Applied UI", string.format("%.1fx", appliedUiScale), C.dim, C.ok, w)
+  ctx.drawKeyValue(x, y + 5, "Applied TXT", string.format("%.1fx", appliedTextScale), C.dim, C.ok, w)
+  ctx.drawKeyValue(x, y + 6, "Applied OUT", outputLabel(appliedOutputMode), C.dim, C.ok, w)
+  ctx.drawKeyValue(x, y + 7, "State", setup.dirty and "MODIFIED" or "SAVED", C.dim, setup.dirty and C.warn or C.ok, w)
 
-  ctx.drawBox(x - 1, y + 9, w + 2, 7, "TIPS", C.borderDim)
-  ctx.writeAt(x, y + 10, ctx.shortText("- UI +/- : scale layout", w), C.dim, C.panelDark)
-  ctx.writeAt(x, y + 11, ctx.shortText("- TXT +/- : monitor text", w), C.dim, C.panelDark)
-  ctx.writeAt(x, y + 12, ctx.shortText("- SAVE pour persister", w), C.dim, C.panelDark)
-  ctx.writeAt(x, y + 13, ctx.shortText("- RELOAD depuis fichier", w), C.dim, C.panelDark)
+  ctx.drawBox(x - 1, y + 11, w + 2, 7, "TIPS", C.borderDim)
+  ctx.writeAt(x, y + 12, ctx.shortText("- UI +/- : scale layout", w), C.dim, C.panelDark)
+  ctx.writeAt(x, y + 13, ctx.shortText("- TXT +/- : monitor text", w), C.dim, C.panelDark)
+  ctx.writeAt(x, y + 14, ctx.shortText("- TERM/MON/BOTH : sortie", w), C.dim, C.panelDark)
+  ctx.writeAt(x, y + 15, ctx.shortText("- SAVE / RELOAD config", w), C.dim, C.panelDark)
 
   local msg = tostring(setup.lastMessage or "Ready")
-  ctx.drawBox(x - 1, y + 17, w + 2, 5, "MESSAGE", C.borderDim)
-  ctx.writeAt(x, y + 18, ctx.shortText(msg, w), C.info, C.panelDark)
-  ctx.writeAt(x, y + 19, ctx.shortText("Save: " .. tostring(setup.saveStatus or "N/A"), w), C.dim, C.panelDark)
+  ctx.drawBox(x - 1, y + 19, w + 2, 5, "MESSAGE", C.borderDim)
+  ctx.writeAt(x, y + 20, ctx.shortText(msg, w), C.info, C.panelDark)
+  ctx.writeAt(x, y + 21, ctx.shortText("Save: " .. tostring(setup.saveStatus or "N/A"), w), C.dim, C.panelDark)
 
   ctx.drawControlPanel(controlPanel, layout)
 end
@@ -290,7 +300,7 @@ function M.drawSetupView(ctx, layout)
   ctx.drawKeyValue(lx, ly + 10, "Reader T", setup.working.readers.tritium, C.dim, setup.deviceStatus.readerTritium == "OK" and C.ok or C.warn, left.w - 6)
   ctx.drawKeyValue(lx, ly + 11, "Reader D", setup.working.readers.deuterium, C.dim, setup.deviceStatus.readerDeuterium == "OK" and C.ok or C.warn, left.w - 6)
   ctx.drawKeyValue(lx, ly + 12, "Reader Aux", setup.working.readers.aux, C.dim, setup.deviceStatus.readerAux == "OK" and C.ok or C.warn, left.w - 6)
-  ctx.drawKeyValue(lx, ly + 13, "View", setup.working.ui.preferredView, C.dim, C.info, left.w - 6)
+  ctx.drawKeyValue(lx, ly + 13, "View/Out", setup.working.ui.preferredView .. "/" .. tostring(setup.working.ui.output or "monitor"), C.dim, C.info, left.w - 6)
   ctx.drawKeyValue(lx, ly + 14, "Text Scale", tostring(setup.working.monitor.scale), C.dim, C.info, left.w - 6)
   ctx.drawKeyValue(lx, ly + 15, "UI Scale", tostring(setup.working.ui.scale), C.dim, C.info, left.w - 6)
 

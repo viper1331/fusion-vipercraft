@@ -9,6 +9,7 @@ function M.new()
     preferredInduction = "inductionPort_1",
 
     uiScale = 1.0,
+    displayOutput = "monitor",
     monitorScale = 0.5,
     refreshDelay = 0.20,
 

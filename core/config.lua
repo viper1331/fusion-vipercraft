@@ -20,6 +20,12 @@ local VALID_SIDES = {
   back = true,
 }
 
+local VALID_OUTPUTS = {
+  terminal = true,
+  monitor = true,
+  both = true,
+}
+
 function M.trimText(txt)
   txt = tostring(txt or "")
   return (txt:gsub("^%s+", ""):gsub("%s+$", ""))
@@ -64,6 +70,7 @@ function M.defaultFusionConfig(CFG, updateEnabled)
     ui = {
       preferredView = "SUP",
       scale = CFG.uiScale or 1.0,
+      output = CFG.displayOutput or "monitor",
       touchEnabled = true,
       refreshDelay = CFG.refreshDelay,
     },
@@ -123,6 +130,7 @@ function M.applyConfigToRuntime(config, CFG)
   CFG.preferredMonitor = config.monitor and config.monitor.name or CFG.preferredMonitor
   CFG.monitorScale = M.sanitizeMonitorScale(config.monitor and config.monitor.scale, CFG.monitorScale)
   CFG.uiScale = M.sanitizeUiScale(config.ui and config.ui.scale, CFG.uiScale or 1.0)
+  CFG.displayOutput = M.sanitizeDisplayOutput(config.ui and config.ui.output, CFG.displayOutput or "monitor")
   CFG.refreshDelay = M.sanitizeRefreshDelay(config.ui and config.ui.refreshDelay, CFG.refreshDelay)
 
   CFG.preferredReactor = config.devices and config.devices.reactorController or CFG.preferredReactor
@@ -156,6 +164,12 @@ function M.sanitizeUiScale(value, fallback)
   if numeric < 0.5 then return 0.5 end
   if numeric > 2 then return 2 end
   return math.floor(numeric * 10 + 0.5) / 10
+end
+
+function M.sanitizeDisplayOutput(value, fallback)
+  local mode = string.lower(tostring(value or ""))
+  if VALID_OUTPUTS[mode] then return mode end
+  return fallback
 end
 
 function M.sanitizeRefreshDelay(value, fallback)
@@ -203,6 +217,11 @@ function M.validateConfig(config)
 
   if tonumber(config.ui and config.ui.scale) == nil then
     table.insert(errors, "ui.scale is invalid")
+  end
+
+  local outputMode = config.ui and config.ui.output
+  if type(outputMode) ~= "string" or not VALID_OUTPUTS[string.lower(outputMode)] then
+    table.insert(errors, "ui.output is invalid")
   end
 
   local relaySides = {
