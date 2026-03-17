@@ -1,5 +1,5 @@
 {
-  "version": "2.4.7",
+  "version": "2.4.8",
   "files": [
     "fusion.lua",
     "fusion.version",
@@ -23,7 +23,6 @@
     "io/readers.lua",
     "io/relays.lua",
     "ui/components.lua",
-    "ui/render.lua",
     "ui/theme.lua",
     "ui/views.lua"
   ],

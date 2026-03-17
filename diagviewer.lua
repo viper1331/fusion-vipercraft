@@ -332,15 +332,6 @@ selectMonitorByName = function(name, silent)
   return false
 end
 
-local function selectMonitorByIndex(index)
-  local monitors = getMonitors()
-  if #monitors == 0 then selectedMonitorIndex = 0; selectedMonitorName = nil; setStatus("Aucun moniteur detecte", 2); return false end
-  if type(index) ~= "number" then return false end
-  local idx = math.floor(index)
-  if idx < 1 or idx > #monitors then return false end
-  return selectMonitorByName(monitors[idx])
-end
-
 local function refreshSelectedMonitor()
   local monitors = getMonitors()
   if #monitors == 0 then
@@ -444,17 +435,6 @@ end
 
 local function safeGetMethods(name)
   return getPeripheralMethods(name)
-end
-
-local function safeInvokeMethod(target, methodName, ...)
-  if not target or type(target[methodName]) ~= "function" then
-    return false, "method unavailable"
-  end
-
-  local args = { ... }
-  return safeCall(function()
-    return target[methodName](table.unpack(args))
-  end)
 end
 
 local DANGEROUS_PREFIXES = {
@@ -1003,17 +983,25 @@ local function addHitbox(source, id, x1, y1, x2, y2, action)
   if type(action) ~= "function" then return end
   local bx1, by1 = math.floor(math.min(x1, x2)), math.floor(math.min(y1, y2))
   local bx2, by2 = math.floor(math.max(x1, x2)), math.floor(math.max(y1, y2))
-  table.insert(getHitboxBucket(source), { id = id, x1 = bx1, y1 = by1, x2 = bx2, y2 = by2, action = action })
+  local area = math.max(1, (bx2 - bx1 + 1) * (by2 - by1 + 1))
+  table.insert(getHitboxBucket(source), { id = id, x1 = bx1, y1 = by1, x2 = bx2, y2 = by2, area = area, action = action })
 end
 
 local function handleClick(x, y, source)
   local bucket = getHitboxBucket(source)
+  local chosen = nil
   for i = #bucket, 1, -1 do
     local hb = bucket[i]
     if x >= hb.x1 and x <= hb.x2 and y >= hb.y1 and y <= hb.y2 then
-      hb.action(source, x, y, hb.id)
-      return true
+      -- En chevauchement, on privilegie la plus petite zone cliquable.
+      if not chosen or hb.area < chosen.area then
+        chosen = hb
+      end
     end
+  end
+  if chosen then
+    chosen.action(source, x, y, chosen.id)
+    return true
   end
   return false
 end

@@ -24,22 +24,6 @@ function M.build(api)
 
   local runtime = {}
 
-  local function detectReactorFormed()
-    if hw.logic then
-      local ok, formed = tryMethods(hw.logic, { "isFormed", "getFormed" })
-      if ok then return formed == true end
-    end
-
-    if hw.reactor then
-      local okPlasma, plasma = tryMethods(hw.reactor, { "getPlasmaTemperature", "getPlasmaTemp", "getPlasmaHeat" })
-      local okIgn, ign = tryMethods(hw.reactor, { "isIgnited", "getIgnitionStatus" })
-      if okPlasma and plasma ~= nil then return true end
-      if okIgn and ign ~= nil then return true end
-    end
-
-    return false
-  end
-
   local function readLaser()
     state.laserPresent = hw.laser ~= nil
     if not hw.laser then
@@ -59,9 +43,22 @@ function M.build(api)
 
   local function readReactor()
     state.reactorPresent = hw.reactor ~= nil or hw.logic ~= nil
-    state.reactorFormed = detectReactorFormed()
+    -- Reset explicite: evite les valeurs stale si un appel peripherique echoue.
+    state.ignition = false
+    state.plasmaTemp = 0
+    state.ignitionTemp = 0
+    state.caseTemp = 0
+
+    local formed = false
+    local formedFromLogic = false
 
     if hw.logic then
+      local okFormed, logicFormed = tryMethods(hw.logic, { "isFormed", "getFormed" })
+      if okFormed then
+        formed = logicFormed == true
+        formedFromLogic = true
+      end
+
       local okIgn, ign = tryMethods(hw.logic, { "isIgnited" })
       if okIgn then state.ignition = (ign == true) end
 
@@ -76,12 +73,16 @@ function M.build(api)
 
       local okCase, caseTemp = tryMethods(hw.logic, { "getCaseTemperature", "getCasingTemperature" })
       if okCase then state.caseTemp = toNumber(caseTemp, 0) end
+
+      if not formedFromLogic then
+        formed = state.ignition or state.plasmaTemp > 0
+      end
     elseif hw.reactor then
       local okIgn, ign = tryMethods(hw.reactor, { "isIgnited", "getIgnitionStatus" })
       state.ignition = okIgn and (ign == true or ign == "true") or false
 
-      local _, plasma = tryMethods(hw.reactor, { "getPlasmaTemperature", "getPlasmaTemp", "getPlasmaHeat" })
-      state.plasmaTemp = toNumber(plasma, 0)
+      local okPlasma, plasma = tryMethods(hw.reactor, { "getPlasmaTemperature", "getPlasmaTemp", "getPlasmaHeat" })
+      state.plasmaTemp = okPlasma and toNumber(plasma, 0) or 0
 
       local _, ignTemp = tryMethods(hw.reactor, { "getIgnitionTemperature", "getIgnitionTemp" })
       state.ignitionTemp = toNumber(ignTemp, 0)
@@ -89,12 +90,12 @@ function M.build(api)
 
       local _, caseTemp = tryMethods(hw.reactor, { "getCaseTemperature", "getCasingTemperature" })
       state.caseTemp = toNumber(caseTemp, 0)
+      formed = state.ignition or state.plasmaTemp > 0
     else
-      state.ignition = false
-      state.plasmaTemp = 0
-      state.ignitionTemp = 0
-      state.caseTemp = 0
+      formed = false
     end
+
+    state.reactorFormed = formed
 
     if state.ignition then
       state.ignitionSequencePending = false

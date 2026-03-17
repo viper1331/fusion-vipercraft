@@ -12,7 +12,6 @@ local M = {}
 function M.run()
   local Theme = require("ui.theme")
   local UIComponents = require("ui.components")
-  local UIRender = require("ui.render")
   local UIViews = require("ui.views")
   local CoreConfig = require("core.config")
   local CoreUpdate = require("core.update")
@@ -176,10 +175,6 @@ function M.run()
     end
   end
 
-  function ui.box(x, y, w, h, bg)
-    ui.fill(x, y, w, h, bg or C.panelDark)
-  end
-
   function ui.frame(x, y, w, h, border, inner)
     if w < 2 or h < 2 then return end
     local stroke = border or C.border
@@ -203,10 +198,6 @@ function M.run()
       ui.hline(x + 1, y, math.max(1, w - 2), skin.header)
       ui.write(x + 2, y, uiShortText("[ " .. headerTitle .. " ]", w - 3), skin.text, skin.header)
     end
-  end
-
-  function ui.label(x, y, text, tc, bc)
-    ui.write(x, y, text, tc or C.text, bc)
   end
 
   function ui.centerText(y, text, tc, bc)
@@ -322,10 +313,6 @@ function M.run()
     return "MAX"
   end
 
-  local function fmtFuelAmount(n)
-    return formatFuelLevel(n)
-  end
-
   local function safePeripheral(name)
     if name and peripheral.isPresent(name) then
       return peripheral.wrap(name)
@@ -363,11 +350,6 @@ function M.run()
     ui.fill(x, y, w, h, bg or C.bg)
   end
 
-  local function fillLine(y, bg)
-    local w = term.getSize()
-    ui.hline(1, y, w, bg)
-  end
-
   local function shortText(txt, maxLen)
     txt = tostring(txt or "")
     if #txt <= maxLen then return txt end
@@ -397,11 +379,6 @@ function M.run()
     end
   end
 
-  local function drawPanelSprite(x, y, w, h, title, style)
-    ui.panel(x, y, w, h, title, style or styles.panel.default)
-  end
-
-
   local runtimeAlerts = CoreAlerts.build({
     state = state,
     hw = hw,
@@ -417,7 +394,6 @@ function M.run()
   local getRuntimeFuelMode = runtimeAlerts.getRuntimeFuelMode
   local isRuntimeFuelOk = runtimeAlerts.isRuntimeFuelOk
   local computeSafetyWarnings = runtimeAlerts.computeSafetyWarnings
-  local collectSafetyWarnings = runtimeAlerts.computeSafetyWarnings
 
   local function drawHeaderBarSprite(title, status)
     local function drawHeaderSegment(x, y, w, label, value, tone)
@@ -801,32 +777,6 @@ function M.run()
     local stateTone = tone or statusColor(value)
     writeAt(x, y, labelText, C.dim, C.panelDark)
     writeAt(x + 10, y, valueText, C.text, stateTone)
-  end
-
-  local function drawBar(x, y, w, pct, color, label)
-    pct = clamp(toNumber(pct, 0), 0, 100)
-    if w < 4 then return end
-    local fill = math.floor((w * pct) / 100)
-    writeAt(x, y, string.rep(" ", w), C.text, C.panel)
-    if fill > 0 then
-      writeAt(x, y, string.rep(" ", fill), C.text, color or C.ok)
-    end
-    if label and #label > 0 and w > 6 then
-      local txt = shortText(label, w - 2)
-      local lx = x + math.floor((w - #txt) / 2)
-      writeAt(lx, y, txt, C.text, C.panelDark)
-    end
-  end
-
-  local function drawBars(panel, x, y)
-    local bw = math.max(10, panel.w - 6)
-    drawBar(x, y, bw, state.laserPct, C.warn, string.format("LASER %3.0f%%", state.laserPct))
-    drawBar(x, y + 2, bw, state.energyKnown and state.energyPct or 0, C.energy, state.energyKnown and string.format("GRID %3.0f%%", state.energyPct) or "GRID N/A")
-  end
-
-  local function drawKV(x, y, key, value, keyColor, valueColor)
-    writeAt(x, y, shortText(key, 11), keyColor or C.dim, C.panelDark)
-    writeAt(x + 11, y, shortText(value, 10), valueColor or C.text, C.panelDark)
   end
 
   local function loadSavedMonitorName()
@@ -1328,7 +1278,7 @@ function M.run()
   end
 
   local function validateLuaScript(text)
-    return CoreUpdate.validateLuaScript(text, trimText, contains)
+    return CoreUpdate.validateLuaScript(text, trimText)
   end
 
   local function writeTextFile(path, content)
@@ -1923,26 +1873,9 @@ function M.run()
     IoRelays.resolveKnownRelays(CFG)
   end
 
-  local function resolveKnownReaders()
-    IoReaders.resolveKnownReaders(hw, CFG.knownReaders)
-  end
-
-  local function resolveKnownTopology()
-    resolveKnownRelays()
-    resolveKnownReaders()
-  end
-
-  local function classifyBlockReaderData(data)
-    return IoReaders.classifyBlockReaderData(data)
-  end
-
   local function scanBlockReaders()
     resolveKnownRelays()
     IoReaders.scanBlockReaders(hw, CFG.knownReaders)
-  end
-
-  local function extractChemicalData(raw)
-    return IoReaders.extractChemicalData(raw, toNumber)
   end
 
   local function readChemicalFromReader(entry)
@@ -2022,6 +1955,7 @@ function M.run()
     local by1 = math.floor(math.min(y1, y2))
     local bx2 = math.floor(math.max(x1, x2))
     local by2 = math.floor(math.max(y1, y2))
+    local area = math.max(1, (bx2 - bx1 + 1) * (by2 - by1 + 1))
     local bucket = getHitboxBucket(source)
     bucket[#bucket + 1] = {
       id = id,
@@ -2029,6 +1963,7 @@ function M.run()
       y1 = by1,
       x2 = bx2,
       y2 = by2,
+      area = area,
       action = action,
     }
   end
@@ -2215,21 +2150,6 @@ function M.run()
       return drawActionButton(button, isPressed)
     end
     return drawPrimaryButton(button, isPressed)
-  end
-
-  function drawStatusBarSprite(x, y, w, title, value, tone)
-    ui.hline(x, y, w, UI_PALETTE.bgElevated)
-    ui.write(x + 1, y, shortText(title .. ":", math.max(1, w - 2)), C.dim, UI_PALETTE.bgElevated)
-    local txt = shortText(value, math.max(1, w - #title - 4))
-    ui.write(x + math.max(2, w - #txt - 1), y, txt, tone or C.info, UI_PALETTE.bgElevated)
-  end
-
-  function drawRaisedButton(button)
-    return drawButtonActiveSprite(button)
-  end
-
-  function drawPressedButton(button)
-    return drawButtonPressedSprite(button)
   end
 
   function drawButton(source, button)
@@ -2559,9 +2479,10 @@ function M.run()
     for i = #bucket, 1, -1 do
       local hit = bucket[i]
       if isInsideBox(x, y, hit) then
-        local area = math.max(1, (hit.x2 - hit.x1 + 1) * (hit.y2 - hit.y1 + 1))
-        if not chosen or area < chosen.area then
-          chosen = { hit = hit, area = area }
+        -- En cas de chevauchement, on retient la zone la plus petite
+        -- pour privilegier le bouton le plus precis.
+        if not chosen or hit.area < chosen.area then
+          chosen = { hit = hit, area = hit.area }
         end
       end
     end
@@ -2596,8 +2517,16 @@ function M.run()
     return CoreInduction.getFillRatio(state)
   end
 
+  local cachedUIViewContext = nil
+
   local function buildUIViewContext()
-    return UIViews.buildContext({
+    -- Contexte UI memoise pour eviter de reconstruire la meme table
+    -- a chaque sous-vue pendant un frame.
+    if cachedUIViewContext then
+      return cachedUIViewContext
+    end
+
+    cachedUIViewContext = UIViews.buildContext({
       C = C,
       state = state,
       hw = hw,
@@ -2633,6 +2562,7 @@ function M.run()
       rollbackTargetList = rollbackTargetList,
       getSetupStatusRows = getSetupStatusRows,
     })
+    return cachedUIViewContext
   end
 
   function drawMonitorSelection(layout)

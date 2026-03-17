@@ -71,7 +71,7 @@ function M.validateVersionString(version)
   return true, nil
 end
 
-function M.validateLuaScript(text, trimText, contains)
+function M.validateLuaScript(text, trimText)
   if type(text) ~= "string" then return false, "Not a string" end
   if #trimText(text) < 16 then return false, "Downloaded script is too short" end
   if string.byte(text, 1) == 27 then return false, "Binary Lua chunks are not allowed" end
