@@ -37,11 +37,22 @@ function M.httpGetText(httpApi, trimText, updateState, url)
     return false, nil, "HTTP request failed"
   end
 
+  local responseCode = nil
+  if type(response.getResponseCode) == "function" then
+    local codeOk, code = pcall(response.getResponseCode)
+    if codeOk then responseCode = tonumber(code) end
+  end
+
   local readOk, body = pcall(response.readAll)
   pcall(response.close)
   if not readOk then
     updateState.httpStatus = "FAIL"
     return false, nil, "Unable to read response"
+  end
+
+  if type(responseCode) == "number" and responseCode >= 400 then
+    updateState.httpStatus = "FAIL"
+    return false, nil, "HTTP " .. tostring(responseCode)
   end
 
   if type(body) ~= "string" or #trimText(body) == 0 then
@@ -62,10 +73,17 @@ end
 
 function M.validateLuaScript(text, trimText, contains)
   if type(text) ~= "string" then return false, "Not a string" end
-  if #trimText(text) < 32 then return false, "Downloaded script is too short" end
-  if not contains(text, "local CFG") and not contains(text, "state") then
-    return false, "Invalid Lua signature"
+  if #trimText(text) < 16 then return false, "Downloaded script is too short" end
+  if string.byte(text, 1) == 27 then return false, "Binary Lua chunks are not allowed" end
+
+  local loader = load or loadstring
+  if type(loader) == "function" then
+    local compiled, err = loader(text, "downloaded-update.lua")
+    if not compiled then
+      return false, "Lua syntax error: " .. tostring(err)
+    end
   end
+
   return true, nil
 end
 
