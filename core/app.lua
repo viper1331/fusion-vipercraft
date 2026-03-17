@@ -518,8 +518,8 @@ function M.run()
     end
 
     local mode = "compact"
-    if scaledTw >= 58 and scaledTh >= 19 then mode = "standard" end
-    if scaledTw >= 74 and scaledTh >= 26 then mode = "large" end
+    if scaledTw >= 52 and scaledTh >= 18 then mode = "standard" end
+    if scaledTw >= 68 and scaledTh >= 24 then mode = "large" end
 
     local top, bottom = 2, th - 1
     local gap = (mode == "compact") and 1 or 2
@@ -527,27 +527,27 @@ function M.run()
     local layout = { mode = mode, top = top, bottom = bottom, height = h, width = tw, tooSmall = false, uiScale = uiScale }
 
     if mode == "compact" then
-      local lw = clamp(math.floor(tw * 0.54), 18, tw - 14)
+      local lw = clamp(math.floor(tw * 0.56), 16, tw - 12)
       layout.left = { x = 1, y = top, w = lw, h = h }
       layout.right = { x = lw + 1 + gap, y = top, w = tw - lw - gap, h = h }
     elseif mode == "standard" then
-      local lw = clamp(math.floor(tw * 0.30), 20, 26)
-      local rw = clamp(math.floor(tw * 0.28), 18, 24)
+      local lw = clamp(math.floor(tw * 0.28), 18, 24)
+      local rw = clamp(math.floor(tw * 0.24), 16, 22)
       local cw = tw - lw - rw - (gap * 2)
-      if cw < 24 then
-        rw = math.max(17, rw - (24 - cw))
+      if cw < 22 then
+        rw = math.max(14, rw - (22 - cw))
         cw = tw - lw - rw - (gap * 2)
       end
       layout.left = { x = 1, y = top, w = lw, h = h }
       layout.center = { x = lw + 1 + gap, y = top, w = cw, h = h }
       layout.right = { x = lw + cw + 1 + (gap * 2), y = top, w = rw, h = h }
     else
-      local lw = clamp(math.floor(tw * 0.29), 22, 30)
-      local rw = clamp(math.floor(tw * 0.27), 21, 28)
+      local lw = clamp(math.floor(tw * 0.27), 20, 28)
+      local rw = clamp(math.floor(tw * 0.23), 17, 24)
       local cw = tw - lw - rw - (gap * 2)
-      if cw < 34 then
-        local delta = 34 - cw
-        rw = math.max(18, rw - delta)
+      if cw < 30 then
+        local delta = 30 - cw
+        rw = math.max(15, rw - delta)
         cw = tw - lw - rw - (gap * 2)
       end
       layout.left = { x = 1, y = top, w = lw, h = h }
@@ -718,6 +718,19 @@ function M.run()
     for i = -spineR, spineR do
       drawCell(gcx + i, gcy, spineColor)
       drawCell(gcx, gcy + i, spineColor)
+    end
+
+    local rfRunning = state.ignition and state.reactorFormed
+    local rfOffset = state.tick % 4
+    local rfBaseTone = rfRunning and colors.lime or C.energy
+    local rfPulseTone = rfRunning and C.ok or C.energy
+    for step = 2, spineR do
+      local leftPulse = ((step + rfOffset) % 3 == 0)
+      local rightPulse = ((step + rfOffset + 1) % 3 == 0)
+      local leftGlyph = rfRunning and (leftPulse and "<<" or "::") or "--"
+      local rightGlyph = rfRunning and (rightPulse and ">>" or "::") or "--"
+      drawCell(gcx - step, gcy, leftPulse and rfPulseTone or rfBaseTone, leftGlyph, C.text)
+      drawCell(gcx + step, gcy, rightPulse and rfPulseTone or rfBaseTone, rightGlyph, C.text)
     end
 
     drawCell(gcx, gcy, coreColor, state.ignition and (pulse and "**" or "##") or (state.ignitionSequencePending and (blink and "!!" or "::") or "[]"), C.text)
@@ -2066,8 +2079,8 @@ function M.run()
 
   function addButton(id, x, y, w, h, label, bg, fg, action, opts)
     opts = opts or {}
-    local width = math.max(4, w)
-    local height = math.max(3, h or (opts.big and 5 or 4))
+    local width = math.max(3, w)
+    local height = math.max(2, h or (opts.big and 3 or 2))
     local maxW, maxH = term.getSize()
     if y > maxH or x > maxW then return end
     if (y + height - 1) < 1 or (x + width - 1) < 1 then return end
@@ -2105,7 +2118,7 @@ function M.run()
       y = y,
       w = width,
       h = height,
-      label = shortText(tostring(label or ""), math.max(1, width - 2)),
+      label = shortText(tostring(label or ""), math.max(1, width)),
       bg = bg,
       fg = fg or C.btnText,
       action = action,
@@ -2144,21 +2157,14 @@ function M.run()
     local textOffset = 0
     local lx = button.x + math.max(1, math.floor((button.w - #button.label) / 2)) + textOffset
     local ly = button.y + math.floor((button.h - 1) / 2) + textOffset
-    lx = clamp(lx, button.x + 1, button.x + button.w - #button.label)
-    ly = clamp(ly, button.y + 1, button.y + button.h - 1)
+    lx = clamp(lx, button.x, button.x + button.w - #button.label)
+    ly = clamp(ly, button.y, button.y + button.h - 1)
     writeAt(lx, ly, button.label, textColor or button.fg, faceColor)
   end
 
   function drawButtonSprite(button, style)
     local skin = style or resolveButtonStyle(button)
     ui.fill(button.x, button.y, button.w, button.h, skin.face)
-    if button.w >= 3 and button.h >= 3 then
-      local stroke = skin.border or skin.rimLight or C.border
-      ui.hline(button.x, button.y, button.w, stroke)
-      ui.hline(button.x, button.y + button.h - 1, button.w, stroke)
-      ui.vline(button.x, button.y + 1, button.h - 2, stroke)
-      ui.vline(button.x + button.w - 1, button.y + 1, button.h - 2, stroke)
-    end
     return skin.face, skin.text
   end
 
@@ -2178,22 +2184,14 @@ function M.run()
 
   function drawTabSprite(x, y, w, h, label, isActive, isPressed)
     local face = isActive and C.info or C.panelMid
-    local stroke = isActive and C.border or C.borderDim
     if isPressed then
       face = C.panel
-      stroke = C.border
     end
 
     ui.fill(x, y, w, h, face)
-    ui.hline(x, y, w, stroke)
-    ui.hline(x, y + h - 1, w, stroke)
-    if w >= 3 then
-      ui.vline(x, y, h, stroke)
-      ui.vline(x + w - 1, y, h, stroke)
-    end
 
-    local txt = shortText(label, math.max(1, w - 2))
-    local tx = x + math.max(1, math.floor((w - #txt) / 2))
+    local txt = shortText(label, math.max(1, w))
+    local tx = x + math.max(0, math.floor((w - #txt) / 2))
     local ty = y + math.floor((h - 1) / 2)
     ui.write(tx, ty, txt, isActive and C.text or C.dim, face)
   end
@@ -2259,7 +2257,7 @@ function M.run()
   end
 
   function drawBigButton(id, x, y, w, label, bg, action)
-    addButton(id, x, y, w, 5, label, bg, C.btnText, action, { big = true })
+    addButton(id, x, y, w, 2, label, bg, C.btnText, action, { big = true })
   end
 
   function addRowButton(id, x, y, w, h, label, bg, fg, action)
@@ -2667,7 +2665,7 @@ function M.run()
     local showIo = state.currentView ~= "setup"
     local ioH = 0
     if showIo then
-      ioH = clamp(math.floor(panel.h * 0.34), 8, 11)
+      ioH = clamp(math.floor(panel.h * 0.30), 6, 10)
     end
 
     local buttonsTop = panel.y + 2
