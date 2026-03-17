@@ -1022,6 +1022,286 @@ function M.run()
     }
   end
 
+  local function listSetupCandidates(expectedType, validator)
+    local candidates = {}
+    for _, name in ipairs(peripheral.getNames()) do
+      local include = false
+      if type(validator) == "function" then
+        local obj = safePeripheral(name)
+        include = obj and validator(obj, name) or false
+      elseif expectedType == nil then
+        include = true
+      else
+        local ptype = getTypeOf(name)
+        include = (ptype == expectedType) or (expectedType == "block_reader" and contains(name, "block_reader"))
+      end
+      if include then table.insert(candidates, name) end
+    end
+    table.sort(candidates)
+    return candidates
+  end
+
+  local function getSetupRebindCandidates(role)
+    if role == "monitor" then
+      return listSetupCandidates("monitor")
+    end
+
+    if role == "reactorController" then
+      return listSetupCandidates(nil, function(obj)
+        return IoDevices.hasMethods(obj, { "isIgnited", "getPlasmaTemperature", "getPlasmaTemp", "getPlasmaHeat", "getCaseTemperature", "getCasingTemperature" }, 2)
+      end)
+    end
+
+    if role == "logicAdapter" then
+      return listSetupCandidates(nil, function(obj)
+        return IoDevices.hasMethods(obj, { "isFormed", "isIgnited", "getPlasmaTemperature", "getPlasmaTemp", "getPlasmaHeat", "getIgnitionTemperature", "getIgnitionTemp" }, 3)
+      end)
+    end
+
+    if role == "laser" then
+      return listSetupCandidates(nil, function(obj)
+        return IoDevices.hasMethods(obj, { "getEnergy", "getEnergyStored", "getStored", "getMaxEnergy", "getMaxEnergyStored", "getCapacity" }, 2)
+      end)
+    end
+
+    if role == "induction" then
+      return listSetupCandidates(nil, function(obj)
+        return IoDevices.hasMethods(obj, { "isFormed", "getEnergy", "getMaxEnergy", "getEnergyFilledPercentage", "getTransferCap" }, 2)
+      end)
+    end
+
+    if role == "relayLaser" or role == "relayTritium" or role == "relayDeuterium" then
+      return listSetupCandidates("redstone_relay")
+    end
+
+    if role == "readerTritium" or role == "readerDeuterium" or role == "readerAux" then
+      return listSetupCandidates("block_reader")
+    end
+
+    return {}
+  end
+
+  local function applySetupSelection(role, selectedName)
+    local w = state.setup.working
+    if type(w) ~= "table" then return false end
+    if type(selectedName) ~= "string" or trimText(selectedName) == "" then return false end
+
+    if role == "monitor" then
+      w.monitor.name = selectedName
+    elseif role == "reactorController" then
+      w.devices.reactorController = selectedName
+    elseif role == "logicAdapter" then
+      w.devices.logicAdapter = selectedName
+    elseif role == "laser" then
+      w.devices.laser = selectedName
+    elseif role == "induction" then
+      w.devices.induction = selectedName
+    elseif role == "relayLaser" then
+      w.relays.laser.name = selectedName
+    elseif role == "relayTritium" then
+      w.relays.tritium.name = selectedName
+    elseif role == "relayDeuterium" then
+      w.relays.deuterium.name = selectedName
+    elseif role == "readerTritium" then
+      w.readers.tritium = selectedName
+    elseif role == "readerDeuterium" then
+      w.readers.deuterium = selectedName
+    elseif role == "readerAux" then
+      w.readers.aux = selectedName
+    else
+      return false
+    end
+
+    state.setup.dirty = true
+    return true
+  end
+
+  local function runSetupTest(target)
+    local setup = state.setup
+    local w = setup.working
+    if type(w) ~= "table" then
+      setup.lastTestResult = "FAIL"
+      setup.lastMessage = "Setup config not loaded"
+      return false
+    end
+
+    local t = string.upper(tostring(target or ""))
+    local ok, status = false, "INVALID"
+    local label = t
+
+    if t == "MONITOR" then
+      ok, status = setupDeviceExists(w.monitor.name, "monitor")
+      label = "monitor"
+    elseif t == "LAS" then
+      ok, status = setupDeviceExists(w.relays.laser.name, "redstone_relay")
+      label = "relay laser"
+    elseif t == "T" then
+      ok, status = setupDeviceExists(w.relays.tritium.name, "redstone_relay")
+      label = "relay tritium"
+    elseif t == "D" then
+      ok, status = setupDeviceExists(w.relays.deuterium.name, "redstone_relay")
+      label = "relay deuterium"
+    elseif t == "READER T" then
+      ok, status = setupDeviceExists(w.readers.tritium, "block_reader")
+      label = "reader tritium"
+    elseif t == "READER D" then
+      ok, status = setupDeviceExists(w.readers.deuterium, "block_reader")
+      label = "reader deuterium"
+    elseif t == "INDUCTION" then
+      ok, status = setupDeviceExists(w.devices.induction, nil)
+      label = "induction"
+    elseif t == "LASER" then
+      ok, status = setupDeviceExists(w.devices.laser, nil)
+      label = "laser"
+    else
+      setup.lastTestResult = "FAIL " .. t
+      setup.lastMessage = "Unknown setup test: " .. tostring(target)
+      pushEvent("Setup test unknown")
+      return false
+    end
+
+    setup.lastTestResult = (ok and "OK " or "FAIL ") .. t
+    setup.lastMessage = string.format("%s: %s (%s)", label, ok and "OK" or "FAIL", tostring(status))
+    refreshSetupDeviceStatus()
+    pushEvent("Setup test " .. t .. (ok and " OK" or " FAIL"))
+    return ok
+  end
+
+  local function setupStartRebind(role)
+    local setup = state.setup
+    local candidates = getSetupRebindCandidates(role)
+    setup.rebindRole = role
+    setup.rebindCandidates = candidates
+    setup.rebindCursor = 1
+    if #candidates == 0 then
+      setup.lastMessage = "No candidate found for " .. tostring(role)
+      setup.rebindRole = nil
+      pushEvent("Setup rebind empty")
+      return false
+    end
+    setup.lastMessage = string.format("Select %s (%d candidates)", tostring(role), #candidates)
+    pushEvent("Setup rebind " .. tostring(role))
+    return true
+  end
+
+  local function setupApplySelection(index)
+    local setup = state.setup
+    local role = setup.rebindRole
+    local candidates = setup.rebindCandidates or {}
+    local idx = tonumber(index) or setup.rebindCursor or 1
+    idx = math.floor(idx)
+
+    if type(role) ~= "string" or #candidates == 0 then
+      setup.lastMessage = "No active rebind"
+      return false
+    end
+
+    local selectedName = candidates[idx]
+    if type(selectedName) ~= "string" then
+      setup.lastMessage = "Invalid selection"
+      return false
+    end
+
+    local applied = applySetupSelection(role, selectedName)
+    if not applied then
+      setup.lastMessage = "Unable to apply selection"
+      return false
+    end
+
+    setup.rebindRole = nil
+    setup.rebindCandidates = {}
+    setup.rebindCursor = 1
+    setup.lastMessage = string.format("%s -> %s", role, selectedName)
+    refreshSetupDeviceStatus()
+    pushEvent("Setup binding updated")
+    return true
+  end
+
+  local function saveSetupConfig()
+    local setup = state.setup
+    if type(setup.working) ~= "table" then
+      setup.saveStatus = "SAVE FAILED"
+      setup.lastMessage = "Setup config not loaded"
+      return false
+    end
+
+    local normalized = normalizeSetupConfig(setup.working)
+    local valid, errors = CoreConfig.validateConfig(normalized)
+    if not valid then
+      setup.saveStatus = "SAVE FAILED"
+      setup.lastMessage = (errors and errors[1]) or "Configuration invalid"
+      pushEvent("Config save failed")
+      return false
+    end
+
+    local okWrite, errWrite = CoreConfig.writeFusionConfig(fs, CONFIG_FILE, normalized)
+    if not okWrite then
+      setup.saveStatus = "SAVE FAILED"
+      setup.lastMessage = tostring(errWrite or "Unable to write config")
+      pushEvent("Config save failed")
+      return false
+    end
+
+    applyConfigToRuntime(normalized)
+    refreshSetupWorkingConfig(normalized)
+    refreshSetupDeviceStatus()
+    setup.saveStatus = "CONFIG SAVED"
+    setup.lastMessage = "Configuration saved"
+    pushEvent("Config saved")
+    return true
+  end
+
+  local function runInstallerFromSetup()
+    local setup = state.setup
+    if not fs.exists("install.lua") then
+      setup.lastMessage = "install.lua missing"
+      setup.saveStatus = "INSTALL FAILED"
+      pushEvent("Installer missing")
+      return false
+    end
+
+    local previousTerm = term.current()
+    term.redirect(nativeTerm)
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.white)
+    term.clear()
+    term.setCursorPos(1, 1)
+    print("[FUSION] Running installer...")
+
+    local okInstaller, installerErr = pcall(function()
+      shell.run("install.lua")
+    end)
+
+    local redirected = pcall(term.redirect, previousTerm)
+    if not redirected then
+      term.redirect(nativeTerm)
+    end
+    applyPremiumPalette()
+
+    if not okInstaller then
+      setup.lastMessage = "Installer error: " .. tostring(installerErr)
+      setup.saveStatus = "INSTALL FAILED"
+      pushEvent("Installer failed")
+      return false
+    end
+
+    local okConfig, config, configErr = loadFusionConfig()
+    if okConfig and type(config) == "table" then
+      applyConfigToRuntime(config)
+      refreshSetupWorkingConfig(config)
+      refreshSetupDeviceStatus()
+      setup.saveStatus = "CONFIG RELOADED"
+      setup.lastMessage = "Installer complete"
+      pushEvent("Installer complete")
+      return true
+    end
+
+    setup.saveStatus = "INSTALL DONE"
+    setup.lastMessage = "Installer complete, reload failed: " .. tostring(configErr or "Unknown")
+    pushEvent("Installer complete")
+    return false
+  end
+
   local function setUpdateState(status, checkResult, applyResult)
     CoreUpdate.setUpdateState(state.update, status, checkResult, applyResult)
   end
@@ -1055,7 +1335,24 @@ function M.run()
   end
 
   local function normalizePath(path)
-    return tostring(path or ""):gsub("\\", "/")
+    local normalized = trimText(tostring(path or ""))
+    normalized = normalized:gsub("\\", "/")
+    normalized = normalized:gsub("/+", "/")
+    normalized = normalized:gsub("^%./+", "")
+    return normalized
+  end
+
+  local function isSafeRelativePath(path)
+    local normalized = normalizePath(path)
+    if normalized == "" then return false end
+    if normalized:sub(1, 1) == "/" then return false end
+    if normalized:match("^[%a]:") then return false end
+    for segment in normalized:gmatch("[^/]+") do
+      if segment == "." or segment == ".." then
+        return false
+      end
+    end
+    return true
   end
 
   local function buildRawFileUrl(path)
@@ -1090,7 +1387,7 @@ function M.run()
     for _, path in ipairs(manifest.preserve or {}) do
       preserveSet[normalizePath(path)] = true
     end
-    preserveSet[CONFIG_FILE] = true
+    preserveSet[normalizePath(CONFIG_FILE)] = true
     return preserveSet
   end
 
@@ -1119,9 +1416,14 @@ function M.run()
     local files = {}
     for _, item in ipairs(decoded.files) do
       local path = normalizePath(trimText(item))
-      if path ~= "" and not seen[path] then
-        seen[path] = true
-        table.insert(files, path)
+      if path ~= "" then
+        if not isSafeRelativePath(path) then
+          return false, nil, "Manifest contains unsafe path: " .. tostring(path)
+        end
+        if not seen[path] then
+          seen[path] = true
+          table.insert(files, path)
+        end
       end
     end
     if #files == 0 then
@@ -1141,7 +1443,12 @@ function M.run()
     if type(decoded.preserve) == "table" then
       for _, item in ipairs(decoded.preserve) do
         local path = normalizePath(trimText(item))
-        if path ~= "" then table.insert(preserve, path) end
+        if path ~= "" then
+          if not isSafeRelativePath(path) then
+            return false, nil, "Manifest preserve path is unsafe: " .. tostring(path)
+          end
+          table.insert(preserve, path)
+        end
       end
     end
 
@@ -1154,6 +1461,10 @@ function M.run()
 
   local function validateDownloadedContent(path, content, expectedVersion)
     local normalized = normalizePath(path)
+    if not isSafeRelativePath(normalized) then
+      return false, "Unsafe target path: " .. tostring(normalized)
+    end
+
     if type(content) ~= "string" or #trimText(content) == 0 then
       return false, "Downloaded file is empty: " .. normalized
     end
@@ -1171,9 +1482,7 @@ function M.run()
     end
 
     if normalized:match("%.lua$") then
-      if #trimText(content) < 8 then
-        return false, "Lua file too short: " .. normalized
-      end
+      return validateLuaScript(content)
     end
 
     return true, nil
@@ -1326,28 +1635,35 @@ function M.run()
     local preserveSet = buildPreserveSet(manifest)
     local downloadedCount = 0
     for _, filePath in ipairs(manifest.files) do
-      if not isPreservedFile(filePath, preserveSet) then
-        local okBody, body, errBody = httpGetText(buildRawFileUrl(filePath))
+      local normalized = normalizePath(filePath)
+      if not isSafeRelativePath(normalized) then
+        state.update.lastError = "Unsafe manifest path: " .. tostring(normalized)
+        setUpdateState("FAILED", nil, "Manifest path rejected")
+        return false, state.update.lastError
+      end
+
+      if not isPreservedFile(normalized, preserveSet) then
+        local okBody, body, errBody = httpGetText(buildRawFileUrl(normalized))
         if not okBody then
-          state.update.lastError = errBody or ("Download failed: " .. filePath)
-          setUpdateState("FAILED", nil, "Download failed: " .. filePath)
+          state.update.lastError = errBody or ("Download failed: " .. normalized)
+          setUpdateState("FAILED", nil, "Download failed: " .. normalized)
           pushEvent("Update failed")
           return false, state.update.lastError
         end
 
         local valid, reason = validateDownloadedContent(filePath, body, manifest.version)
         if not valid then
-          state.update.lastError = reason or ("Validation failed: " .. filePath)
+          state.update.lastError = reason or ("Validation failed: " .. normalized)
           setUpdateState("FAILED", nil, "Validation failed")
           pushEvent("Update failed")
           return false, state.update.lastError
         end
 
-        local tempPath = getTempPathFor(filePath)
+        local tempPath = getTempPathFor(normalized)
         ensureParentDir(tempPath)
         local okWrite, errWrite = writeTextFile(tempPath, body)
         if not okWrite then
-          state.update.lastError = errWrite or ("Temp write failed: " .. filePath)
+          state.update.lastError = errWrite or ("Temp write failed: " .. normalized)
           setUpdateState("FAILED", nil, "Temp write failed")
           pushEvent("Update failed")
           return false, state.update.lastError
@@ -1390,6 +1706,11 @@ function M.run()
 
     for _, filePath in ipairs(manifest.files) do
       local normalized = normalizePath(filePath)
+      if not isSafeRelativePath(normalized) then
+        state.update.lastError = "Unsafe manifest path: " .. tostring(normalized)
+        setUpdateState("FAILED", nil, "Apply rejected")
+        return false, state.update.lastError
+      end
       if not isPreservedFile(normalized, preserveSet) then
         local tempPath = getTempPathFor(normalized)
         if not fs.exists(tempPath) then
@@ -1483,7 +1804,12 @@ function M.run()
 
     for _, filePath in ipairs(files) do
       local normalized = normalizePath(filePath)
-      if normalized ~= CONFIG_FILE then
+      if not isSafeRelativePath(normalized) then
+        setUpdateState("FAILED", nil, "Rollback rejected")
+        return false, "Unsafe rollback path: " .. tostring(normalized)
+      end
+
+      if normalized ~= normalizePath(CONFIG_FILE) then
         local backupPath = getBackupPathFor(normalized)
         local missingMarker = getMissingBackupMarker(normalized)
 
