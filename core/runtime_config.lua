@@ -65,11 +65,11 @@ function M.new()
   local hitboxDefaults = {
     minW = 10,
     minH = 3,
-    basePadX = 1,
-    basePadY = 1,
-    smallBoostPadX = 2,
-    smallBoostPadY = 1,
-    rowPadX = 1,
+    basePadX = 0,
+    basePadY = 0,
+    smallBoostPadX = 1,
+    smallBoostPadY = 0,
+    rowPadX = 0,
     rowPadY = 0,
   }
 

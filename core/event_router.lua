@@ -79,7 +79,9 @@ function M.route(ev, p1, p2, p3, api)
   end
 
   if ev == "mouse_click" then
-    api.handleClick(p2, p3, "terminal")
+    if p1 == 1 then
+      api.handleClick(p2, p3, "terminal")
+    end
     return
   end
 

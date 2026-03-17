@@ -424,10 +424,7 @@ function M.run()
       if w < 6 then return end
       ui.hline(x, y, w, C.headerBg)
       ui.write(x, y, " ", C.text, C.border)
-      if w >= 2 then
-        ui.write(x + w - 1, y, " ", C.text, C.border)
-      end
-      local txt = shortText(string.format("%s:%s", label, tostring(value or "N/A")), math.max(1, w - 2))
+      local txt = shortText(string.format("%s:%s", label, tostring(value or "N/A")), math.max(1, w - 1))
       ui.write(x + 1, y, txt, tone or C.text, C.headerBg)
     end
 
@@ -469,12 +466,9 @@ function M.run()
   local function drawFooterBarSprite()
     local function drawFooterSegment(x, y, w, key, value, tone, bg)
       if w < 6 then return end
-      local txt = shortText(key .. " " .. tostring(value), math.max(1, w - 2))
+      local txt = shortText(key .. " " .. tostring(value), math.max(1, w - 1))
       ui.hline(x, y, w, bg)
       ui.write(x, y, " ", C.text, C.border)
-      if w >= 2 then
-        ui.write(x + w - 1, y, " ", C.text, C.border)
-      end
       ui.write(x + 1, y, txt, tone or C.text, bg)
     end
 
@@ -552,36 +546,37 @@ function M.run()
     if scaledTw >= 74 and scaledTh >= 26 then mode = "large" end
 
     local top, bottom = 2, th - 1
+    local gap = (mode == "compact") and 1 or 2
     local h = bottom - top + 1
     local layout = { mode = mode, top = top, bottom = bottom, height = h, width = tw, tooSmall = false, uiScale = uiScale }
 
     if mode == "compact" then
       local lw = clamp(math.floor(tw * 0.54), 18, tw - 14)
       layout.left = { x = 1, y = top, w = lw, h = h }
-      layout.right = { x = lw + 1, y = top, w = tw - lw, h = h }
+      layout.right = { x = lw + 1 + gap, y = top, w = tw - lw - gap, h = h }
     elseif mode == "standard" then
       local lw = clamp(math.floor(tw * 0.30), 20, 26)
       local rw = clamp(math.floor(tw * 0.28), 18, 24)
-      local cw = tw - lw - rw
+      local cw = tw - lw - rw - (gap * 2)
       if cw < 24 then
         rw = math.max(17, rw - (24 - cw))
-        cw = tw - lw - rw
+        cw = tw - lw - rw - (gap * 2)
       end
       layout.left = { x = 1, y = top, w = lw, h = h }
-      layout.center = { x = lw + 1, y = top, w = cw, h = h }
-      layout.right = { x = lw + cw + 1, y = top, w = rw, h = h }
+      layout.center = { x = lw + 1 + gap, y = top, w = cw, h = h }
+      layout.right = { x = lw + cw + 1 + (gap * 2), y = top, w = rw, h = h }
     else
       local lw = clamp(math.floor(tw * 0.29), 22, 30)
       local rw = clamp(math.floor(tw * 0.27), 21, 28)
-      local cw = tw - lw - rw
+      local cw = tw - lw - rw - (gap * 2)
       if cw < 34 then
         local delta = 34 - cw
         rw = math.max(18, rw - delta)
-        cw = tw - lw - rw
+        cw = tw - lw - rw - (gap * 2)
       end
       layout.left = { x = 1, y = top, w = lw, h = h }
-      layout.center = { x = lw + 1, y = top, w = cw, h = h }
-      layout.right = { x = lw + cw + 1, y = top, w = rw, h = h }
+      layout.center = { x = lw + 1 + gap, y = top, w = cw, h = h }
+      layout.right = { x = lw + cw + 1 + (gap * 2), y = top, w = rw, h = h }
     end
     return layout
   end
@@ -2057,8 +2052,15 @@ function M.run()
 
   function addButton(id, x, y, w, h, label, bg, fg, action, opts)
     opts = opts or {}
-    local width = math.max(6, w)
+    local width = math.max(4, w)
     local height = math.max(3, h or (opts.big and 5 or 4))
+    local maxW, maxH = term.getSize()
+    if y > maxH or x > maxW then return end
+    if (y + height - 1) < 1 or (x + width - 1) < 1 then return end
+    x = clamp(x, 1, maxW)
+    y = clamp(y, 1, maxH)
+    width = clamp(width, 1, maxW - x + 1)
+    height = clamp(height, 1, maxH - y + 1)
 
     local hitPadX = opts.hitPadX
     local hitPadY = opts.hitPadY
@@ -2089,7 +2091,7 @@ function M.run()
       y = y,
       w = width,
       h = height,
-      label = label,
+      label = shortText(tostring(label or ""), math.max(1, width - 2)),
       bg = bg,
       fg = fg or C.btnText,
       action = action,
@@ -2109,7 +2111,7 @@ function M.run()
 
     local id = tostring(button.id or "")
     if button.disabled then return styles.button.disabled end
-    if id == "setupSave" or id == "cfgSave" then return styles.button.success end
+    if id == "setupSave" or id == "cfgSave" or id == "updRestart" then return styles.button.success end
     if id == "setupInstaller" or id == "arret" or id == "manualStop" then return styles.button.danger end
     if button.bg == C.btnWarn then return styles.button.danger end
     if button.bg == C.tritium then return styles.button.fuelT end
@@ -2464,6 +2466,12 @@ function M.run()
           state.lastAction = "No update"
         end
       end,
+      restartProgram = function()
+        state.pendingRestart = true
+        state.running = false
+        state.lastAction = "Restart requested"
+        pushEvent("Restart requested")
+      end,
       toggleDebugHitboxes = function()
         state.debugHitboxes = not state.debugHitboxes
         state.lastAction = state.debugHitboxes and "Hitbox debug ON" or "Hitbox debug OFF"
@@ -2543,14 +2551,24 @@ function M.run()
     if not isSourceEnabled(source) then
       return false
     end
+    if type(x) ~= "number" or type(y) ~= "number" then
+      return false
+    end
     local bucket = getHitboxBucket(source)
+    local chosen = nil
     for i = #bucket, 1, -1 do
       local hit = bucket[i]
       if isInsideBox(x, y, hit) then
-        setButtonPressed(source, hit.id)
-        hit.action()
-        return true
+        local area = math.max(1, (hit.x2 - hit.x1 + 1) * (hit.y2 - hit.y1 + 1))
+        if not chosen or area < chosen.area then
+          chosen = { hit = hit, area = area }
+        end
       end
+    end
+    if chosen then
+      setButtonPressed(source, chosen.hit.id)
+      chosen.hit.action()
+      return true
     end
     return false
   end
@@ -2622,33 +2640,48 @@ function M.run()
   end
 
   function drawControlPanel(panel, layout)
-    drawBox(panel.x, panel.y, panel.w, panel.h,
-      state.currentView == "manual" and "MANUAL CONTROL"
-        or (state.currentView == "update" and "UPDATE COMMAND"
-        or (state.currentView == "config" and "CONFIG COMMAND"
-        or (state.currentView == "setup" and "SETUP COMMAND" or "CONTROL SYSTEM"))), C.border)
-    local x = panel.x + 2
-    local w = panel.w - 3
+    drawBox(panel.x, panel.y, panel.w, panel.h, "CONTROL SYSTEM", C.border)
 
-    local autoH = clamp(math.floor(panel.h * 0.24), 6, 8)
-    local actionH = clamp(math.floor(panel.h * 0.34), 8, 12)
-    local ioH = panel.h - autoH - actionH - 2
+    local innerX = panel.x + 1
+    local innerW = panel.w - 2
+    local headerY = panel.y + 1
+    local headerText = "CONTROL SYSTEM"
+    local modeText = "MODE " .. string.upper(state.currentView or "supervision")
+    ui.hline(innerX, headerY, innerW, C.headerBg)
+    local titleX = panel.x + math.max(1, math.floor((panel.w - #headerText) / 2))
+    writeAt(titleX, headerY, headerText, C.text, C.headerBg)
+    local modeX = panel.x + panel.w - #modeText - 2
+    if modeX > titleX + #headerText then
+      writeAt(modeX, headerY, modeText, C.info, C.headerBg)
+    end
 
-    drawBox(x, panel.y + 1, w, autoH, "CONTROL SYSTEM", C.borderDim)
-    local sx = x + 2
-    drawBadge(sx, panel.y + 2, "MASTER", state.autoMaster and "AUTO" or "MANUAL")
-    drawBadge(sx, panel.y + 3, "FUSION", state.fusionAuto and "AUTO" or "MANUAL")
-    drawBadge(sx, panel.y + 4, "CHARGE", state.chargeAuto and "AUTO" or "MANUAL")
-    drawBadge(sx, panel.y + 5, "GAS", state.gasAuto and "AUTO" or "MANUAL")
+    local showIo = state.currentView ~= "setup"
+    local ioH = 0
+    if showIo then
+      ioH = clamp(math.floor(panel.h * 0.34), 8, 11)
+    end
 
-    local yAction = panel.y + 1 + autoH
-    drawBox(x, yAction, w, actionH, "COMMAND ACTIONS", C.borderDim)
+    local buttonsTop = panel.y + 2
+    local buttonsBottom = panel.y + panel.h - 2 - ioH - (showIo and 1 or 0)
+    if buttonsBottom < buttonsTop then buttonsBottom = buttonsTop end
+
+    state.controlBounds = {
+      x = panel.x + 2,
+      y = buttonsTop,
+      w = math.max(8, panel.w - 4),
+      h = math.max(3, buttonsBottom - buttonsTop + 1),
+    }
 
     buildButtons(layout)
     drawButtons(getCurrentInputSource())
 
-    local yIo = yAction + actionH
-    UIComponents.drawIoPanel(buildUIViewContext(), x, yIo, w, ioH)
+    if showIo then
+      local ioY = buttonsBottom + 1
+      local ioRealH = (panel.y + panel.h - 1) - ioY
+      if ioRealH >= 4 then
+        UIComponents.drawIoPanel(buildUIViewContext(), panel.x + 1, ioY, panel.w - 2, ioRealH)
+      end
+    end
   end
 
 
@@ -2809,6 +2842,7 @@ function M.run()
       term.redirect(surface)
       currentDrawSource = source
       clearHitboxes(source)
+      state.controlBounds = nil
 
       local tw, th = term.getSize()
       local layout = computeLayout(tw, th)
@@ -2903,6 +2937,30 @@ function M.run()
     fireLaser = fireLaser,
     pushEvent = pushEvent,
   })
+
+  if state.pendingRestart then
+    restoreTerm()
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.white)
+    term.clear()
+    term.setCursorPos(1, 1)
+    print("Restarting Fusion...")
+
+    local launched = false
+    if shell and type(shell.run) == "function" then
+      local okRun, runResult = pcall(shell.run, "fusion.lua")
+      launched = okRun and runResult ~= false
+      if not launched then
+        local okRunShort, runResultShort = pcall(shell.run, "fusion")
+        launched = okRunShort and runResultShort ~= false
+      end
+    end
+
+    if not launched and os and type(os.reboot) == "function" then
+      os.reboot()
+    end
+    return
+  end
 
   restoreTerm()
   term.setBackgroundColor(colors.black)
