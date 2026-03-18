@@ -64,6 +64,43 @@ function M.build(api)
       return base
     end
 
+    local function drawGuideLine(x1, y1, x2, y2, tone)
+      local cx, cy = math.floor(x1), math.floor(y1)
+      local tx, ty = math.floor(x2), math.floor(y2)
+      local dx = math.abs(tx - cx)
+      local dy = math.abs(ty - cy)
+      local sx = (cx < tx) and 1 or -1
+      local sy = (cy < ty) and 1 or -1
+      local err = dx - dy
+
+      while true do
+        if cx >= x + 2 and cx <= x + w - 2 and cy >= y + 1 and cy <= y + h - 2 then
+          writeAt(cx, cy, ".", tone, C.panelDark)
+        end
+        if cx == tx and cy == ty then break end
+        local e2 = err * 2
+        if e2 > -dy then
+          err = err - dy
+          cx = cx + sx
+        end
+        if e2 < dx then
+          err = err + dx
+          cy = cy + sy
+        end
+      end
+    end
+
+    local function formatTemp(value)
+      local n = tonumber(value) or 0
+      if n >= 1000000 then
+        return string.format("%.2f MC", n / 1000000)
+      end
+      if n >= 1000 then
+        return string.format("%.1f kC", n / 1000)
+      end
+      return string.format("%.0f C", n)
+    end
+
     -- Teintes principales du reacteur (coque / coeur).
     local structureColor = C.borderDim
     if state.reactorPresent and state.reactorFormed then
@@ -323,6 +360,30 @@ function M.build(api)
     elseif moduleX + moduleW + 1 <= x + w - 2 then
       local laserTxt = string.format("%3.0f%%", state.laserPct)
       writeAt(moduleX + moduleW + 1, moduleY, laserTxt, laserTone, C.panelDark)
+    end
+
+    -- Telemetries temperature proches du schema reacteur.
+    local tempY = ry + 2
+    if tempY >= y + 2 and tempY <= y + h - 3 and w >= 50 then
+      local plasText = "T PLAS " .. (state.reactorPresent and formatTemp(state.plasmaTemp) or "N/A")
+      local structText = "T STRUCT " .. (state.reactorPresent and formatTemp(state.caseTemp) or "N/A")
+      local leftTextX = x + 3
+      local rightTextX = x + w - #structText - 3
+      if leftTextX + #plasText < rightTextX - 3 then
+        local plasTone = state.reactorPresent and C.warn or C.dim
+        local structTone = state.reactorPresent and C.bad or C.dim
+        writeAt(leftTextX, tempY, plasText, plasTone, C.panelDark)
+        writeAt(rightTextX, tempY, structText, structTone, C.panelDark)
+
+        local guideStartLeftX = leftTextX + #plasText + 1
+        local guideStartRightX = rightTextX - 1
+        local guideY = tempY + 1
+        local guideTargetY = math.max(ry + 2, gcy + ry - 3)
+        local guideLeftTargetX = rx + (gcx - 2) * cellW
+        local guideRightTargetX = rx + (gcx + 1) * cellW
+        drawGuideLine(guideStartLeftX, guideY, guideLeftTargetX, guideTargetY, C.warn)
+        drawGuideLine(guideStartRightX, guideY, guideRightTargetX, guideTargetY, C.bad)
+      end
     end
 
     local bottomY = ry + gh

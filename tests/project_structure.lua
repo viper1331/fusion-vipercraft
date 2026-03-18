@@ -25,6 +25,7 @@ function M.run(ctx)
     "core/energy.lua",
     "core/runtime_loop.lua",
     "tests/energy_units.lua",
+    "tests/laser_device_selection.lua",
     "tests/laser_threshold.lua",
     "ui/chrome.lua",
     "ui/views.lua",

@@ -123,6 +123,7 @@ local modules = {
   "project_structure.lua",
   "manifest_consistency.lua",
   "energy_units.lua",
+  "laser_device_selection.lua",
   "laser_threshold.lua",
 }
 

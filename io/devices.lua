@@ -85,7 +85,12 @@ function M.detectBestLaserPeripheral(peripheralApi, preferredName, safePeriphera
     local score = methodCount(obj, energyMethods)
     score = score + methodCount(obj, ampMethods)
 
-    if includes(ptype, "laser_amplifier") or includes(name, "laser_amplifier") then
+    if includes(ptype, "laser_amplifier")
+      or includes(name, "laser_amplifier")
+      or includes(ptype, "laseramplifier")
+      or includes(name, "laseramplifier")
+      or includes(ptype, "laser amplifier")
+      or includes(name, "laser amplifier") then
       score = score + 20
     elseif includes(ptype, "laser") or includes(name, "laser") then
       score = score + 8

@@ -465,23 +465,23 @@ function M.run()
       layout.left = { x = 1, y = top, w = lw, h = h }
       layout.right = { x = lw + 1 + gap, y = top, w = tw - lw - gap, h = h }
     elseif mode == "standard" then
-      local lw = clamp(math.floor(tw * 0.28), 18, 24)
-      local rw = clamp(math.floor(tw * 0.24), 16, 22)
+      local lw = clamp(math.floor(tw * 0.30), 22, 34)
+      local rw = clamp(math.floor(tw * 0.22), 18, 30)
       local cw = tw - lw - rw - (gap * 2)
-      if cw < 22 then
-        rw = math.max(14, rw - (22 - cw))
+      if cw < 34 then
+        rw = math.max(16, rw - (34 - cw))
         cw = tw - lw - rw - (gap * 2)
       end
       layout.left = { x = 1, y = top, w = lw, h = h }
       layout.center = { x = lw + 1 + gap, y = top, w = cw, h = h }
       layout.right = { x = lw + cw + 1 + (gap * 2), y = top, w = rw, h = h }
     else
-      local lw = clamp(math.floor(tw * 0.27), 20, 28)
-      local rw = clamp(math.floor(tw * 0.23), 17, 24)
+      local lw = clamp(math.floor(tw * 0.31), 24, 38)
+      local rw = clamp(math.floor(tw * 0.21), 20, 32)
       local cw = tw - lw - rw - (gap * 2)
-      if cw < 30 then
-        local delta = 30 - cw
-        rw = math.max(15, rw - delta)
+      if cw < 40 then
+        local delta = 40 - cw
+        rw = math.max(18, rw - delta)
         cw = tw - lw - rw - (gap * 2)
       end
       layout.left = { x = 1, y = top, w = lw, h = h }
