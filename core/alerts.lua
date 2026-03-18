@@ -11,6 +11,7 @@ function M.build(api)
   local hw = api.hw
   local CFG = api.CFG
   local C = api.C
+  local MIN_LASER_IGNITION_FE = 1000000000
 
   local contains = api.contains
   local toNumber = api.toNumber
@@ -33,23 +34,34 @@ function M.build(api)
     return CoreEnergy.sanitizeUnit(state.laserEnergySourceUnit, currentEnergyUnit())
   end
 
-  local function formatEnergyThreshold(joules)
-    return CoreEnergy.formatEnergyFromJ(toNumber(joules, 0), currentEnergyUnit(), {
+  local function formatLaserThreshold()
+    return CoreEnergy.formatScaled(MIN_LASER_IGNITION_FE, "FE", {
       compact = true,
-      decimals = 0,
+      decimals = 2,
     })
   end
 
+  local function toFe(value, sourceUnit)
+    local energyJ = CoreEnergy.toJ(toNumber(value, 0), sourceUnit)
+    return CoreEnergy.fromJ(energyJ, "fe")
+  end
+
+  local function getLaserThresholdJ()
+    return CoreEnergy.toJ(MIN_LASER_IGNITION_FE, "fe")
+  end
+
   function runtime.getLaserThresholdRaw()
-    local thresholdJ = toNumber(CFG and CFG.ignitionLaserEnergyThreshold, 0)
+    local thresholdJ = getLaserThresholdJ()
     return CoreEnergy.thresholdFromJToSource(thresholdJ, laserSourceUnit())
   end
 
   function runtime.getLaserState()
     local thresholdRaw = runtime.getLaserThresholdRaw()
     local energyRaw = toNumber(state.laserEnergy, 0)
+    local sourceUnit = laserSourceUnit()
+    local energyFe = toFe(energyRaw, sourceUnit)
     local present = state.laserPresent == true
-    local ready = present and energyRaw >= thresholdRaw
+    local ready = present and energyFe >= MIN_LASER_IGNITION_FE
     local chargingSignal = (state.laserChargeOn == true) or (state.laserLineOn == true)
     local status = "ABSENT"
 
@@ -59,23 +71,19 @@ function M.build(api)
       status = "READY"
     elseif chargingSignal then
       status = "CHARGING"
-    elseif energyRaw <= 0 then
-      status = "INACTIVE"
     else
       status = "INSUFFICIENT"
     end
 
     local labelByStatus = {
       ABSENT = "LASER ABSENT",
-      INACTIVE = "LASER IDLE",
-      CHARGING = "LASER CHARGING",
-      READY = "LASER READY",
-      INSUFFICIENT = "LAS BELOW THRESHOLD",
+      CHARGING = "LAS CHARGE INSUFFICIENT",
+      READY = "LAS CHARGE READY",
+      INSUFFICIENT = "LAS CHARGE INSUFFICIENT",
     }
 
     local shortByStatus = {
       ABSENT = "ABS",
-      INACTIVE = "IDLE",
       CHARGING = "CHG",
       READY = "READY",
       INSUFFICIENT = "LOW",
@@ -87,7 +95,9 @@ function M.build(api)
       ready = ready,
       charging = chargingSignal,
       energyRaw = energyRaw,
+      energyFe = energyFe,
       thresholdRaw = thresholdRaw,
+      thresholdFe = MIN_LASER_IGNITION_FE,
       label = labelByStatus[status] or status,
       short = shortByStatus[status] or status,
     }
@@ -115,12 +125,12 @@ function M.build(api)
   local function getCriticalIgnitionBlockers()
     local blockers = {}
     local laser = runtime.getLaserState()
-    local thresholdLabel = formatEnergyThreshold(CFG.ignitionLaserEnergyThreshold)
+    local thresholdLabel = formatLaserThreshold()
 
     if not laser.present then
       table.insert(blockers, "LASER ABSENT")
     elseif not laser.ready then
-      table.insert(blockers, "LAS BELOW " .. thresholdLabel)
+      table.insert(blockers, "LAS CHARGE BELOW " .. thresholdLabel)
     end
 
     if not state.tOpen then table.insert(blockers, "T LOCK CLOSED") end
@@ -163,7 +173,7 @@ function M.build(api)
     if laser.status == "READY" then return "READY" end
     if laser.status == "ABSENT" then return "LASER ABSENT" end
     if laser.status == "INSUFFICIENT" then return "CHARGE LOW" end
-    return "LASER IDLE"
+    return "CHARGE LOW"
   end
 
   function runtime.phaseColor(phase)
@@ -179,13 +189,13 @@ function M.build(api)
   end
 
   function runtime.getIgnitionChecklist()
-    local thresholdLabel = formatEnergyThreshold(CFG.ignitionLaserEnergyThreshold)
+    local thresholdLabel = formatLaserThreshold()
     local laser = runtime.getLaserState()
     local laserItem
     if not laser.present then
       laserItem = { key = "LASER PRESENT", ok = false, wait = false }
     else
-      laserItem = { key = "LAS >= " .. thresholdLabel, ok = laser.ready, wait = laser.status == "CHARGING" }
+      laserItem = { key = "LAS >= " .. thresholdLabel, ok = laser.ready, wait = (not laser.ready) and laser.charging }
     end
 
     return {
@@ -219,15 +229,15 @@ function M.build(api)
     end
 
     if not state.ignition then
-      local thresholdLabel = formatEnergyThreshold(CFG.ignitionLaserEnergyThreshold)
+      local thresholdLabel = formatLaserThreshold()
       if laser.status == "ABSENT" then
         table.insert(warnings, "LASER ABSENT")
       elseif not laser.ready then
-        if laser.status == "CHARGING" then
-          table.insert(warnings, "LAS CHARGING " .. string.format("%3.0f%%", toNumber(state.laserPct, 0)))
-        else
-          table.insert(warnings, "LAS BELOW " .. thresholdLabel)
+        local msg = "LAS CHARGE INSUFFICIENT (< " .. thresholdLabel .. ")"
+        if laser.charging then
+          msg = msg .. " CHG " .. string.format("%3.0f%%", toNumber(state.laserPct, 0))
         end
+        table.insert(warnings, msg)
       end
     end
 

@@ -65,7 +65,7 @@ function M.run(ctx)
       },
       CFG = {
         energyUnit = "fe",
-        ignitionLaserEnergyThreshold = 2000000000,
+        ignitionLaserEnergyThreshold = 2500000000,
         actions = {},
       },
       C = { ok = 1, warn = 2, bad = 4, dim = 8 },
@@ -77,10 +77,10 @@ function M.run(ctx)
 
   local runtimeJ = makeRuntime({
     laserEnergySourceUnit = "j",
-    laserEnergy = 2000000000,
+    laserEnergy = 2500000000,
   })
   local thresholdJ = runtimeJ.getLaserThresholdRaw()
-  if math.abs(thresholdJ - 2000000000) > 1e-3 then
+  if math.abs(thresholdJ - 2500000000) > 1e-3 then
     fail(71, "Seuil laser brut J invalide")
   else
     ok("Seuil laser brut J valide")
@@ -93,10 +93,10 @@ function M.run(ctx)
 
   local runtimeFe = makeRuntime({
     laserEnergySourceUnit = "fe",
-    laserEnergy = 800000000,
+    laserEnergy = 1000000000,
   })
   local thresholdFe = runtimeFe.getLaserThresholdRaw()
-  if math.abs(thresholdFe - 800000000) > 1e-3 then
+  if math.abs(thresholdFe - 1000000000) > 1e-3 then
     fail(73, "Seuil laser brut FE invalide")
   else
     ok("Seuil laser brut FE valide")
@@ -109,7 +109,7 @@ function M.run(ctx)
 
   local runtimeNotReady = makeRuntime({
     laserEnergySourceUnit = "fe",
-    laserEnergy = 790000000,
+    laserEnergy = 999999999,
   })
   if runtimeNotReady.isLaserReady() then
     fail(75, "Etat LAS READY devrait etre false sous le seuil")

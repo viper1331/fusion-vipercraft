@@ -43,7 +43,7 @@ function M.run(ctx)
       ignitionChecklist = {},
       safetyWarnings = { "IGNITION BLOCKED" },
       laserPresent = true,
-      laserEnergy = 2000000000,
+      laserEnergy = 2500000000,
       laserEnergySourceUnit = "j",
       laserPct = 100,
       laserChargeOn = false,
@@ -72,7 +72,7 @@ function M.run(ctx)
       },
       CFG = {
         energyUnit = "j",
-        ignitionLaserEnergyThreshold = 2000000000,
+        ignitionLaserEnergyThreshold = 2500000000,
         actions = {
           laser_charge = { relay = "relay_las", side = "top" },
           deuterium = { relay = "relay_d", side = "front" },
@@ -89,7 +89,7 @@ function M.run(ctx)
   end
 
   local runtimeReady, stateReady = buildRuntime({
-    laserEnergy = 2000000000,
+    laserEnergy = 2500000000,
     laserChargeOn = false,
     laserLineOn = false,
   })
@@ -111,7 +111,7 @@ function M.run(ctx)
   end
 
   local runtimeLow, stateLow = buildRuntime({
-    laserEnergy = 1999999999,
+    laserEnergy = 2499999999,
     laserChargeOn = false,
     laserLineOn = false,
   })
@@ -128,7 +128,7 @@ function M.run(ctx)
   end
 
   local runtimeCharging, stateCharging = buildRuntime({
-    laserEnergy = 1500000000,
+    laserEnergy = 2000000000,
     laserChargeOn = true,
     laserLineOn = false,
   })
