@@ -448,12 +448,15 @@ function M.build(api)
     local dPathTone = dFlowColor
     local dtPathTone = dtFlowColor
 
-    -- Module LAS au-dessus du coeur.
+    -- Zone LAS:
+    -- 1) ligne d'information en haut
+    -- 2) bloc laser (cartouche + modules) juste en dessous
+    -- 3) reacteur ensuite
     local moduleW = clamp(math.min(gw * cellW - 2, 14), 10, 14)
     if moduleW % 2 ~= 0 then moduleW = moduleW - 1 end
     local moduleX = rx + math.floor((gw * cellW - moduleW) / 2)
-    local moduleY = math.max(y + 1, ry - 3)
-    local topY = moduleY - 2
+    local infoY = clamp(ry - 5, y + 1, ry - 3)
+    local moduleY = clamp(infoY + 2, y + 2, ry - 2)
     local gapTop = moduleY + 1
     local gapBottom = ry - 1
     local beamX = rx + (gcx - 1) * cellW
@@ -500,13 +503,15 @@ function M.build(api)
     end
 
     local stackCount = math.max(1, math.floor(tonumber(displayedLaserCount) or 1))
-    local stackMinY = math.max(y + 1, topY + 1)
+    -- La pile de modules appartient visuellement au bloc LAS et reste
+    -- sous la ligne d'information pour conserver une separation nette.
+    local stackMinY = math.max(y + 2, moduleY)
     local stackMaxY = math.min(y + h - 2, ry + gcy + 2)
     if stackMaxY < stackMinY then stackMaxY = stackMinY end
     local stackCapacity = math.max(1, stackMaxY - stackMinY + 1)
     local visibleStackCount = math.min(stackCount, stackCapacity)
     local hiddenStackCount = math.max(0, stackCount - visibleStackCount)
-    local stackStartY = moduleY - math.floor((visibleStackCount - 1) / 2)
+    local stackStartY = math.max(stackMinY, moduleY)
     if stackStartY < stackMinY then stackStartY = stackMinY end
     if stackStartY + visibleStackCount - 1 > stackMaxY then
       stackStartY = stackMaxY - visibleStackCount + 1
@@ -611,9 +616,9 @@ function M.build(api)
     drawCell(gcx, legY - 1, dtPathTone, dtValveGlyph, C.text)
 
     -- Libelles d'etat (haut/bas du diagramme).
-    if topY >= y + 1 then
+    if infoY >= y + 1 then
       local laserTxt = shortText(string.format("LAS x%d (%d) %3.0f%% %s", displayedLaserCount, detectedLaserCount, state.laserPct, tostring(state.laserStatusText or laserState)), gw * cellW - 2)
-      writeAt(rx + math.floor((gw * cellW - #laserTxt) / 2), topY, laserTxt, laserTone, C.panelDark)
+      writeAt(rx + math.floor((gw * cellW - #laserTxt) / 2), infoY, laserTxt, laserTone, C.panelDark)
     elseif moduleX + moduleW + 1 <= x + w - 2 then
       local laserTxt = string.format("%3.0f%%", state.laserPct)
       writeAt(moduleX + moduleW + 1, moduleY, laserTxt, laserTone, C.panelDark)
