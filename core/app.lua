@@ -20,6 +20,7 @@ function M.run()
   local CoreEnergy = require("core.energy")
   local CoreTemperature = require("core.temperature")
   local CoreUpdate = require("core.update")
+  local CoreLogger = require("core.logger")
   local CoreState = require("core.state")
   local CoreReactor = require("core.reactor")
   local CoreInduction = require("core.induction")
@@ -55,12 +56,57 @@ function M.run()
   local pressedButtons = {}
   local currentDrawSource = "terminal"
   local pressedEffectDuration = 0.18
+  local loggedMethodFailures = {}
 
   local HITBOX_DEFAULTS = runtime.hitboxDefaults
 
   local state = CoreState.new(CoreState.defaultRuntimeState(LOCAL_VERSION, UPDATE_ENABLED))
   local hw = CoreState.defaultHardwareState()
   local setupMonitor
+  local logger = CoreLogger.new({
+    fs = fs,
+    term = nativeTerm,
+    enabled = CFG.logEnabled,
+    level = CFG.logLevel,
+    toFile = CFG.logToFile,
+    toTerminal = CFG.logToTerminal,
+    file = CFG.logFile,
+    maxFileBytes = CFG.logMaxFileBytes,
+    prefix = "fusion",
+  })
+
+  local function logDebug(message, meta)
+    logger.debug(message, meta)
+  end
+
+  local function logInfo(message, meta)
+    logger.info(message, meta)
+  end
+
+  local function logWarn(message, meta)
+    logger.warn(message, meta)
+  end
+
+  local function logError(message, meta)
+    logger.error(message, meta)
+  end
+
+  local function configureLoggerFromCFG()
+    logger.configure({
+      enabled = CFG.logEnabled,
+      level = CFG.logLevel,
+      toFile = CFG.logToFile,
+      toTerminal = CFG.logToTerminal,
+      file = CFG.logFile,
+      maxFileBytes = CFG.logMaxFileBytes,
+      prefix = "fusion",
+    })
+  end
+
+  logInfo("Fusion runtime boot", {
+    version = tostring(LOCAL_VERSION),
+    refreshDelay = tostring(CFG.refreshDelay),
+  })
 
   local UI_PALETTE = {
     bgMain = colors.white,
@@ -377,10 +423,23 @@ function M.run()
   end
 
   local function safeCall(obj, method, ...)
-    if not obj then return false, nil end
-    if type(obj[method]) ~= "function" then return false, nil end
+    if not obj then
+      logDebug("safeCall skipped: no peripheral", { method = method })
+      return false, nil
+    end
+    if type(obj[method]) ~= "function" then
+      logDebug("safeCall skipped: missing method", { method = method })
+      return false, nil
+    end
     local ok, result = pcall(obj[method], ...)
-    if not ok then return false, nil end
+    if not ok then
+      local key = tostring(method) .. "|" .. tostring(result)
+      if not loggedMethodFailures[key] then
+        loggedMethodFailures[key] = true
+        logWarn("safeCall failed", { method = method, err = tostring(result) })
+      end
+      return false, nil
+    end
     return true, result
   end
 
@@ -478,6 +537,7 @@ function M.run()
     while #state.eventLog > (state.maxEventLog or 8) do
       table.remove(state.eventLog)
     end
+    logInfo(message, { source = "event" })
   end
 
   local function drawKeyValue(x, y, key, value, keyColor, valueColor, maxVal)
@@ -502,6 +562,7 @@ function M.run()
       end
       state.lastAction = msg
       pushEvent(msg)
+      logError("setupMonitor callback missing", { context = context or "runtime" })
       return false
     end
 
@@ -512,8 +573,15 @@ function M.run()
       end
       state.lastAction = "Monitor reconfiguration failed"
       pushEvent("Monitor reconfiguration failed")
+      logError("setupMonitor returned false", { context = context or "runtime" })
       return false
     end
+    logInfo("Display surface configured", {
+      context = context or "runtime",
+      monitor = hw.monitorName or "none",
+      backend = hw.monitorBackend or "terminal",
+      output = CFG.displayOutput,
+    })
     return true
   end
 
@@ -671,6 +739,7 @@ function M.run()
   local function applyConfigToRuntime(config)
     if type(config) ~= "table" then return end
     CoreConfig.applyConfigToRuntime(config, CFG)
+    configureLoggerFromCFG()
 
     if type(config.ui) == "table" and type(config.ui.preferredView) == "string" then
       local view = string.upper(config.ui.preferredView)
@@ -687,6 +756,12 @@ function M.run()
     if type(config.update) == "table" and config.update.enabled ~= nil then
       UPDATE_ENABLED = config.update.enabled and true or false
     end
+    logInfo("Runtime config applied", {
+      output = CFG.displayOutput,
+      monitorScale = CFG.monitorScale,
+      uiScale = CFG.uiScale,
+      logLevel = CFG.logLevel,
+    })
   end
 
   local function cloneTable(input)
@@ -708,6 +783,13 @@ function M.run()
     merged.ui.energyUnit = CoreConfig.sanitizeEnergyUnit(merged.ui.energyUnit, base.ui.energyUnit or "j")
     merged.ui.laserCount = CoreConfig.sanitizeLaserCount(merged.ui.laserCount, base.ui.laserCount or 1)
     merged.monitor.scale = CoreConfig.sanitizeMonitorScale(merged.monitor.scale, base.monitor.scale or 0.5)
+    merged.logs = type(merged.logs) == "table" and merged.logs or {}
+    merged.logs.enabled = CoreConfig.sanitizeBoolean(merged.logs.enabled, base.logs.enabled ~= false)
+    merged.logs.level = CoreConfig.sanitizeLogLevel(merged.logs.level, base.logs.level or "info")
+    merged.logs.toFile = CoreConfig.sanitizeBoolean(merged.logs.toFile, base.logs.toFile ~= false)
+    merged.logs.toTerminal = CoreConfig.sanitizeBoolean(merged.logs.toTerminal, base.logs.toTerminal == true)
+    merged.logs.file = CoreConfig.sanitizeLogFile(merged.logs.file, base.logs.file or "fusion.log")
+    merged.logs.maxFileBytes = CoreConfig.sanitizeLogMaxFileBytes(merged.logs.maxFileBytes, base.logs.maxFileBytes or 262144)
     return merged
   end
 
@@ -722,6 +804,7 @@ function M.run()
   local function ensureConfigOrInstaller()
     local ok, config, err = loadFusionConfig()
     if not ok then
+      logError("Config load failed", { err = tostring(err) })
       term.redirect(nativeTerm)
       term.setBackgroundColor(colors.black)
       term.setTextColor(colors.white)
@@ -732,6 +815,7 @@ function M.run()
       print("[FUSION] Appuyez sur I pour lancer l'installateur, ou une autre touche pour quitter.")
       local _, key = os.pullEvent("key")
       if key == keys.i and fs.exists("install.lua") then
+        logInfo("Launching installer from missing config prompt")
         shell.run("install.lua")
       end
       return false, nil
@@ -739,6 +823,7 @@ function M.run()
 
     local configValid, configErrors = CoreConfig.validateConfig(config)
     if not configValid then
+      logError("Config validation failed", { first = tostring(configErrors and configErrors[1]) })
       term.redirect(nativeTerm)
       term.setBackgroundColor(colors.black)
       term.setTextColor(colors.white)
@@ -752,6 +837,7 @@ function M.run()
       print("[FUSION] Appuyez sur I pour lancer l'installateur, ou une autre touche pour quitter.")
       local _, key = os.pullEvent("key")
       if key == keys.i and fs.exists("install.lua") then
+        logInfo("Launching installer from invalid config prompt")
         shell.run("install.lua")
       end
       return false, nil
@@ -759,6 +845,7 @@ function M.run()
 
     applyConfigToRuntime(config)
     refreshSetupWorkingConfig(config)
+    logInfo("Configuration loaded", { file = CONFIG_FILE })
     return true, config
   end
 
@@ -1034,6 +1121,7 @@ function M.run()
     if type(setup.working) ~= "table" then
       setup.saveStatus = "SAVE FAILED"
       setup.lastMessage = "Setup config not loaded"
+      logError("Setup save failed: working config missing")
       return false
     end
 
@@ -1043,6 +1131,7 @@ function M.run()
       setup.saveStatus = "SAVE FAILED"
       setup.lastMessage = (errors and errors[1]) or "Configuration invalid"
       pushEvent("Config save failed")
+      logError("Setup save failed: config validation", { err = tostring(setup.lastMessage) })
       return false
     end
 
@@ -1051,6 +1140,7 @@ function M.run()
       setup.saveStatus = "SAVE FAILED"
       setup.lastMessage = tostring(errWrite or "Unable to write config")
       pushEvent("Config save failed")
+      logError("Setup save failed: write error", { err = tostring(errWrite) })
       return false
     end
 
@@ -1063,6 +1153,7 @@ function M.run()
     state.lastAction = "Config saved"
     setup.dirty = false
     pushEvent("Config saved")
+    logInfo("Setup config saved")
     return true
   end
 
@@ -1072,6 +1163,7 @@ function M.run()
       setup.lastMessage = "install.lua missing"
       setup.saveStatus = "INSTALL FAILED"
       pushEvent("Installer missing")
+      logError("Installer launch failed: install.lua missing")
       return false
     end
 
@@ -1097,6 +1189,7 @@ function M.run()
       setup.lastMessage = "Installer error: " .. tostring(installerErr)
       setup.saveStatus = "INSTALL FAILED"
       pushEvent("Installer failed")
+      logError("Installer execution failed", { err = tostring(installerErr) })
       return false
     end
 
@@ -1110,6 +1203,7 @@ function M.run()
       setup.lastMessage = "Installer complete"
       state.lastAction = "Installer complete"
       pushEvent("Installer complete")
+      logInfo("Installer completed and config reloaded")
       return true
     end
 
@@ -1117,6 +1211,7 @@ function M.run()
     setup.lastMessage = "Installer complete, reload failed: " .. tostring(configErr or "Unknown")
     state.lastAction = "Installer done"
     pushEvent("Installer complete")
+    logWarn("Installer completed but config reload failed", { err = tostring(configErr) })
     return false
   end
 
@@ -1373,12 +1468,14 @@ function M.run()
     state.update.filesToUpdate = 0
     state.update.lastManifestError = ""
     pushEvent("Update check started")
+    logInfo("Update check started")
 
     if not UPDATE_ENABLED then
       state.update.httpStatus = "DISABLED"
       state.update.remoteVersion = "DISABLED"
       state.update.available = false
       setUpdateState("DISABLED", "Update disabled", nil)
+      logWarn("Update check skipped: update disabled")
       return false, "Update disabled"
     end
 
@@ -1390,6 +1487,7 @@ function M.run()
       state.update.lastManifestError = state.update.lastError
       setUpdateState("FAILED", "Check failed: " .. state.update.lastError, nil)
       pushEvent("Update failed")
+      logError("Update check failed", { err = state.update.lastError })
       return false, state.update.lastError
     end
 
@@ -1399,6 +1497,7 @@ function M.run()
     state.update.filesToUpdate = #manifest.files
     state.update.lastCheckClock = os.clock()
     pushEvent("Manifest loaded " .. manifest.version)
+    logInfo("Manifest loaded", { version = manifest.version, files = tostring(#manifest.files) })
 
     local localVersion = trimText(state.update.localVersion)
     local validLocalVersion, localVersionErr = validateVersionString(localVersion)
@@ -1407,6 +1506,7 @@ function M.run()
       state.update.lastError = localVersionErr or "Local version invalid"
       setUpdateState("FAILED", "Check failed: " .. state.update.lastError, nil)
       pushEvent("Update failed")
+      logError("Local version invalid", { err = state.update.lastError })
       return false, state.update.lastError
     end
     state.update.localVersion = localVersion
@@ -1416,6 +1516,7 @@ function M.run()
       state.update.available = true
       setUpdateState("UPDATE AVAILABLE", "Remote " .. manifest.version .. " > local " .. state.update.localVersion, nil)
       pushEvent("Update available")
+      logInfo("Update available", { localVersion = state.update.localVersion, remoteVersion = manifest.version })
       return true, "Update available"
     elseif cmp == 0 then
       state.update.available = false
@@ -1430,6 +1531,7 @@ function M.run()
 
   local function downloadUpdate()
     state.update.lastError = ""
+    logInfo("Update download started")
     if not UPDATE_ENABLED then
       setUpdateState("DISABLED", nil, "Update disabled")
       return false, "Update disabled"
@@ -1457,6 +1559,7 @@ function M.run()
       if not isSafeRelativePath(normalized) then
         state.update.lastError = "Unsafe manifest path: " .. tostring(normalized)
         setUpdateState("FAILED", nil, "Manifest path rejected")
+        logError("Update manifest path rejected", { path = normalized })
         return false, state.update.lastError
       end
 
@@ -1466,6 +1569,7 @@ function M.run()
           state.update.lastError = errBody or ("Download failed: " .. normalized)
           setUpdateState("FAILED", nil, "Download failed: " .. normalized)
           pushEvent("Update failed")
+          logError("Update file download failed", { file = normalized, err = state.update.lastError })
           return false, state.update.lastError
         end
 
@@ -1474,6 +1578,7 @@ function M.run()
           state.update.lastError = reason or ("Validation failed: " .. normalized)
           setUpdateState("FAILED", nil, "Validation failed")
           pushEvent("Update failed")
+          logError("Update file validation failed", { file = normalized, err = state.update.lastError })
           return false, state.update.lastError
         end
 
@@ -1484,6 +1589,7 @@ function M.run()
           state.update.lastError = errWrite or ("Temp write failed: " .. normalized)
           setUpdateState("FAILED", nil, "Temp write failed")
           pushEvent("Update failed")
+          logError("Update temp write failed", { file = normalized, err = state.update.lastError })
           return false, state.update.lastError
         end
 
@@ -1495,6 +1601,7 @@ function M.run()
     if not cacheOk then
       state.update.lastError = cacheErr or "Cannot save manifest cache"
       setUpdateState("FAILED", nil, "Manifest cache failed")
+      logError("Manifest cache save failed", { err = state.update.lastError })
       return false, state.update.lastError
     end
 
@@ -1503,16 +1610,19 @@ function M.run()
     state.update.filesToUpdate = #manifest.files
     setUpdateState("DOWNLOADED", nil, "Downloaded " .. tostring(downloadedCount) .. " files")
     pushEvent("Download complete")
+    logInfo("Update files downloaded", { count = tostring(downloadedCount) })
     return true, nil
   end
 
   local function applyUpdate()
     state.update.lastError = ""
+    logInfo("Apply update started")
     local manifest = state.update.lastManifest
     if type(manifest) ~= "table" then
       local okManifest, cachedManifest, cacheErr = readManifestCache()
       if not okManifest then
         setUpdateState("FAILED", nil, "Manifest cache missing")
+        logError("Apply update failed: manifest cache missing", { err = tostring(cacheErr) })
         return false, cacheErr or "Manifest cache missing"
       end
       manifest = cachedManifest
@@ -1527,6 +1637,7 @@ function M.run()
       if not isSafeRelativePath(normalized) then
         state.update.lastError = "Unsafe manifest path: " .. tostring(normalized)
         setUpdateState("FAILED", nil, "Apply rejected")
+        logError("Apply update rejected path", { path = normalized })
         return false, state.update.lastError
       end
       if not isPreservedFile(normalized, preserveSet) then
@@ -1534,6 +1645,7 @@ function M.run()
         if not fs.exists(tempPath) then
           state.update.lastError = "Missing temp file: " .. normalized
           setUpdateState("FAILED", nil, "Apply failed")
+          logError("Apply update missing temp file", { file = normalized })
           return false, state.update.lastError
         end
 
@@ -1541,6 +1653,7 @@ function M.run()
         if not okTemp then
           state.update.lastError = tempErr or ("Cannot read temp file: " .. normalized)
           setUpdateState("FAILED", nil, "Apply failed")
+          logError("Apply update cannot read temp file", { file = normalized, err = state.update.lastError })
           return false, state.update.lastError
         end
 
@@ -1548,6 +1661,7 @@ function M.run()
         if not valid then
           state.update.lastError = reason or ("Invalid temp file: " .. normalized)
           setUpdateState("FAILED", nil, "Apply failed")
+          logError("Apply update temp validation failed", { file = normalized, err = state.update.lastError })
           return false, state.update.lastError
         end
 
@@ -1560,12 +1674,14 @@ function M.run()
           if not okCurrent then
             state.update.lastError = currentErr or ("Cannot backup file: " .. normalized)
             setUpdateState("FAILED", nil, "Backup failed")
+            logError("Apply update backup read failed", { file = normalized, err = state.update.lastError })
             return false, state.update.lastError
           end
           local okBackup, backupErr = writeTextFile(backupPath, currentBody)
           if not okBackup then
             state.update.lastError = backupErr or ("Cannot write backup: " .. normalized)
             setUpdateState("FAILED", nil, "Backup failed")
+            logError("Apply update backup write failed", { file = normalized, err = state.update.lastError })
             return false, state.update.lastError
           end
           if fs.exists(missingMarker) then pcall(fs.delete, missingMarker) end
@@ -1574,6 +1690,7 @@ function M.run()
           if not markerOk then
             state.update.lastError = markerErr or ("Cannot mark missing backup: " .. normalized)
             setUpdateState("FAILED", nil, "Backup failed")
+            logError("Apply update missing marker write failed", { file = normalized, err = state.update.lastError })
             return false, state.update.lastError
           end
         end
@@ -1583,6 +1700,7 @@ function M.run()
         if not okWrite then
           state.update.lastError = writeErr or ("Cannot replace file: " .. normalized)
           setUpdateState("FAILED", nil, "Apply failed")
+          logError("Apply update target write failed", { file = normalized, err = state.update.lastError })
           return false, state.update.lastError
         end
       end
@@ -1596,6 +1714,7 @@ function M.run()
     setUpdateState("RESTART REQUIRED", nil, "Update applied. Restart required")
     pushEvent("Update applied")
     pushEvent("Restart required")
+    logInfo("Update applied successfully", { version = manifest.version })
     return true, nil
   end
 
@@ -1617,6 +1736,7 @@ function M.run()
   end
 
   local function rollbackUpdate()
+    logWarn("Rollback requested")
     local files = rollbackTargetList()
     local restored = 0
 
@@ -1624,6 +1744,7 @@ function M.run()
       local normalized = normalizePath(filePath)
       if not isSafeRelativePath(normalized) then
         setUpdateState("FAILED", nil, "Rollback rejected")
+        logError("Rollback rejected path", { path = normalized })
         return false, "Unsafe rollback path: " .. tostring(normalized)
       end
 
@@ -1635,6 +1756,7 @@ function M.run()
           local okRead, backupBody, readErr = readTextFile(backupPath)
           if not okRead then
             setUpdateState("FAILED", nil, "Rollback failed")
+            logError("Rollback read backup failed", { file = normalized, err = tostring(readErr) })
             return false, readErr
           end
 
@@ -1642,6 +1764,7 @@ function M.run()
           local okWrite, writeErr = writeTextFile(normalized, backupBody)
           if not okWrite then
             setUpdateState("FAILED", nil, "Rollback failed")
+            logError("Rollback write failed", { file = normalized, err = tostring(writeErr) })
             return false, writeErr
           end
           restored = restored + 1
@@ -1661,18 +1784,22 @@ function M.run()
     state.update.downloaded = false
     if restored == 0 then
       setUpdateState("FAILED", nil, "No rollback backup available")
+      logWarn("Rollback aborted: no backup available")
       return false, "No rollback backup available"
     end
 
     setUpdateState("RESTART REQUIRED", nil, "Rollback applied. Restart required")
     pushEvent("Rollback applied")
     pushEvent("Restart required")
+    logInfo("Rollback completed", { restored = tostring(restored) })
     return true, nil
   end
 
   local function getMonitorCandidates()
 
-    return IoDevices.getMonitorCandidates(peripheral, getTypeOf, safePeripheral)
+    local candidates = IoDevices.getMonitorCandidates(peripheral, getTypeOf, safePeripheral, logger)
+    logDebug("Display candidates scanned", { count = #candidates })
+    return candidates
   end
 
   local function chooseMonitorAuto()
@@ -1702,9 +1829,19 @@ function M.run()
     hw.monitor = chosen and chosen.obj or nil
     hw.monitorName = chosen and chosen.name or nil
     if type(IoMonitor.setupMonitor) ~= "function" then
+      logError("IoMonitor.setupMonitor unavailable")
       return false
     end
-    IoMonitor.setupMonitor(nativeTerm, hw, CFG, C, chosen, getTypeOf)
+    IoMonitor.setupMonitor(nativeTerm, hw, CFG, C, chosen, getTypeOf, logger)
+    if chosen then
+      logInfo("Monitor selected", {
+        name = chosen.name,
+        backend = chosen.backend or hw.monitorBackend or "unknown",
+        size = tostring(chosen.w or 0) .. "x" .. tostring(chosen.h or 0),
+      })
+    else
+      logWarn("No monitor selected; terminal fallback active")
+    end
     return true
   end
 
@@ -1733,7 +1870,7 @@ function M.run()
   end
 
   local function scanPeripherals()
-    IoDevices.scanPeripherals(peripheral, hw, CFG, safePeripheral, getTypeOf, contains)
+    IoDevices.scanPeripherals(peripheral, hw, CFG, safePeripheral, getTypeOf, contains, logger)
   end
 
   local function resolveKnownRelays()
@@ -1742,7 +1879,7 @@ function M.run()
 
   local function scanBlockReaders()
     resolveKnownRelays()
-    IoReaders.scanBlockReaders(hw, CFG.knownReaders)
+    IoReaders.scanBlockReaders(hw, CFG.knownReaders, logger)
   end
 
   local function readChemicalFromReader(entry)
@@ -1754,15 +1891,15 @@ function M.run()
   end
 
   local function relayWrite(actionName, on)
-    return IoRelays.relayWrite(CFG.actions, hw.relays, actionName, on)
+    return IoRelays.relayWrite(CFG.actions, hw.relays, actionName, on, logger)
   end
 
   local function readRelayOutputState(actionName, fallback)
-    return IoRelays.readRelayOutputState(CFG.actions, hw.relays, actionName, fallback, toNumber)
+    return IoRelays.readRelayOutputState(CFG.actions, hw.relays, actionName, fallback, toNumber, logger)
   end
 
   local function ensureRelayLow(actionName)
-    return IoRelays.ensureRelayLow(CFG.actions, hw.relays, actionName)
+    return IoRelays.ensureRelayLow(CFG.actions, hw.relays, actionName, logger)
   end
 
   local runtimeRefresh = CoreRuntimeRefresh.build({
@@ -1782,6 +1919,7 @@ function M.run()
     ensureRelayLow = ensureRelayLow,
     refreshSetupDeviceStatus = refreshSetupDeviceStatus,
     pushEvent = pushEvent,
+    log = logger,
   })
 
   local refreshAll = runtimeRefresh.refreshAll
@@ -1792,6 +1930,7 @@ function M.run()
     relayWrite = relayWrite,
     pushEvent = pushEvent,
     runtimeAlerts = runtimeAlerts,
+    log = logger,
   })
 
   local setLaserCharge = runtimeActions.setLaserCharge
@@ -2654,6 +2793,7 @@ function M.run()
     setupMonitor = setupMonitor,
     refreshAll = refreshAll,
     pushEvent = pushEvent,
+    log = logger,
     UPDATE_ENABLED = UPDATE_ENABLED,
     checkForUpdate = checkForUpdate,
   })
@@ -2680,6 +2820,7 @@ function M.run()
     triggerAutomaticIgnitionSequence = triggerAutomaticIgnitionSequence,
     fireLaser = fireLaser,
     pushEvent = pushEvent,
+    log = logger,
   })
 
   if state.pendingRestart then

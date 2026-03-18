@@ -24,8 +24,29 @@ function M.build(api)
   local ensureRelayLow = api.ensureRelayLow
   local refreshSetupDeviceStatus = api.refreshSetupDeviceStatus
   local pushEvent = api.pushEvent
+  local log = api.log or {}
+  local logDebug = type(log.debug) == "function" and log.debug or function() end
+  local logInfo = type(log.info) == "function" and log.info or function() end
+  local logWarn = type(log.warn) == "function" and log.warn or function() end
 
   local runtime = {}
+  local previous = {}
+
+  local function logTransition(key, value, message, level, meta)
+    if previous[key] == nil then
+      previous[key] = value
+      return
+    end
+    if previous[key] == value then
+      return
+    end
+    previous[key] = value
+    if level == "warn" then
+      logWarn(message, meta)
+    else
+      logInfo(message, meta)
+    end
+  end
 
   local function detectTemperatureSourceUnit(obj, fallback)
     if not obj then
@@ -459,9 +480,46 @@ function M.build(api)
     readInductionStatus()
     readReaders()
     updateFuelFlow()
+
+    logTransition("reactorPresent", state.reactorPresent, "Reactor peripheral presence changed", "warn", {
+      reactorPresent = state.reactorPresent and "true" or "false",
+      reactor = hw.reactorName or "none",
+      logic = hw.logicName or "none",
+    })
+    logTransition("reactorFormed", state.reactorFormed, "Reactor formed state changed", "info", {
+      formed = state.reactorFormed and "true" or "false",
+    })
+    logTransition("ignition", state.ignition, "Reactor ignition state changed", state.ignition and "info" or "warn", {
+      ignition = state.ignition and "true" or "false",
+      plasmaTemp = tostring(state.plasmaTemp),
+    })
+    logTransition("laserPresent", state.laserPresent, "Laser peripheral presence changed", "warn", {
+      laserPresent = state.laserPresent and "true" or "false",
+      laser = hw.laserName or "none",
+      count = tostring(state.laserDetectedCount or 0),
+    })
+    logTransition("inductionPresent", state.inductionPresent, "Induction peripheral presence changed", "warn", {
+      inductionPresent = state.inductionPresent and "true" or "false",
+      induction = hw.inductionName or "none",
+    })
+    logTransition("fuelFlowSource", state.fuelFlowSource, "Fuel flow mode changed", "info", {
+      flow = state.fuelFlowSource,
+      mbt = tostring(state.fuelFlowMbT),
+    })
+
     if (not wasIgnited) and state.ignition then
       pushEvent("Reactor running")
     end
+
+    if (state.tick or 0) % 120 == 0 then
+      logDebug("Refresh summary", {
+        ignition = state.ignition and "true" or "false",
+        laserPct = string.format("%.1f", tonumber(state.laserPct or 0)),
+        energyPct = string.format("%.1f", tonumber(state.energyPct or 0)),
+        fuel = state.fuelFlowSource,
+      })
+    end
+
     refreshSetupDeviceStatus()
     state.tick = (state.tick or 0) + 1
   end

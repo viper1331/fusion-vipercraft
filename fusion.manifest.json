@@ -1,5 +1,5 @@
 {
-    "version":  "2.4.32",
+    "version":  "2.4.33",
     "files":  [
                   "fusion.lua",
                   "fusion.version",
@@ -12,6 +12,7 @@
                   "core/energy.lua",
                   "core/event_router.lua",
                   "core/induction.lua",
+                  "core/logger.lua",
                   "core/reactor.lua",
                   "core/runtime_config.lua",
                   "core/runtime_loop.lua",

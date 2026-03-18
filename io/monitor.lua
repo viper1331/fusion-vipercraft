@@ -31,6 +31,18 @@ local DisplayBackend = loadDisplayBackend()
 
 local M = {}
 
+local function logInfo(logger, message, meta)
+  if type(logger) == "table" and type(logger.info) == "function" then
+    logger.info(message, meta)
+  end
+end
+
+local function logWarn(logger, message, meta)
+  if type(logger) == "table" and type(logger.warn) == "function" then
+    logger.warn(message, meta)
+  end
+end
+
 local function resolveMonitorCandidate(hw, provided, getTypeOf)
   if type(provided) == "table" and provided.obj == hw.monitor then
     return provided
@@ -41,7 +53,7 @@ local function resolveMonitorCandidate(hw, provided, getTypeOf)
   return DisplayBackend.detectCandidate(hw.monitorName, hw.monitor, getTypeOf)
 end
 
-function M.setupMonitor(nativeTerm, hw, CFG, C, chosenCandidate, getTypeOf)
+function M.setupMonitor(nativeTerm, hw, CFG, C, chosenCandidate, getTypeOf, logger)
   local outputMode = string.lower(tostring((CFG and CFG.displayOutput) or "monitor"))
 
   hw.displaySurface = nil
@@ -81,6 +93,14 @@ function M.setupMonitor(nativeTerm, hw, CFG, C, chosenCandidate, getTypeOf)
     if outputMode == "monitor" then
       term.redirect(hw.displaySurface)
     end
+    logInfo(logger, "Monitor backend ready", {
+      monitor = candidate.name or hw.monitorName or "unknown",
+      backend = hw.monitorBackend or "unknown",
+      touch = hw.monitorTouchEvent or "monitor_touch",
+      output = outputMode,
+    })
+  else
+    logWarn(logger, "Monitor backend disabled: no monitor peripheral")
   end
 
   term.setCursorBlink(false)

@@ -1,4 +1,17 @@
 local M = {}
+local lastReaderSignature = nil
+
+local function logDebug(logger, message, meta)
+  if type(logger) == "table" and type(logger.debug) == "function" then
+    logger.debug(message, meta)
+  end
+end
+
+local function logInfo(logger, message, meta)
+  if type(logger) == "table" and type(logger.info) == "function" then
+    logger.info(message, meta)
+  end
+end
 
 function M.contains(str, sub)
   return tostring(str or ""):find(sub, 1, true) ~= nil
@@ -75,7 +88,7 @@ function M.reconcileKnownReaders(hw, knownReaders)
   end
 end
 
-function M.scanBlockReaders(hw, knownReaders)
+function M.scanBlockReaders(hw, knownReaders, logger)
   hw.readerRoles = {
     deuterium = nil,
     tritium = nil,
@@ -87,6 +100,15 @@ function M.scanBlockReaders(hw, knownReaders)
 
   M.resolveKnownReaders(hw, knownReaders)
 
+  local roleCounts = {
+    deuterium = 0,
+    tritium = 0,
+    inventory = 0,
+    energy = 0,
+    active = 0,
+    unknown = 0,
+  }
+
   for _, entry in ipairs(hw.blockReaders) do
     entry.role = "unknown"
     entry.data = nil
@@ -96,6 +118,8 @@ function M.scanBlockReaders(hw, knownReaders)
       if ok then
         entry.data = data
         entry.role = M.classifyBlockReaderData(data)
+      else
+        logDebug(logger, "Block reader probe failed", { name = tostring(entry.name) })
       end
     end
 
@@ -113,11 +137,35 @@ function M.scanBlockReaders(hw, knownReaders)
     else
       table.insert(hw.readerRoles.unknown, entry)
     end
+
+    roleCounts[entry.role] = (roleCounts[entry.role] or 0) + 1
   end
 
   -- Synchronise les noms connus sur les roles effectivement detectes
   -- pour absorber automatiquement les changements du terrain.
   M.reconcileKnownReaders(hw, knownReaders)
+  local signature = table.concat({
+    tostring(#(hw.blockReaders or {})),
+    tostring(roleCounts.deuterium or 0),
+    tostring(roleCounts.tritium or 0),
+    tostring(roleCounts.inventory or 0),
+    tostring(roleCounts.active or 0),
+    tostring(roleCounts.unknown or 0),
+    hw.readerRoles.deuterium and hw.readerRoles.deuterium.name or "none",
+    hw.readerRoles.tritium and hw.readerRoles.tritium.name or "none",
+    hw.readerRoles.inventory and hw.readerRoles.inventory.name or "none",
+  }, "|")
+  if signature ~= lastReaderSignature then
+    lastReaderSignature = signature
+    logInfo(logger, "Block reader roles updated", {
+      total = tostring(#(hw.blockReaders or {})),
+      deuterium = tostring(roleCounts.deuterium or 0),
+      tritium = tostring(roleCounts.tritium or 0),
+      inventory = tostring(roleCounts.inventory or 0),
+      active = tostring(roleCounts.active or 0),
+      unknown = tostring(roleCounts.unknown or 0),
+    })
+  end
 end
 
 function M.extractChemicalData(raw, toNumber)

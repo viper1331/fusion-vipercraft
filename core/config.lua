@@ -31,6 +31,14 @@ local VALID_ENERGY_UNITS = {
   fe = true,
 }
 
+local VALID_LOG_LEVELS = {
+  debug = true,
+  info = true,
+  warn = true,
+  error = true,
+  off = true,
+}
+
 function M.trimText(txt)
   txt = tostring(txt or "")
   return (txt:gsub("^%s+", ""):gsub("%s+$", ""))
@@ -83,6 +91,14 @@ function M.defaultFusionConfig(CFG, updateEnabled)
     },
     update = {
       enabled = updateEnabled,
+    },
+    logs = {
+      enabled = CFG.logEnabled,
+      level = CFG.logLevel,
+      toFile = CFG.logToFile,
+      toTerminal = CFG.logToTerminal,
+      file = CFG.logFile,
+      maxFileBytes = CFG.logMaxFileBytes,
     },
   }
 end
@@ -141,6 +157,12 @@ function M.applyConfigToRuntime(config, CFG)
   CFG.energyUnit = M.sanitizeEnergyUnit(config.ui and config.ui.energyUnit, CFG.energyUnit or "j")
   CFG.laserCount = M.sanitizeLaserCount(config.ui and config.ui.laserCount, CFG.laserCount or 1)
   CFG.refreshDelay = M.sanitizeRefreshDelay(config.ui and config.ui.refreshDelay, CFG.refreshDelay)
+  CFG.logEnabled = M.sanitizeBoolean(config.logs and config.logs.enabled, CFG.logEnabled ~= false)
+  CFG.logLevel = M.sanitizeLogLevel(config.logs and config.logs.level, CFG.logLevel or "info")
+  CFG.logToFile = M.sanitizeBoolean(config.logs and config.logs.toFile, CFG.logToFile ~= false)
+  CFG.logToTerminal = M.sanitizeBoolean(config.logs and config.logs.toTerminal, CFG.logToTerminal == true)
+  CFG.logFile = M.sanitizeLogFile(config.logs and config.logs.file, CFG.logFile or "fusion.log")
+  CFG.logMaxFileBytes = M.sanitizeLogMaxFileBytes(config.logs and config.logs.maxFileBytes, CFG.logMaxFileBytes or 262144)
 
   CFG.preferredReactor = M.sanitizeDeviceName(config.devices and config.devices.reactorController, CFG.preferredReactor)
   CFG.preferredLogicAdapter = M.sanitizeDeviceName(config.devices and config.devices.logicAdapter, CFG.preferredLogicAdapter)
@@ -201,6 +223,43 @@ function M.sanitizeRefreshDelay(value, fallback)
   if numeric == nil then return fallback end
   if numeric < 0.05 then return 0.05 end
   if numeric > 5 then return 5 end
+  return numeric
+end
+
+function M.sanitizeBoolean(value, fallback)
+  if type(value) == "boolean" then return value end
+  if value == nil then return fallback and true or false end
+  if type(value) == "number" then return value ~= 0 end
+  local raw = string.lower(tostring(value or ""))
+  if raw == "true" or raw == "1" or raw == "yes" or raw == "on" then return true end
+  if raw == "false" or raw == "0" or raw == "no" or raw == "off" then return false end
+  return fallback and true or false
+end
+
+function M.sanitizeLogLevel(value, fallback)
+  local level = string.lower(tostring(value or ""))
+  if VALID_LOG_LEVELS[level] then return level end
+  return string.lower(tostring(fallback or "info"))
+end
+
+function M.sanitizeLogFile(value, fallback)
+  local file = M.trimText(tostring(value or ""))
+  if file == "" then return fallback end
+  file = file:gsub("\\", "/")
+  file = file:gsub("/+", "/")
+  file = file:gsub("^%./+", "")
+  if file:sub(1, 1) == "/" then return fallback end
+  if file:match("^[%a]:") then return fallback end
+  if file:find("%.%.", 1, true) then return fallback end
+  return file
+end
+
+function M.sanitizeLogMaxFileBytes(value, fallback)
+  local numeric = tonumber(value)
+  if numeric == nil then return fallback end
+  numeric = math.floor(numeric + 0.5)
+  if numeric < 8192 then return 8192 end
+  if numeric > 8388608 then return 8388608 end
   return numeric
 end
 
@@ -267,6 +326,35 @@ function M.validateConfig(config)
 
   if tonumber(config.ui and config.ui.laserCount) == nil then
     table.insert(errors, "ui.laserCount is invalid")
+  end
+
+  local logs = config.logs
+  if logs ~= nil and type(logs) ~= "table" then
+    table.insert(errors, "logs must be a table")
+  elseif type(logs) == "table" then
+    if logs.enabled ~= nil and type(logs.enabled) ~= "boolean" then
+      table.insert(errors, "logs.enabled is invalid")
+    end
+    if logs.toFile ~= nil and type(logs.toFile) ~= "boolean" then
+      table.insert(errors, "logs.toFile is invalid")
+    end
+    if logs.toTerminal ~= nil and type(logs.toTerminal) ~= "boolean" then
+      table.insert(errors, "logs.toTerminal is invalid")
+    end
+    if logs.level ~= nil then
+      local level = string.lower(tostring(logs.level))
+      if not VALID_LOG_LEVELS[level] then
+        table.insert(errors, "logs.level is invalid")
+      end
+    end
+    if logs.file ~= nil then
+      if type(logs.file) ~= "string" or M.trimText(logs.file) == "" then
+        table.insert(errors, "logs.file is invalid")
+      end
+    end
+    if logs.maxFileBytes ~= nil and tonumber(logs.maxFileBytes) == nil then
+      table.insert(errors, "logs.maxFileBytes is invalid")
+    end
   end
 
   local relaySides = {

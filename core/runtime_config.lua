@@ -15,6 +15,12 @@ function M.new()
     energyUnit = "j",
     laserCount = 1,
     refreshDelay = 0.20,
+    logEnabled = true,
+    logLevel = "info",
+    logToFile = true,
+    logToTerminal = false,
+    logFile = "fusion.log",
+    logMaxFileBytes = 262144,
 
     ignitionLaserEnergyThreshold = 2000000000,
 

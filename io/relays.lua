@@ -1,5 +1,23 @@
 local M = {}
 
+local function logDebug(logger, message, meta)
+  if type(logger) == "table" and type(logger.debug) == "function" then
+    logger.debug(message, meta)
+  end
+end
+
+local function logInfo(logger, message, meta)
+  if type(logger) == "table" and type(logger.info) == "function" then
+    logger.info(message, meta)
+  end
+end
+
+local function logWarn(logger, message, meta)
+  if type(logger) == "table" and type(logger.warn) == "function" then
+    logger.warn(message, meta)
+  end
+end
+
 local VALID_SIDES = {
   top = true,
   bottom = true,
@@ -170,16 +188,28 @@ local function getAnalogSafe(relay, side, toNumber)
   return false, 0
 end
 
-function M.ensureRelayLow(actions, relays, actionName)
+function M.ensureRelayLow(actions, relays, actionName, logger)
   local _, relay, side = resolveRelayConfig(actions, relays, actionName)
-  if not relay then return false end
-  if setAnalogSafe(relay, side, 0) then return true end
-  return setDigitalSafe(relay, side, false)
+  if not relay then
+    logDebug(logger, "ensureRelayLow skipped: relay missing", { action = actionName })
+    return false
+  end
+  if setAnalogSafe(relay, side, 0) then
+    return true
+  end
+  local ok = setDigitalSafe(relay, side, false)
+  if not ok then
+    logWarn(logger, "ensureRelayLow failed", { action = actionName, side = side })
+  end
+  return ok
 end
 
-function M.relayWrite(actions, relays, actionName, on)
+function M.relayWrite(actions, relays, actionName, on, logger)
   local cfg, relay, side = resolveRelayConfig(actions, relays, actionName)
-  if not cfg or not relay then return false end
+  if not cfg or not relay then
+    logWarn(logger, "relayWrite failed: relay missing", { action = actionName, on = tostring(on) })
+    return false
+  end
 
   if cfg.pulse then
     if on then
@@ -187,28 +217,41 @@ function M.relayWrite(actions, relays, actionName, on)
       if setAnalogSafe(relay, side, high) then
         sleep(cfg.pulseTime or 0.2)
         setAnalogSafe(relay, side, 0)
+        logInfo(logger, "relay pulse sent", { action = actionName, side = side, analog = tostring(high) })
         return true
       end
       if setDigitalSafe(relay, side, true) then
         sleep(cfg.pulseTime or 0.2)
         setDigitalSafe(relay, side, false)
+        logInfo(logger, "relay digital pulse sent", { action = actionName, side = side })
         return true
       end
     end
+    logWarn(logger, "relay pulse failed", { action = actionName, side = side })
     return false
   end
 
   -- `forceZero` garantit que la ligne reste coupee (0) meme si `on = true`.
   local wantsOn = (on == true) and (cfg.forceZero ~= true)
   if setAnalogSafe(relay, side, wantsOn and (cfg.analog or 15) or 0) then
+    logDebug(logger, "relay analog write", { action = actionName, side = side, value = wantsOn and (cfg.analog or 15) or 0 })
     return true
   end
-  return setDigitalSafe(relay, side, wantsOn)
+  local ok = setDigitalSafe(relay, side, wantsOn)
+  if ok then
+    logDebug(logger, "relay digital write", { action = actionName, side = side, on = wantsOn and "true" or "false" })
+  else
+    logWarn(logger, "relay write failed", { action = actionName, side = side, on = tostring(on) })
+  end
+  return ok
 end
 
-function M.readRelayOutputState(actions, relays, actionName, fallback, toNumber)
+function M.readRelayOutputState(actions, relays, actionName, fallback, toNumber, logger)
   local _, relay, side = resolveRelayConfig(actions, relays, actionName)
-  if not relay then return fallback end
+  if not relay then
+    logDebug(logger, "readRelayOutputState fallback: relay missing", { action = actionName })
+    return fallback
+  end
 
   local okAnalog, analog = getAnalogSafe(relay, side, toNumber)
   if okAnalog then return analog > 0 end
@@ -218,6 +261,7 @@ function M.readRelayOutputState(actions, relays, actionName, fallback, toNumber)
     if ok then return v == true end
   end
 
+  logDebug(logger, "readRelayOutputState fallback", { action = actionName, side = side })
   return fallback
 end
 

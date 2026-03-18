@@ -9,6 +9,10 @@ function M.build(api)
 
   local relayWrite = api.relayWrite
   local pushEvent = api.pushEvent
+  local log = api.log or {}
+  local logDebug = type(log.debug) == "function" and log.debug or function() end
+  local logInfo = type(log.info) == "function" and log.info or function() end
+  local logWarn = type(log.warn) == "function" and log.warn or function() end
 
   local runtimeAlerts = api.runtimeAlerts
 
@@ -20,12 +24,14 @@ function M.build(api)
     state.laserChargeOn = on
     state.lastAction = on and "Charge laser ON" or "Charge laser OFF"
     pushEvent(state.lastAction)
+    logInfo("Laser charge line toggled", { on = on and "true" or "false" })
   end
 
   function actions.fireLaser()
     if not state.ignitionSequencePending then
       state.lastAction = "Pulse LAS bloque (hors ignition)"
       pushEvent("Pulse LAS blocked")
+      logWarn("Laser pulse blocked: ignition sequence not pending")
       return false
     end
 
@@ -34,12 +40,14 @@ function M.build(api)
     if state.ignition then
       state.lastAction = "Pulse LAS bloque (reacteur actif)"
       pushEvent("Pulse LAS blocked")
+      logWarn("Laser pulse blocked: reactor already ignited")
       return false
     end
 
     if not state.hohlraumPresent then
       state.lastAction = "Pulse LAS bloque (hohlraum absent)"
       pushEvent("Pulse LAS blocked")
+      logWarn("Laser pulse blocked: hohlraum missing")
       return false
     end
 
@@ -47,10 +55,12 @@ function M.build(api)
       state.lastLaserPulseAt = os.clock()
       state.lastAction = "Pulse LAS"
       pushEvent("Pulse LAS")
+      logInfo("Laser pulse fired")
       return true
     else
       state.lastAction = "Laser pulse non cable"
       pushEvent("Pulse LAS FAIL")
+      logWarn("Laser pulse failed: relay not wired")
       return false
     end
   end
@@ -63,6 +73,7 @@ function M.build(api)
     state.dtOpen = on
     state.lastAction = on and "DT OPEN" or "DT CLOSED"
     pushEvent(state.lastAction)
+    logDebug("DT fuel line changed", { on = on and "true" or "false" })
   end
 
   function actions.openDeuterium(on)
@@ -72,6 +83,7 @@ function M.build(api)
     end
     state.dOpen = on
     pushEvent(on and "D line OPEN" or "D line CLOSED")
+    logDebug("Deuterium line changed", { on = on and "true" or "false" })
   end
 
   function actions.openTritium(on)
@@ -81,6 +93,7 @@ function M.build(api)
     end
     state.tOpen = on
     pushEvent(on and "T line OPEN" or "T line CLOSED")
+    logDebug("Tritium line changed", { on = on and "true" or "false" })
   end
 
   function actions.openSeparatedGases(on)
@@ -98,6 +111,7 @@ function M.build(api)
     state.alert = "DANGER"
     state.lastAction = "Arret securite"
     pushEvent("Emergency stop")
+    logWarn("Emergency stop", { reason = reason or "unspecified" })
   end
 
   function actions.startReactorSequence()
@@ -106,6 +120,7 @@ function M.build(api)
 
     if state.ignitionSequencePending then
       state.status = "FIRING"
+      logWarn("Start sequence ignored: already pending")
       return false
     end
 
@@ -113,6 +128,7 @@ function M.build(api)
       state.status = "BLOCKED"
       state.lastAction = "Ignition refused"
       pushEvent("Ignition refused")
+      logWarn("Ignition blocked by runtime alerts")
       return false
     end
 
@@ -120,6 +136,7 @@ function M.build(api)
       state.status = "BLOCKED"
       state.lastAction = "Ignition refusee: hohlraum absent"
       pushEvent("Ignition refused (hohlraum)")
+      logWarn("Ignition blocked: hohlraum missing")
       return false
     end
 
@@ -132,11 +149,13 @@ function M.build(api)
       state.status = "BLOCKED"
       state.lastAction = "Ignition refusee: pulse LAS"
       pushEvent("Ignition failed")
+      logWarn("Ignition failed: LAS pulse failure")
       return false
     end
     state.status = "FIRING"
     state.lastAction = "Start sequence"
     pushEvent("Ignition start sequence")
+    logInfo("Ignition sequence started")
     return true
   end
 
@@ -148,6 +167,7 @@ function M.build(api)
     state.status = reason or "ARRET"
     state.lastAction = "Arret commande"
     pushEvent("Reactor stop sequence")
+    logInfo("Reactor stop sequence", { reason = reason or "manual" })
   end
 
   function actions.triggerAutomaticIgnitionSequence()
@@ -229,6 +249,7 @@ function M.build(api)
   function actions.fullAuto()
     if not state.autoMaster then
       runtimeAlerts.updateAlerts()
+      logDebug("fullAuto skipped: autoMaster off")
       return
     end
     actions.autoSafety()

@@ -103,8 +103,12 @@ end
 function M.route(ev, p1, p2, p3, api)
   local state = api.state
   local hw = api.hw
+  local log = api.log or {}
+  local logDebug = type(log.debug) == "function" and log.debug or function() end
+  local logWarn = type(log.warn) == "function" and log.warn or function() end
 
   if ev == "char" then
+    logDebug("Input char", { value = tostring(p1) })
     local ch = string.lower(p1)
     if state.choosingMonitor then
       handleMonitorSelectionChar(ch, api)
@@ -115,6 +119,7 @@ function M.route(ev, p1, p2, p3, api)
   end
 
   if ev == "mouse_click" then
+    logDebug("Mouse click", { source = "terminal", x = p2, y = p3, button = p1 })
     if p1 == 1 then
       api.handleClick(p2, p3, "terminal")
     end
@@ -122,6 +127,7 @@ function M.route(ev, p1, p2, p3, api)
   end
 
   if ev == "monitor_touch" then
+    logDebug("Monitor touch event", { backend = hw.monitorTouchEvent or "monitor_touch" })
     if (hw.monitorTouchEvent or "monitor_touch") == "monitor_touch" then
       local x, y = unpackMonitorCoords(hw, p1, p2, p3)
       x, y = normalizeMonitorCoords(hw, x, y)
@@ -133,6 +139,7 @@ function M.route(ev, p1, p2, p3, api)
   end
 
   if ev == "tm_monitor_touch" then
+    logDebug("Tom monitor touch event", { backend = hw.monitorTouchEvent or "monitor_touch" })
     if (hw.monitorTouchEvent or "monitor_touch") == "tm_monitor_touch" then
       local x, y = unpackMonitorCoords(hw, p1, p2, p3)
       x, y = normalizeMonitorCoords(hw, x, y)
@@ -144,18 +151,24 @@ function M.route(ev, p1, p2, p3, api)
   end
 
   if ev == "monitor_resize" or ev == "term_resize" or ev == "tm_monitor_resize" then
+    logDebug("Display resize", { event = ev })
     api.setupMonitor()
     state.uiDrawn = false
     return
   end
 
   if ev == "peripheral" or ev == "peripheral_detach" then
+    logDebug("Peripheral topology changed", { event = ev, side = tostring(p1) })
     api.setupMonitor()
     state.uiDrawn = false
     if state.choosingMonitor then
       state.monitorList = api.getMonitorCandidates()
     end
     return
+  end
+
+  if ev ~= "timer" then
+    logDebug("Unhandled event", { event = tostring(ev) })
   end
 end
 

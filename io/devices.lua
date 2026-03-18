@@ -43,6 +43,19 @@ end
 local DisplayBackend = loadDisplayBackend()
 
 local M = {}
+local lastScanSignature = nil
+
+local function logDebug(logger, message, meta)
+  if type(logger) == "table" and type(logger.debug) == "function" then
+    logger.debug(message, meta)
+  end
+end
+
+local function logInfo(logger, message, meta)
+  if type(logger) == "table" and type(logger.info) == "function" then
+    logger.info(message, meta)
+  end
+end
 
 local function getSortedPeripheralNames(peripheralApi)
   local names = peripheralApi.getNames() or {}
@@ -61,7 +74,7 @@ local function methodCount(obj, methods)
   return count
 end
 
-function M.getMonitorCandidates(peripheralApi, getTypeOf, safePeripheral)
+function M.getMonitorCandidates(peripheralApi, getTypeOf, safePeripheral, logger)
   local monitors = {}
   for _, name in ipairs(getSortedPeripheralNames(peripheralApi)) do
     local obj = safePeripheral(name)
@@ -91,6 +104,7 @@ function M.getMonitorCandidates(peripheralApi, getTypeOf, safePeripheral)
     end
     return a.name < b.name
   end)
+  logDebug(logger, "Display candidates listed", { count = #monitors })
   return monitors
 end
 
@@ -216,7 +230,7 @@ function M.detectBestLaserPeripheral(peripheralApi, preferredName, safePeriphera
   return ranked[1].obj, ranked[1].name
 end
 
-function M.scanPeripherals(peripheralApi, hw, cfg, safePeripheral, getTypeOf, contains)
+function M.scanPeripherals(peripheralApi, hw, cfg, safePeripheral, getTypeOf, contains, logger)
   hw.reactor, hw.reactorName = M.detectBestPeripheral(peripheralApi, cfg.preferredReactor, safePeripheral, function(obj)
     return M.hasMethods(obj, { "isIgnited", "getPlasmaTemperature", "getPlasmaTemp", "getPlasmaHeat", "getCaseTemperature", "getCasingTemperature" }, 2)
   end)
@@ -247,6 +261,32 @@ function M.scanPeripherals(peripheralApi, hw, cfg, safePeripheral, getTypeOf, co
     elseif ptype == "block_reader" or contains(name, "block_reader") then
       table.insert(hw.blockReaders, { name = name, obj = safePeripheral(name), role = "unknown", data = nil })
     end
+  end
+
+  local relayCount = 0
+  for _ in pairs(hw.relays or {}) do relayCount = relayCount + 1 end
+
+  local signature = table.concat({
+    hw.reactorName or "none",
+    hw.logicName or "none",
+    hw.laserName or "none",
+    tostring(#(hw.lasers or {})),
+    hw.inductionName or "none",
+    tostring(relayCount),
+    tostring(#(hw.blockReaders or {})),
+  }, "|")
+
+  if signature ~= lastScanSignature then
+    lastScanSignature = signature
+    logInfo(logger, "Peripheral topology changed", {
+      reactor = hw.reactorName or "none",
+      logic = hw.logicName or "none",
+      laser = hw.laserName or "none",
+      lasers = tostring(#(hw.lasers or {})),
+      induction = hw.inductionName or "none",
+      relays = tostring(relayCount),
+      readers = tostring(#(hw.blockReaders or {})),
+    })
   end
 end
 
