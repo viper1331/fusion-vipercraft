@@ -26,6 +26,11 @@ local VALID_OUTPUTS = {
   both = true,
 }
 
+local VALID_ENERGY_UNITS = {
+  j = true,
+  fe = true,
+}
+
 function M.trimText(txt)
   txt = tostring(txt or "")
   return (txt:gsub("^%s+", ""):gsub("%s+$", ""))
@@ -71,6 +76,7 @@ function M.defaultFusionConfig(CFG, updateEnabled)
       preferredView = "SUP",
       scale = CFG.uiScale or 1.0,
       output = CFG.displayOutput or "monitor",
+      energyUnit = CFG.energyUnit or "j",
       touchEnabled = true,
       refreshDelay = CFG.refreshDelay,
     },
@@ -131,6 +137,7 @@ function M.applyConfigToRuntime(config, CFG)
   CFG.monitorScale = M.sanitizeMonitorScale(config.monitor and config.monitor.scale, CFG.monitorScale)
   CFG.uiScale = M.sanitizeUiScale(config.ui and config.ui.scale, CFG.uiScale or 1.0)
   CFG.displayOutput = M.sanitizeDisplayOutput(config.ui and config.ui.output, CFG.displayOutput or "monitor")
+  CFG.energyUnit = M.sanitizeEnergyUnit(config.ui and config.ui.energyUnit, CFG.energyUnit or "j")
   CFG.refreshDelay = M.sanitizeRefreshDelay(config.ui and config.ui.refreshDelay, CFG.refreshDelay)
 
   CFG.preferredReactor = M.sanitizeDeviceName(config.devices and config.devices.reactorController, CFG.preferredReactor)
@@ -169,6 +176,12 @@ end
 function M.sanitizeDisplayOutput(value, fallback)
   local mode = string.lower(tostring(value or ""))
   if VALID_OUTPUTS[mode] then return mode end
+  return fallback
+end
+
+function M.sanitizeEnergyUnit(value, fallback)
+  local unit = string.lower(tostring(value or ""))
+  if VALID_ENERGY_UNITS[unit] then return unit end
   return fallback
 end
 
@@ -234,6 +247,11 @@ function M.validateConfig(config)
   local outputMode = config.ui and config.ui.output
   if type(outputMode) ~= "string" or not VALID_OUTPUTS[string.lower(outputMode)] then
     table.insert(errors, "ui.output is invalid")
+  end
+
+  local energyUnit = config.ui and config.ui.energyUnit
+  if type(energyUnit) ~= "string" or not VALID_ENERGY_UNITS[string.lower(energyUnit)] then
+    table.insert(errors, "ui.energyUnit is invalid")
   end
 
   local relaySides = {

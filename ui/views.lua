@@ -20,7 +20,9 @@ function M.buildContext(base)
     shortText = base.shortText,
     clamp = base.clamp,
     fmt = base.fmt,
-    formatMJ = base.formatMJ,
+    formatEnergy = base.formatEnergy or base.formatMJ,
+    formatEnergyPerTick = base.formatEnergyPerTick or base.formatMJ,
+    formatMJ = base.formatMJ or base.formatEnergy,
     yesno = base.yesno,
     reactorPhase = base.reactorPhase,
     phaseColor = base.phaseColor,
@@ -184,10 +186,10 @@ function M.drawInductionView(ctx, layout)
   UIComponents.drawStateBlock(ctx, x + math.floor((left.w - 6) / 2), y + 4, left.w - 6 - math.floor((left.w - 6) / 2), "Alert", state.alert)
 
   ctx.drawBox(x - 1, y + 7, left.w - 4, 11, "TECHNICAL", C.borderDim)
-  UIComponents.drawValueBlock(ctx, x, y + 8, left.w - 6, "Stored", ctx.formatMJ(state.inductionEnergy), "", C.energy)
-  UIComponents.drawValueBlock(ctx, x, y + 10, left.w - 6, "Max", ctx.formatMJ(state.inductionMax), "", C.energy)
-  UIComponents.drawValueBlock(ctx, x, y + 12, left.w - 6, "Needed", ctx.formatMJ(state.inductionNeeded), "", C.warn)
-  UIComponents.drawValueBlock(ctx, x, y + 14, left.w - 6, "In / Out", ctx.formatMJ(state.inductionInput) .. " / " .. ctx.formatMJ(state.inductionOutput), "", C.info)
+  UIComponents.drawValueBlock(ctx, x, y + 8, left.w - 6, "Stored", ctx.formatEnergy(state.inductionEnergy), "", C.energy)
+  UIComponents.drawValueBlock(ctx, x, y + 10, left.w - 6, "Max", ctx.formatEnergy(state.inductionMax), "", C.energy)
+  UIComponents.drawValueBlock(ctx, x, y + 12, left.w - 6, "Needed", ctx.formatEnergy(state.inductionNeeded), "", C.warn)
+  UIComponents.drawValueBlock(ctx, x, y + 14, left.w - 6, "In / Out", ctx.formatEnergyPerTick(state.inductionInput) .. " / " .. ctx.formatEnergyPerTick(state.inductionOutput), "", C.info)
   UIComponents.drawValueBlock(ctx, x, y + 16, left.w - 6, "Fill", string.format("%.1f", state.inductionPct), "%", C.energy)
 
   ctx.drawBox(x - 1, y + 19, left.w - 4, 6, "STRUCTURE", C.borderDim)
@@ -252,9 +254,11 @@ function M.drawConfigView(ctx, layout)
   local uiScale = tonumber(working.ui and working.ui.scale) or 1.0
   local textScale = tonumber(working.monitor and working.monitor.scale) or 0.5
   local outputMode = string.lower(tostring(working.ui and working.ui.output or "monitor"))
+  local energyUnit = string.lower(tostring(working.ui and working.ui.energyUnit or "j"))
   local appliedUiScale = tonumber(ctx.CFG.uiScale) or uiScale
   local appliedTextScale = tonumber(ctx.CFG.monitorScale) or textScale
   local appliedOutputMode = string.lower(tostring(ctx.CFG.displayOutput or outputMode))
+  local appliedEnergyUnit = string.lower(tostring(ctx.CFG.energyUnit or energyUnit))
 
   local function outputLabel(mode)
     if mode == "terminal" then return "TERMINAL" end
@@ -262,25 +266,33 @@ function M.drawConfigView(ctx, layout)
     return "MONITOR"
   end
 
-  ctx.drawBox(x - 1, y, w + 2, 10, "CURRENT VALUES", C.borderDim)
+  local function energyLabel(unit)
+    if unit == "fe" then return "FE" end
+    return "J"
+  end
+
+  ctx.drawBox(x - 1, y, w + 2, 12, "CURRENT VALUES", C.borderDim)
   ctx.drawKeyValue(x, y + 1, "UI Scale", string.format("%.1fx", uiScale), C.dim, C.info, w)
   ctx.drawKeyValue(x, y + 2, "Text Scale", string.format("%.1fx", textScale), C.dim, C.info, w)
   ctx.drawKeyValue(x, y + 3, "Output", outputLabel(outputMode), C.dim, C.info, w)
-  ctx.drawKeyValue(x, y + 4, "Applied UI", string.format("%.1fx", appliedUiScale), C.dim, C.ok, w)
-  ctx.drawKeyValue(x, y + 5, "Applied TXT", string.format("%.1fx", appliedTextScale), C.dim, C.ok, w)
-  ctx.drawKeyValue(x, y + 6, "Applied OUT", outputLabel(appliedOutputMode), C.dim, C.ok, w)
-  ctx.drawKeyValue(x, y + 7, "State", setup.dirty and "MODIFIED" or "SAVED", C.dim, setup.dirty and C.warn or C.ok, w)
+  ctx.drawKeyValue(x, y + 4, "Energy Unit", energyLabel(energyUnit), C.dim, C.info, w)
+  ctx.drawKeyValue(x, y + 5, "Applied UI", string.format("%.1fx", appliedUiScale), C.dim, C.ok, w)
+  ctx.drawKeyValue(x, y + 6, "Applied TXT", string.format("%.1fx", appliedTextScale), C.dim, C.ok, w)
+  ctx.drawKeyValue(x, y + 7, "Applied OUT", outputLabel(appliedOutputMode), C.dim, C.ok, w)
+  ctx.drawKeyValue(x, y + 8, "Applied UNIT", energyLabel(appliedEnergyUnit), C.dim, C.ok, w)
+  ctx.drawKeyValue(x, y + 9, "State", setup.dirty and "MODIFIED" or "SAVED", C.dim, setup.dirty and C.warn or C.ok, w)
 
-  ctx.drawBox(x - 1, y + 11, w + 2, 7, "TIPS", C.borderDim)
-  ctx.writeAt(x, y + 12, ctx.shortText("- UI +/- : scale layout", w), C.dim, C.panelDark)
-  ctx.writeAt(x, y + 13, ctx.shortText("- TXT +/- : monitor text", w), C.dim, C.panelDark)
-  ctx.writeAt(x, y + 14, ctx.shortText("- TERM/MON/BOTH : sortie", w), C.dim, C.panelDark)
-  ctx.writeAt(x, y + 15, ctx.shortText("- SAVE / RELOAD config", w), C.dim, C.panelDark)
+  ctx.drawBox(x - 1, y + 13, w + 2, 7, "TIPS", C.borderDim)
+  ctx.writeAt(x, y + 14, ctx.shortText("- UI +/- : scale layout", w), C.dim, C.panelDark)
+  ctx.writeAt(x, y + 15, ctx.shortText("- TXT +/- : monitor text", w), C.dim, C.panelDark)
+  ctx.writeAt(x, y + 16, ctx.shortText("- TERM/MON/BOTH : sortie", w), C.dim, C.panelDark)
+  ctx.writeAt(x, y + 17, ctx.shortText("- UNIT J/FE : energie", w), C.dim, C.panelDark)
+  ctx.writeAt(x, y + 18, ctx.shortText("- SAVE / RELOAD config", w), C.dim, C.panelDark)
 
   local msg = tostring(setup.lastMessage or "Ready")
-  ctx.drawBox(x - 1, y + 19, w + 2, 5, "MESSAGE", C.borderDim)
-  ctx.writeAt(x, y + 20, ctx.shortText(msg, w), C.info, C.panelDark)
-  ctx.writeAt(x, y + 21, ctx.shortText("Save: " .. tostring(setup.saveStatus or "N/A"), w), C.dim, C.panelDark)
+  ctx.drawBox(x - 1, y + 21, w + 2, 5, "MESSAGE", C.borderDim)
+  ctx.writeAt(x, y + 22, ctx.shortText(msg, w), C.info, C.panelDark)
+  ctx.writeAt(x, y + 23, ctx.shortText("Save: " .. tostring(setup.saveStatus or "N/A"), w), C.dim, C.panelDark)
 
   ctx.drawControlPanel(controlPanel, layout)
 end
@@ -308,7 +320,7 @@ function M.drawSetupView(ctx, layout)
   ctx.drawKeyValue(lx, ly + 3, "Laser", setup.working.devices.laser, C.dim, setup.deviceStatus.laser == "OK" and C.ok or C.bad, left.w - 6)
   ctx.drawKeyValue(lx, ly + 4, "Induction", setup.working.devices.induction, C.dim, setup.deviceStatus.induction == "OK" and C.ok or C.bad, left.w - 6)
 
-  ctx.drawBox(lx - 1, ly + 6, left.w - 4, 10, "ACTIVE CONFIG", C.borderDim)
+  ctx.drawBox(lx - 1, ly + 6, left.w - 4, 12, "ACTIVE CONFIG", C.borderDim)
   ctx.drawKeyValue(lx, ly + 7, "Relay LAS", setup.working.relays.laser.name .. "." .. setup.working.relays.laser.side, C.dim, setup.deviceStatus.relayLaser == "OK" and C.ok or C.warn, left.w - 6)
   ctx.drawKeyValue(lx, ly + 8, "Relay T", setup.working.relays.tritium.name .. "." .. setup.working.relays.tritium.side, C.dim, setup.deviceStatus.relayTritium == "OK" and C.ok or C.warn, left.w - 6)
   ctx.drawKeyValue(lx, ly + 9, "Relay D", setup.working.relays.deuterium.name .. "." .. setup.working.relays.deuterium.side, C.dim, setup.deviceStatus.relayDeuterium == "OK" and C.ok or C.warn, left.w - 6)
@@ -316,8 +328,9 @@ function M.drawSetupView(ctx, layout)
   ctx.drawKeyValue(lx, ly + 11, "Reader D", setup.working.readers.deuterium, C.dim, setup.deviceStatus.readerDeuterium == "OK" and C.ok or C.warn, left.w - 6)
   ctx.drawKeyValue(lx, ly + 12, "Reader Aux", setup.working.readers.aux, C.dim, setup.deviceStatus.readerAux == "OK" and C.ok or C.warn, left.w - 6)
   ctx.drawKeyValue(lx, ly + 13, "View/Out", setup.working.ui.preferredView .. "/" .. tostring(setup.working.ui.output or "monitor"), C.dim, C.info, left.w - 6)
-  ctx.drawKeyValue(lx, ly + 14, "Text Scale", tostring(setup.working.monitor.scale), C.dim, C.info, left.w - 6)
-  ctx.drawKeyValue(lx, ly + 15, "UI Scale", tostring(setup.working.ui.scale), C.dim, C.info, left.w - 6)
+  ctx.drawKeyValue(lx, ly + 14, "Energy Unit", string.upper(tostring(setup.working.ui.energyUnit or "j")), C.dim, C.info, left.w - 6)
+  ctx.drawKeyValue(lx, ly + 15, "Text Scale", tostring(setup.working.monitor.scale), C.dim, C.info, left.w - 6)
+  ctx.drawKeyValue(lx, ly + 16, "UI Scale", tostring(setup.working.ui.scale), C.dim, C.info, left.w - 6)
 
   if center then
     ctx.drawBox(center.x, center.y, center.w, center.h, "DEVICE STATUS / TESTS", C.border)

@@ -269,23 +269,55 @@ function M.run()
     return tostring(math.floor(n))
   end
 
-  local function formatMJ(n)
-    if type(n) ~= "number" then return tostring(n) end
-    local absn = math.abs(n)
-    local units = {
-      { 1e12, "TMJ" },
-      { 1e9, "GMJ" },
-      { 1e6, "MMJ" },
-      { 1e3, "kMJ" },
-    }
+  local ENERGY_J_PER_FE = 2.5
+  local ENERGY_FE_PER_J = 1 / ENERGY_J_PER_FE
 
+  local function sanitizeEnergyUnit(value)
+    local unit = string.lower(tostring(value or "j"))
+    if unit == "fe" then return "fe" end
+    return "j"
+  end
+
+  local function toDisplayEnergy(joules, unit)
+    if unit == "fe" then
+      return joules * ENERGY_FE_PER_J
+    end
+    return joules
+  end
+
+  local function formatScaledEnergy(value, suffix)
+    local absn = math.abs(value)
+    local units = {
+      { 1e15, "P" },
+      { 1e12, "T" },
+      { 1e9, "G" },
+      { 1e6, "M" },
+      { 1e3, "k" },
+    }
     for _, u in ipairs(units) do
       if absn >= u[1] then
-        return string.format("%.2f%s", n / u[1], u[2])
+        return string.format("%.2f%s%s", value / u[1], u[2], suffix)
       end
     end
+    return string.format("%.0f%s", value, suffix)
+  end
 
-    return string.format("%.0fMJ", n)
+  local function formatEnergy(n)
+    if type(n) ~= "number" then return tostring(n) end
+    local unit = sanitizeEnergyUnit(CFG.energyUnit)
+    local display = toDisplayEnergy(n, unit)
+    local suffix = unit == "fe" and "FE" or "J"
+    return formatScaledEnergy(display, suffix)
+  end
+
+  local function formatEnergyPerTick(n)
+    if type(n) ~= "number" then return tostring(n) end
+    return formatEnergy(n) .. "/t"
+  end
+
+  local function formatMJ(n)
+    -- Alias historique garde pour compatibilite des appels existants.
+    return formatEnergy(n)
   end
 
   local function normalizePortMode(mode)
@@ -642,6 +674,7 @@ function M.run()
     if merged.ui.preferredView == "CONFIG" then merged.ui.preferredView = "CFG" end
     merged.ui.scale = CoreConfig.sanitizeUiScale(merged.ui.scale, base.ui.scale or 1.0)
     merged.ui.output = CoreConfig.sanitizeDisplayOutput(merged.ui.output, base.ui.output or "monitor")
+    merged.ui.energyUnit = CoreConfig.sanitizeEnergyUnit(merged.ui.energyUnit, base.ui.energyUnit or "j")
     merged.monitor.scale = CoreConfig.sanitizeMonitorScale(merged.monitor.scale, base.monitor.scale or 0.5)
     return merged
   end
@@ -2049,9 +2082,11 @@ function M.run()
 
     CFG.uiScale = CoreConfig.sanitizeUiScale(working.ui.scale, CFG.uiScale or 1.0)
     CFG.displayOutput = CoreConfig.sanitizeDisplayOutput(working.ui.output, CFG.displayOutput or "monitor")
+    CFG.energyUnit = CoreConfig.sanitizeEnergyUnit(working.ui.energyUnit, CFG.energyUnit or "j")
     CFG.monitorScale = CoreConfig.sanitizeMonitorScale(working.monitor.scale, CFG.monitorScale or 0.5)
     working.ui.scale = CFG.uiScale
     working.ui.output = CFG.displayOutput
+    working.ui.energyUnit = CFG.energyUnit
     working.monitor.scale = CFG.monitorScale
 
     IoMonitor.setupMonitor(nativeTerm, hw, CFG, C)
@@ -2126,6 +2161,20 @@ function M.run()
     state.setup.dirty = true
     state.setup.lastMessage = "Display output: " .. string.upper(nextMode)
     state.lastAction = "Output " .. string.upper(nextMode)
+    applySetupScaleRuntime(working)
+    pushEvent(state.lastAction)
+  end
+
+  local function setEnergyUnit(unit)
+    local working = ensureSetupWorking()
+    local uiCfg = working.ui or {}
+    working.ui = uiCfg
+
+    local nextUnit = CoreConfig.sanitizeEnergyUnit(unit, CFG.energyUnit or "j")
+    uiCfg.energyUnit = nextUnit
+    state.setup.dirty = true
+    state.setup.lastMessage = "Energy unit: " .. string.upper(nextUnit)
+    state.lastAction = "Unit " .. string.upper(nextUnit)
     applySetupScaleRuntime(working)
     pushEvent(state.lastAction)
   end
@@ -2239,6 +2288,7 @@ function M.run()
       adjustTextScale = adjustTextScale,
       adjustInjectionRate = adjustInjectionRate,
       setDisplayOutput = setDisplayOutput,
+      setEnergyUnit = setEnergyUnit,
       saveSetupConfig = saveSetupConfig,
       reloadSetupConfig = reloadSetupConfig,
       runInstallerFromSetup = runInstallerFromSetup,
@@ -2367,6 +2417,8 @@ function M.run()
       shortText = shortText,
       clamp = clamp,
       fmt = fmt,
+      formatEnergy = formatEnergy,
+      formatEnergyPerTick = formatEnergyPerTick,
       formatMJ = formatMJ,
       yesno = yesno,
       reactorPhase = reactorPhase,
@@ -2534,12 +2586,12 @@ function M.run()
   function drawInductionDiagramInfo(x, y, w, h, geo, status, tone)
     writeAt(x + 2, y + 1, string.format("STATE %s", status), tone, C.panelDark)
     writeAt(geo.infoX, geo.sy + 1, string.format("FILL  %5.1f%%", state.inductionPct), C.energy, C.panelDark)
-    writeAt(geo.infoX, geo.sy + 2, string.format("STORED %s", formatMJ(state.inductionEnergy)), C.text, C.panelDark)
-    writeAt(geo.infoX, geo.sy + 3, string.format("MAX    %s", formatMJ(state.inductionMax)), C.dim, C.panelDark)
-    writeAt(geo.infoX, geo.sy + 4, string.format("NEEDED %s", formatMJ(state.inductionNeeded)), C.dim, C.panelDark)
-    writeAt(geo.infoX, geo.sy + 6, string.format("IN   %s", formatMJ(state.inductionInput)), C.ok, C.panelDark)
-    writeAt(geo.infoX, geo.sy + 7, string.format("OUT  %s", formatMJ(state.inductionOutput)), C.warn, C.panelDark)
-    writeAt(geo.infoX, geo.sy + 8, string.format("CAP  %s", formatMJ(state.inductionTransferCap)), C.info, C.panelDark)
+    writeAt(geo.infoX, geo.sy + 2, string.format("STORED %s", formatEnergy(state.inductionEnergy)), C.text, C.panelDark)
+    writeAt(geo.infoX, geo.sy + 3, string.format("MAX    %s", formatEnergy(state.inductionMax)), C.dim, C.panelDark)
+    writeAt(geo.infoX, geo.sy + 4, string.format("NEEDED %s", formatEnergy(state.inductionNeeded)), C.dim, C.panelDark)
+    writeAt(geo.infoX, geo.sy + 6, string.format("IN   %s", formatEnergyPerTick(state.inductionInput)), C.ok, C.panelDark)
+    writeAt(geo.infoX, geo.sy + 7, string.format("OUT  %s", formatEnergyPerTick(state.inductionOutput)), C.warn, C.panelDark)
+    writeAt(geo.infoX, geo.sy + 8, string.format("CAP  %s", formatEnergyPerTick(state.inductionTransferCap)), C.info, C.panelDark)
     writeAt(geo.infoX, geo.sy + 9, string.format("PORT  %s", state.inductionPortMode), C.info, C.panelDark)
     writeAt(geo.infoX, geo.sy + 10, string.format("CELLS %d", state.inductionCells), C.info, C.panelDark)
     writeAt(geo.infoX, geo.sy + 11, string.format("PROV  %d", state.inductionProviders), C.info, C.panelDark)

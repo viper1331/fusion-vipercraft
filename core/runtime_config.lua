@@ -12,6 +12,7 @@ function M.new()
     uiScale = 1.0,
     displayOutput = "monitor",
     monitorScale = 0.5,
+    energyUnit = "j",
     refreshDelay = 0.20,
 
     ignitionLaserEnergyThreshold = 2000000000,

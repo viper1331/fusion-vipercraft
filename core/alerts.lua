@@ -14,12 +14,45 @@ function M.build(api)
   local CoreReactor = api.CoreReactor
 
   local runtime = {}
+  local ENERGY_FE_PER_J = 0.4
 
   local function isRelayMappedAndPresent(actionName)
     local action = type(CFG.actions) == "table" and CFG.actions[actionName] or nil
     if type(action) ~= "table" then return false end
     if type(action.relay) ~= "string" or action.relay == "" then return false end
     return hw.relays[action.relay] ~= nil
+  end
+
+  local function currentEnergyUnit()
+    local unit = string.lower(tostring(CFG.energyUnit or "j"))
+    if unit == "fe" then return "fe" end
+    return "j"
+  end
+
+  local function formatEnergyThreshold(joules)
+    local value = toNumber(joules, 0)
+    local suffix = "J"
+    if currentEnergyUnit() == "fe" then
+      value = value * ENERGY_FE_PER_J
+      suffix = "FE"
+    end
+
+    local absn = math.abs(value)
+    local units = {
+      { 1e15, "P" },
+      { 1e12, "T" },
+      { 1e9, "G" },
+      { 1e6, "M" },
+      { 1e3, "k" },
+    }
+
+    for _, u in ipairs(units) do
+      if absn >= u[1] then
+        return string.format("%.2f %s%s", value / u[1], u[2], suffix)
+      end
+    end
+
+    return string.format("%.0f %s", value, suffix)
   end
 
   function runtime.getRuntimeFuelMode()
@@ -69,8 +102,9 @@ function M.build(api)
   end
 
   function runtime.getIgnitionChecklist()
+    local thresholdLabel = formatEnergyThreshold(CFG.ignitionLaserEnergyThreshold)
     return {
-      { key = "LAS >= 2 GFE", ok = state.laserEnergy >= CFG.ignitionLaserEnergyThreshold, wait = state.laserPresent },
+      { key = "LAS >= " .. thresholdLabel, ok = state.laserEnergy >= CFG.ignitionLaserEnergyThreshold, wait = state.laserPresent },
       { key = "T OPEN", ok = state.tOpen },
       { key = "D OPEN", ok = state.dOpen },
       { key = "HOHLRAUM PRESENT", ok = state.hohlraumPresent },
@@ -106,7 +140,7 @@ function M.build(api)
     end
 
     if (not state.ignition) and state.laserEnergy < CFG.ignitionLaserEnergyThreshold then
-      table.insert(warnings, "LAS BELOW 2 GFE")
+      table.insert(warnings, "LAS BELOW " .. formatEnergyThreshold(CFG.ignitionLaserEnergyThreshold))
     end
     if state.ignition then
       if not runtime.isRuntimeFuelOk() then

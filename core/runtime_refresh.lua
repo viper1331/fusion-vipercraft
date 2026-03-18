@@ -145,6 +145,11 @@ function M.build(api)
     state.injectionMin = 0
     state.injectionMax = 98
     state.injectionWritable = false
+    state.fuelFlowMbT = 0
+    state.fuelFlowSource = "STARVED"
+    state.fuelFlowDTMbT = 0
+    state.fuelFlowDMbT = 0
+    state.fuelFlowTMbT = 0
 
     local formed = false
     local formedFromLogic = false
@@ -321,6 +326,46 @@ function M.build(api)
     state.tOpen = readRelayOutputState("tritium", state.tOpen)
   end
 
+  local function updateFuelFlow()
+    local injection = math.max(0, toNumber(state.injectionRate, 0))
+    if not state.ignition then
+      injection = 0
+    end
+
+    local dt = state.dtOpen == true
+    local d = state.dOpen == true
+    local t = state.tOpen == true
+
+    state.fuelFlowMbT = 0
+    state.fuelFlowSource = "STARVED"
+    state.fuelFlowDTMbT = 0
+    state.fuelFlowDMbT = 0
+    state.fuelFlowTMbT = 0
+
+    if dt and not d and not t then
+      state.fuelFlowSource = "DT"
+      state.fuelFlowDTMbT = injection
+      state.fuelFlowMbT = injection
+      return
+    end
+
+    if (not dt) and d and t then
+      local split = injection * 0.5
+      state.fuelFlowSource = "D+T"
+      state.fuelFlowDMbT = split
+      state.fuelFlowTMbT = split
+      state.fuelFlowMbT = injection
+      return
+    end
+
+    if dt and (d or t) then
+      state.fuelFlowSource = "HYBRID"
+      state.fuelFlowDTMbT = injection
+      state.fuelFlowMbT = injection
+      return
+    end
+  end
+
   function runtime.refreshAll()
     local wasIgnited = state.ignition
     scanPeripherals()
@@ -333,6 +378,7 @@ function M.build(api)
     readReactor()
     readInductionStatus()
     readReaders()
+    updateFuelFlow()
     if (not wasIgnited) and state.ignition then
       pushEvent("Reactor running")
     end

@@ -87,10 +87,14 @@ function M.drawStatusPanel(ctx, panel)
     local mode = ctx.getRuntimeFuelMode()
     local flowOk = ctx.isRuntimeFuelOk()
     local injText = tostring(math.floor(tonumber(state.injectionRate) or 0))
+    local flowMbT = tonumber(state.fuelFlowMbT) or 0
+    local flowText = string.format("%.1f mB/t", flowMbT)
+    local flowSource = tostring(state.fuelFlowSource or mode)
     local rows = {
       { "Fuel Mode", mode, mode == "STARVED" and C.bad or C.ok },
-      { "Fuel Flow", flowOk and "OK" or "NO FLOW", flowOk and C.ok or C.bad },
-      { "Injection", injText, state.injectionWritable and C.info or C.warn },
+      { "Fuel Flow", flowText, flowMbT > 0 and C.ok or C.bad },
+      { "Flow Src", flowSource, flowOk and C.info or C.warn },
+      { "Injection", injText .. " mB/t", state.injectionWritable and C.info or C.warn },
       { "Hohlraum", state.hohlraumPresent and "PRESENT" or "MISSING", state.hohlraumPresent and C.ok or C.bad },
       { "D Line", state.dOpen and "OPEN" or "CLOSED", state.dOpen and C.deuterium or C.warn },
       { "T Line", state.tOpen and "OPEN" or "CLOSED", state.tOpen and C.tritium or C.warn },
@@ -389,11 +393,16 @@ function M.buildButtons(ctx, layout)
 
   local function buildConfigButtons()
     local outputMode = "monitor"
+    local energyUnit = "j"
     if type(state.setup) == "table" and type(state.setup.working) == "table" and type(state.setup.working.ui) == "table" then
       outputMode = string.lower(tostring(state.setup.working.ui.output or "monitor"))
+      energyUnit = string.lower(tostring(state.setup.working.ui.energyUnit or "j"))
     end
     if outputMode ~= "terminal" and outputMode ~= "both" and outputMode ~= "monitor" then
       outputMode = "monitor"
+    end
+    if energyUnit ~= "j" and energyUnit ~= "fe" then
+      energyUnit = "j"
     end
 
     addGridRow({
@@ -408,6 +417,10 @@ function M.buildButtons(ctx, layout)
       { id = "cfgOutTerm", label = "TERM", bg = outputMode == "terminal" and C.btnOn or C.panelMid, action = function() actions.setDisplayOutput("terminal") end },
       { id = "cfgOutMon", label = "MON", bg = outputMode == "monitor" and C.btnOn or C.panelMid, action = function() actions.setDisplayOutput("monitor") end },
       { id = "cfgOutBoth", label = "BOTH", bg = outputMode == "both" and C.btnOn or C.panelMid, action = function() actions.setDisplayOutput("both") end },
+    }, 2, 1)
+    addGridRow({
+      { id = "cfgUnitJ", label = "UNIT J", bg = energyUnit == "j" and C.btnOn or C.panelMid, action = function() actions.setEnergyUnit("j") end },
+      { id = "cfgUnitFE", label = "UNIT FE", bg = energyUnit == "fe" and C.btnOn or C.panelMid, action = function() actions.setEnergyUnit("fe") end },
     }, 2, 1)
     addGridRow({
       { id = "cfgSave", label = "SAVE CONFIG", bg = C.ok, action = actions.saveSetupConfig },

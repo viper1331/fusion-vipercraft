@@ -34,6 +34,11 @@ function M.defaultRuntimeState(localVersion, updateEnabled)
     injectionMin = 0,
     injectionMax = 98,
     injectionWritable = false,
+    fuelFlowMbT = 0,
+    fuelFlowSource = "STARVED",
+    fuelFlowDTMbT = 0,
+    fuelFlowDMbT = 0,
+    fuelFlowTMbT = 0,
 
     laserPresent = false,
     laserEnergy = 0,
