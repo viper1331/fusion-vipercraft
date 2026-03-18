@@ -461,7 +461,7 @@ function M.buildButtons(ctx, layout)
     local innerW = center.w - 4
     local btnH = 3
     local gap = 2
-    local barY = center.y + center.h - btnH - 4
+    local barY = center.y + center.h - btnH - 6
     local minBtnW = math.max(#"T LOCK", #"DT LOCK", #"D LOCK") + 2
     local btnW = math.max(minBtnW, math.floor((innerW - (gap * 2)) / 3))
     local totalW = (btnW * 3) + (gap * 2)

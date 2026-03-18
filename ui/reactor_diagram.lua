@@ -207,29 +207,40 @@ function M.build(api)
     end
 
     -- Coeur + croix proche coeur.
-    drawCell(gcx, gcy, coreColor, state.ignition and (pulse and "**" or "##") or (state.ignitionSequencePending and (blink and "!!" or "::") or "[]"), C.text)
+    local hohlraumPresent = state.hohlraumPresent == true
+    local hohlGlyph = hohlraumPresent and "H+" or "H-"
+    local coreCenterGlyph = hohlGlyph
+    if state.ignition then
+      coreCenterGlyph = pulse and hohlGlyph or "**"
+    elseif state.ignitionSequencePending then
+      coreCenterGlyph = blink and hohlGlyph or "::"
+    end
+    local hohlTone = hohlraumPresent and C.ok or C.bad
+    drawCell(gcx, gcy, coreColor, coreCenterGlyph, hohlTone)
     drawCell(gcx - 1, gcy, ringColor, "[]", C.text)
     drawCell(gcx + 1, gcy, ringColor, "[]", C.text)
     drawCell(gcx, gcy - 1, ringColor, "[]", C.text)
     drawCell(gcx, gcy + 1, ringColor, "[]", C.text)
 
     -- Lignes de flux:
-    -- - D de droite en rouge (deuterium)
-    -- - DT en violet
+    -- - D a droite rouge quand ouvert, orange quand ferme
+    -- - DT violet quand ouvert, orange quand ferme
+    -- Les 3 flux sont separes jusqu'au coeur.
     local laserOn = state.laserChargeOn or state.laserLineOn or state.ignitionSequencePending
     local laserTone = laserOn and C.bad or C.dim
-    local dFlowColor = C.bad
-    local dtFlowColor = colors.purple
-    local dTone = state.dOpen and dFlowColor or C.dim
-    local tTone = state.tOpen and C.tritium or C.dim
-    local dtTone = state.dtOpen and dtFlowColor or C.dim
+    local closedFuelColor = C.warn
+    local dFlowColor = state.dOpen and C.bad or closedFuelColor
+    local dtFlowColor = state.dtOpen and colors.purple or closedFuelColor
+    local dTone = dFlowColor
+    local tTone = state.tOpen and C.tritium or closedFuelColor
+    local dtTone = dtFlowColor
 
     local conduitTone = C.borderDim
     if state.alert == "WARN" then conduitTone = C.warn end
     if state.alert == "DANGER" then conduitTone = C.bad end
 
     local laserPathTone = laserOn and C.bad or conduitTone
-    local tPathTone = state.tOpen and C.tritium or conduitTone
+    local tPathTone = state.tOpen and C.tritium or closedFuelColor
     local dPathTone = dFlowColor
     local dtPathTone = dtFlowColor
 
@@ -256,18 +267,37 @@ function M.build(api)
     end
 
     -- Branches carburant vers les locks.
+    -- Trajets independants: T, DT et D arrivent separement au coeur.
     local legY = math.min(gh - 1, gcy + outerR + 1)
-    for gyLine = gcy + 2, legY do
+    local splitY = math.min(gh - 2, gcy + 3)
+
+    -- Montantes principales depuis les vannes.
+    for gyLine = splitY, legY do
       drawCell(gcx - branchOffset, gyLine, tPathTone)
+      drawCell(gcx, gyLine, dtPathTone)
       drawCell(gcx + branchOffset, gyLine, dPathTone)
     end
-    for gxLine = gcx - (branchOffset - 1), gcx - 1 do
-      drawCell(gxLine, gcy + 2, tPathTone)
+
+    -- Branche T vers entree gauche du coeur.
+    for gxLine = gcx - branchOffset + 1, gcx - 2 do
+      drawCell(gxLine, splitY, tPathTone)
     end
-    for gxLine = gcx + 1, gcx + (branchOffset - 1) do
-      drawCell(gxLine, gcy + 2, dPathTone)
+    for gyLine = splitY - 1, gcy + 1, -1 do
+      drawCell(gcx - 2, gyLine, tPathTone)
     end
-    drawCell(gcx, gcy + 2, dtPathTone)
+    drawCell(gcx - 1, gcy + 1, tPathTone)
+
+    -- Branche D vers entree droite du coeur.
+    for gxLine = gcx + 2, gcx + branchOffset - 1 do
+      drawCell(gxLine, splitY, dPathTone)
+    end
+    for gyLine = splitY - 1, gcy + 1, -1 do
+      drawCell(gcx + 2, gyLine, dPathTone)
+    end
+    drawCell(gcx + 1, gcy + 1, dPathTone)
+
+    -- Branche DT vers entree basse du coeur.
+    drawCell(gcx, gcy + 1, dtPathTone)
 
     local tValveGlyph = state.tOpen and (tAnimating and (blink and "<>" or ">>") or "TT") or (tAnimating and (blink and "xx" or "x ") or "T ")
     local dValveGlyph = state.dOpen and (dAnimating and (blink and "<>" or "<<") or "DD") or (dAnimating and (blink and "xx" or " x") or "D ")
@@ -321,8 +351,8 @@ function M.build(api)
           local dLockX = rightBranchX - math.floor((#dLock - 2) / 2)
 
           local tLockBg = state.tOpen and C.tritium or C.panelMid
-          local dtLockBg = state.dtOpen and dtFlowColor or C.panelMid
-          local dLockBg = state.dOpen and dFlowColor or C.panelMid
+          local dtLockBg = dtFlowColor
+          local dLockBg = dFlowColor
           if tAnimating then tLockBg = blink and C.warn or tLockBg end
           if dtAnimating then dtLockBg = blink and C.warn or dtLockBg end
           if dAnimating then dLockBg = blink and C.warn or dLockBg end
@@ -339,13 +369,19 @@ function M.build(api)
       local tMx = rx
       local dMx = rx + gw * cellW - 6
       writeAt(tMx, tdModuleY, " TANK T", state.tOpen and C.text or C.dim, state.tOpen and C.tritium or C.panelMid)
-      writeAt(dMx, tdModuleY, " TANK D", state.dOpen and C.text or C.dim, state.dOpen and dFlowColor or C.panelMid)
+      writeAt(dMx, tdModuleY, " TANK D", state.dOpen and C.text or C.dim, dFlowColor)
     end
 
     writeAt(
       x + 3,
       y + 2,
-      shortText("CORE " .. (state.reactorPresent and (state.reactorFormed and "FORMED" or "UNFORMED") or "ABSENT"), math.max(8, math.floor(w * 0.31))),
+      shortText(
+        "CORE "
+          .. (state.reactorPresent and (state.reactorFormed and "FORMED" or "UNFORMED") or "ABSENT")
+          .. " | HOHL "
+          .. (hohlraumPresent and "OK" or "MISSING"),
+        math.max(8, math.floor(w * 0.45))
+      ),
       state.reactorPresent and C.info or C.bad,
       C.panelDark
     )

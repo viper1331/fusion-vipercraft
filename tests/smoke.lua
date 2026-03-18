@@ -1,7 +1,20 @@
 -- tests/smoke.lua
--- Smoke test CraftOS-PC pour valider l'integrite minimale du package.
+-- Orchestrateur de validation locale (CraftOS-PC headless compatible).
+-- Objectif: verifier rapidement l'integrite du projet avant modification/push.
+
+local EXIT = {
+  OK = 0,
+  VERSION_MISSING = 10,
+  VERSION_EMPTY = 11,
+  VERSION_INVALID = 12,
+  MANIFEST_MISSING = 20,
+  MANIFEST_EMPTY = 21,
+  MANIFEST_INVALID = 22,
+  MODULE_LOAD_ERROR = 23,
+}
 
 local failures = {}
+local exitCode = EXIT.OK
 
 local function trim(text)
   text = tostring(text or "")
@@ -17,8 +30,15 @@ local function toPath(relPath)
   return fs.combine(basePath, relPath)
 end
 
-local function fail(msg)
+local function setExit(code)
+  if exitCode == EXIT.OK then
+    exitCode = code
+  end
+end
+
+local function fail(code, msg)
   failures[#failures + 1] = msg
+  setExit(code)
   print("[FAIL] " .. msg)
 end
 
@@ -36,13 +56,30 @@ local function readAll(path)
   return data
 end
 
-local function expectFile(path, label)
-  if not fs.exists(path) then
-    fail(label .. " manquant: " .. path)
+local function expectFile(path, label, codeIfMissing)
+  if not fs.exists(path) or fs.isDir(path) then
+    fail(codeIfMissing, label .. " manquant: " .. path)
     return false
   end
   ok(label .. " present: " .. path)
   return true
+end
+
+local function loadModule(moduleName)
+  local scriptPath = (shell and shell.getRunningProgram and shell.getRunningProgram()) or "tests/smoke.lua"
+  local scriptDir = fs.getDir(scriptPath)
+  local modulePath = fs.combine(scriptDir, moduleName)
+  local loadOk, moduleOrErr = pcall(dofile, modulePath)
+  if not loadOk then
+    fail(EXIT.MODULE_LOAD_ERROR, "Echec chargement module " .. moduleName .. ": " .. tostring(moduleOrErr))
+    return nil
+  end
+  if type(moduleOrErr) ~= "table" or type(moduleOrErr.run) ~= "function" then
+    fail(EXIT.MODULE_LOAD_ERROR, "Module invalide: " .. moduleName)
+    return nil
+  end
+  ok("Module test charge: " .. moduleName)
+  return moduleOrErr
 end
 
 if basePath ~= "" then
@@ -52,64 +89,67 @@ end
 local versionPath = toPath("fusion.version")
 local manifestPath = toPath("fusion.manifest.json")
 
-local hasVersion = expectFile(versionPath, "Version")
-local hasManifest = expectFile(manifestPath, "Manifest")
-
-if hasVersion then
-  local rawVersion = readAll(versionPath)
-  local version = trim(rawVersion)
-  if version == "" then
-    fail("fusion.version est vide")
+local versionValue = ""
+if expectFile(versionPath, "Version", EXIT.VERSION_MISSING) then
+  versionValue = trim(readAll(versionPath))
+  if versionValue == "" then
+    fail(EXIT.VERSION_EMPTY, "fusion.version est vide")
+  elseif not string.match(versionValue, "^%d+%.%d+%.%d+$") then
+    fail(EXIT.VERSION_INVALID, "fusion.version format invalide (attendu: X.Y.Z): " .. versionValue)
   else
-    ok("fusion.version non vide: " .. version)
+    ok("fusion.version valide: " .. versionValue)
   end
 end
 
-if hasManifest then
+local manifest = nil
+if expectFile(manifestPath, "Manifest", EXIT.MANIFEST_MISSING) then
   local rawManifest = readAll(manifestPath)
   if not rawManifest or trim(rawManifest) == "" then
-    fail("fusion.manifest.json est vide ou illisible")
+    fail(EXIT.MANIFEST_EMPTY, "fusion.manifest.json est vide ou illisible")
+  elseif not textutils or type(textutils.unserializeJSON) ~= "function" then
+    fail(EXIT.MANIFEST_INVALID, "Parser JSON indisponible (textutils.unserializeJSON)")
   else
-    local parsed = nil
-    if textutils and type(textutils.unserializeJSON) == "function" then
-      local parseOk, manifestOrErr = pcall(textutils.unserializeJSON, rawManifest)
-      if parseOk and type(manifestOrErr) == "table" then
-        parsed = manifestOrErr
-      else
-        fail("fusion.manifest.json invalide")
-      end
+    local parseOk, parsed = pcall(textutils.unserializeJSON, rawManifest)
+    if not parseOk or type(parsed) ~= "table" then
+      fail(EXIT.MANIFEST_INVALID, "fusion.manifest.json invalide")
     else
-      fail("Parser JSON indisponible (textutils.unserializeJSON)")
-    end
-
-    if parsed then
-      if type(parsed.files) ~= "table" then
-        fail("manifest.files absent ou invalide")
-      elseif #parsed.files == 0 then
-        fail("manifest.files est vide")
-      else
-        ok("manifest.files detecte: " .. tostring(#parsed.files) .. " fichiers")
-        for i, path in ipairs(parsed.files) do
-          if type(path) ~= "string" or trim(path) == "" then
-            fail("manifest.files[" .. tostring(i) .. "] invalide")
-          else
-            local fullPath = toPath(path)
-            if not fs.exists(fullPath) then
-              fail("Fichier manquant depuis manifest: " .. path)
-            else
-              ok("Present: " .. path)
-            end
-          end
-        end
-      end
+      manifest = parsed
+      ok("fusion.manifest.json parse correctement")
     end
   end
+end
+
+local structureModule = loadModule("project_structure.lua")
+local manifestModule = loadModule("manifest_consistency.lua")
+
+local sharedCtx = {
+  fail = fail,
+  ok = ok,
+  toPath = toPath,
+  exists = fs.exists,
+}
+
+if structureModule then
+  structureModule.run(sharedCtx)
+end
+
+if manifestModule then
+  manifestModule.run({
+    fail = fail,
+    ok = ok,
+    toPath = toPath,
+    exists = fs.exists,
+    manifest = manifest,
+    version = versionValue,
+  })
 end
 
 if #failures > 0 then
   print("SMOKE RESULT: FAIL (" .. tostring(#failures) .. " erreurs)")
-  -- Permet une sortie non nulle via shell.run (retour false).
-  error("SMOKE_FAILED", 0)
+  print("SMOKE_EXIT_CODE=" .. tostring(exitCode))
+  -- Retour non nul pour shell.run: false.
+  error("SMOKE_FAILED_CODE_" .. tostring(exitCode), 0)
 end
 
 print("SMOKE RESULT: OK")
+print("SMOKE_EXIT_CODE=0")
