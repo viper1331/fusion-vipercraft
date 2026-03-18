@@ -68,7 +68,7 @@ local function listCandidates(devices)
 end
 
 local function runMonitorTest(name)
-  if not name then return false, "Monitor non configuré" end
+  if not name then return false, "Monitor non configure" end
   local mon = peripheral.wrap(name)
   if not mon then return false, "Monitor introuvable" end
 
@@ -82,21 +82,21 @@ local function runMonitorTest(name)
     mon.write("Touch this monitor now")
   end)
 
-  if not ok then return false, "Échec écriture monitor" end
+  if not ok then return false, "Echec ecriture monitor" end
   local timer = os.startTimer(5)
   while true do
     local ev, p1 = os.pullEvent()
     if ev == "monitor_touch" and p1 == name then
-      return true, "Touch monitor détecté"
+      return true, "Touch monitor detecte"
     end
     if ev == "timer" and p1 == timer then
-      return true, "Monitor visible (pas de touch détecté)"
+      return true, "Monitor visible (pas de touch detecte)"
     end
   end
 end
 
 local function runRelayTest(relayName, side)
-  if not relayName then return false, "Relay non configuré" end
+  if not relayName then return false, "Relay non configure" end
   local relay = peripheral.wrap(relayName)
   if not relay or type(relay.setOutput) ~= "function" then
     return false, "Relay introuvable"
@@ -108,23 +108,23 @@ local function runRelayTest(relayName, side)
     relay.setOutput(side, false)
   end)
 
-  if not ok then return false, "Test relais échoué: " .. tostring(err) end
-  return true, "Pulse envoyé sur " .. relayName .. "." .. side
+  if not ok then return false, "Test relais echoue: " .. tostring(err) end
+  return true, "Pulse envoye sur " .. relayName .. "." .. side
 end
 
 local function runReaderTest(readerName)
-  if not readerName then return false, "Reader non configuré" end
+  if not readerName then return false, "Reader non configure" end
   local reader = peripheral.wrap(readerName)
   if not reader then return false, "Reader introuvable" end
 
   local methods = peripheral.getMethods(readerName) or {}
-  if #methods == 0 then return false, "Aucune méthode reader" end
-  return true, "Reader disponible (" .. tostring(#methods) .. " méthodes)"
+  if #methods == 0 then return false, "Aucune methode reader" end
+  return true, "Reader disponible (" .. tostring(#methods) .. " methodes)"
 end
 
 local function runDevicePresenceTest(name)
-  if not name then return false, "Non configuré" end
-  if peripheral.isPresent(name) then return true, "Présent" end
+  if not name then return false, "Non configure" end
+  if peripheral.isPresent(name) then return true, "Present" end
   return false, "Manquant"
 end
 
@@ -160,7 +160,7 @@ end
 
 local function writeConfig(config)
   local h = fs.open(CONFIG_FILE, "w")
-  if not h then return false, "Impossible d'écrire " .. CONFIG_FILE end
+  if not h then return false, "Impossible d ecrire " .. CONFIG_FILE end
   h.write("return ")
   h.write(serializeValue(config, 0))
   h.write("\n")
@@ -182,7 +182,7 @@ local state = {
   running = true,
   devices = gatherPeripherals(),
   suggested = nil,
-  status = "Bienvenue dans l'assistant d'installation Fusion.",
+  status = "Bienvenue dans l assistant d installation Fusion.",
   setupName = "Fusion ViperCraft",
   uiScale = 1.0,
   outputMode = "monitor",
@@ -229,6 +229,13 @@ local nativeTerm = term.current()
 local currentSource = "term"
 local currentSurface = nativeTerm
 
+
+local function sanitizeUiText(text)
+  local value = tostring(text or "")
+  value = value:gsub("[^\r\n\t\032-\126]", "")
+  return value
+end
+
 local function clearHitboxes(source)
   hitboxes[source] = {}
 end
@@ -264,14 +271,15 @@ local function withSurface(fn)
 end
 
 local function drawText(x, y, text, fg, bg)
+  local safeText = sanitizeUiText(text)
   currentSurface.setCursorPos(x, y)
   if bg then currentSurface.setBackgroundColor(bg) end
   if fg then currentSurface.setTextColor(fg) end
-  currentSurface.write(text)
+  currentSurface.write(safeText)
 end
 
 local function fitText(text, maxWidth)
-  local value = tostring(text or "")
+  local value = sanitizeUiText(text)
   if maxWidth <= 0 then return "" end
   if #value <= maxWidth then return value end
   if maxWidth <= 3 then return value:sub(1, maxWidth) end
@@ -370,12 +378,13 @@ end
 local stepTitles = {
   "Accueil",
   "Scan devices",
-  "Sélection monitor",
+  "Selection monitor",
   "Devices principaux",
   "Relays & faces",
   "Readers",
-  "Tests matériels",
-  "Récapitulatif",
+  "Laser count",
+  "Tests materiels",
+  "Recapitulatif",
 }
 
 local function drawSteps(w, layout)
@@ -399,9 +408,9 @@ local function drawFooter(w, h, layout)
 
   if layout.compact then
     drawText(2, top + 2, fitText("Back/Next: naviguer", w - 2), colors.gray, colors.black)
-    drawText(2, top + 3, fitText("Click ligne: sélectionner", w - 2), colors.gray, colors.black)
+    drawText(2, top + 3, fitText("Click ligne: selectionner", w - 2), colors.gray, colors.black)
   else
-    local help = "Back/Next pour naviguer • Cliquer une ligne pour sélectionner"
+    local help = "Back/Next pour naviguer - Cliquer une ligne pour selectionner"
     drawText(2, top + 2, fitText(help, w - 2), colors.gray, colors.black)
   end
 end
@@ -472,13 +481,13 @@ local function drawWelcome(source, w, h, layout)
   y = y + 2
   drawText(left + 1, y, fitText("Objectif", right - left - 1), colors.white, colors.black)
   y = y + 1
-  drawText(left + 2, y, fitText("Configurer rapidement le setup Fusion + périphériques.", right - left - 3), colors.lightGray, colors.black)
+  drawText(left + 2, y, fitText("Configurer rapidement le setup Fusion + peripheriques.", right - left - 3), colors.lightGray, colors.black)
   y = y + 2
 
-  local monitorInfo = state.selected.monitor and ("Monitor: " .. state.selected.monitor) or "Monitor: non sélectionné"
-  drawText(left + 1, y, fitText("État scan", right - left - 1), colors.white, colors.black)
+  local monitorInfo = state.selected.monitor and ("Monitor: " .. state.selected.monitor) or "Monitor: non selectionne"
+  drawText(left + 1, y, fitText("Etat scan", right - left - 1), colors.white, colors.black)
   y = y + 1
-  drawText(left + 2, y, fitText("Devices détectés: " .. tostring(#state.devices.all), right - left - 3), colors.lightGray, colors.black)
+  drawText(left + 2, y, fitText("Devices detectes: " .. tostring(#state.devices.all), right - left - 3), colors.lightGray, colors.black)
   y = y + 1
   drawText(left + 2, y, fitText(monitorInfo, right - left - 3), colors.lightGray, colors.black)
 
@@ -519,17 +528,18 @@ end
 local function drawMonitorStep(source, w, h, layout)
   local left = layout.marginX
   local right = w - layout.marginX
-  local listTop = layout.contentTop + 2
+  local listTop = layout.contentTop + 3
   local scrollX = right - 8
 
   drawText(left, layout.contentTop, fitText("Choisissez le monitor principal:", right - left + 1), colors.white, colors.black)
+  drawText(left, layout.contentTop + 1, fitText("Terminal mouse + monitor touch restent actifs.", right - left + 1), colors.lightGray, colors.black)
   local rows = math.max(3, layout.navY - listTop - 2)
   local maxScroll = math.max(0, #state.devices.monitors - rows)
   if state.monitorScroll > maxScroll then state.monitorScroll = maxScroll end
 
   createListRows(state.devices.monitors, state.selected.monitor, listTop, rows, state.monitorScroll, source, function(name)
     state.selected.monitor = name
-    state.status = "Monitor sélectionné: " .. name
+    state.status = "Monitor selectionne: " .. name
   end, left, scrollX - 1)
 
   drawButton(source, "mup", scrollX, listTop, 8, "UP", "secondary", function()
@@ -545,14 +555,14 @@ local function drawMonitorStep(source, w, h, layout)
       state.tests.monitor = { ok = ok, msg = msg }
       state.status = (ok and "OK: " or "FAIL: ") .. msg
     end },
-    { id = "toggle_surface", label = state.uiOnMonitor and "USE TERMINAL UI" or "DISPLAY ON MONITOR", kind = "secondary", action = function()
+    { id = "toggle_surface", label = state.uiOnMonitor and "MONITOR UI OFF" or "MONITOR UI ON", kind = "secondary", action = function()
       if state.uiOnMonitor then
         state.uiOnMonitor = false
         state.status = "Affichage revenu sur terminal."
         return
       end
       if not state.selected.monitor then
-        state.status = "Sélectionnez un monitor avant d'afficher l'UI dessus."
+        state.status = "Selectionnez un monitor avant activation UI monitor."
         return
       end
       local mon = peripheral.wrap(state.selected.monitor)
@@ -562,7 +572,7 @@ local function drawMonitorStep(source, w, h, layout)
       end
       pcall(function() mon.setTextScale(sanitizeScale(state.monitorScale)) end)
       state.uiOnMonitor = true
-      state.status = "UI affichée sur monitor. Utilisez monitor_touch."
+      state.status = "UI active sur monitor + terminal (clic et touch)."
     end },
   }, left, right, layout.compact and 1 or 2)
 end
@@ -585,7 +595,7 @@ local function drawCoreDevices(source, w, h, layout)
   local left = layout.marginX
   local right = w - layout.marginX
   local scrollX = right - 8
-  drawText(left, layout.contentTop, fitText("Choisissez un rôle puis cliquez un device.", right - left + 1), colors.white, colors.black)
+  drawText(left, layout.contentTop, fitText("Choisissez un role puis cliquez un device.", right - left + 1), colors.white, colors.black)
 
   local roles = {
     { "reactorController", "Reactor Ctrl" },
@@ -652,7 +662,7 @@ local function drawRelays(source, w, h, layout)
   if scroll > maxScroll then scroll = maxScroll end
   state.relayScroll[state.activeRelay] = scroll
 
-  drawText(left, listTop - 1, fitText("Sélection relay:", right - left + 1), colors.white, colors.black)
+  drawText(left, listTop - 1, fitText("Selection relay:", right - left + 1), colors.white, colors.black)
   createListRows(state.devices.relays, selectedRelay, listTop, rows, scroll, source, function(name)
     state.selected[meta.key] = name
     state.status = meta.label .. " -> " .. name
@@ -666,7 +676,7 @@ local function drawRelays(source, w, h, layout)
   end)
 
   local sideY = layout.navY - 8
-  drawText(left, sideY - 1, fitText("Sélection face:", right - left + 1), colors.white, colors.black)
+  drawText(left, sideY - 1, fitText("Selection face:", right - left + 1), colors.white, colors.black)
   local sideDefs = {}
   for _, side in ipairs(SIDES) do
     local selectedSide = state.selected[meta.side] == side
@@ -722,6 +732,45 @@ local function drawReaders(source, w, h, layout)
 
   drawButton(source, "reader_up", scrollX, listTop, 8, "UP", "secondary", function() state.readerScroll = math.max(0, state.readerScroll - 1) end)
   drawButton(source, "reader_down", scrollX, listTop + 4, 8, "DOWN", "secondary", function() state.readerScroll = math.min(maxScroll, state.readerScroll + 1) end)
+end
+
+local LASER_COUNT_OPTIONS = { 1, 2, 3, 4, 6, 8 }
+
+local function drawLaserCountStep(source, w, h, layout)
+  local left = layout.marginX
+  local right = w - layout.marginX
+  local panelTop = layout.contentTop
+  local panelBottom = layout.contentBottom
+  local titleW = right - left + 1
+
+  fillRect(left, panelTop, right, panelBottom, colors.black)
+  drawText(left, panelTop, fitText("Choisissez le nombre de lasers:", titleW), colors.white, colors.black)
+  drawText(left + 1, panelTop + 2, fitText("Valeur active: " .. tostring(state.laserCount), titleW - 1), colors.yellow, colors.black)
+  drawText(left + 1, panelTop + 3, fitText("Selection rapide par boutons.", titleW - 1), colors.lightGray, colors.black)
+
+  local defs = {}
+  for _, value in ipairs(LASER_COUNT_OPTIONS) do
+    local active = tonumber(state.laserCount) == value
+    table.insert(defs, {
+      id = "laser_count_" .. tostring(value),
+      label = tostring(value),
+      kind = active and "primary" or "secondary",
+      action = function()
+        state.laserCount = value
+        state.status = "Laser count choisi: " .. tostring(value)
+      end,
+    })
+  end
+
+  local rowY = panelTop + 6
+  if rowY <= panelBottom - 1 then
+    drawButtonRow(source, rowY, defs, left + 1, right - 1, layout.compact and 1 or 2)
+  end
+
+  local hintY = math.min(panelBottom - 1, rowY + 4)
+  if hintY > panelTop then
+    drawText(left + 1, hintY, fitText("Options: 1, 2, 3, 4, 6, 8", titleW - 1), colors.gray, colors.black)
+  end
 end
 
 local function runNamedTest(id)
@@ -824,6 +873,7 @@ local function drawSummary(source, w, h, layout)
   local right = w - layout.marginX
   local lines = {
     "Monitor: " .. tostring(state.selected.monitor),
+    "Laser count: " .. tostring(state.laserCount),
     "Reactor controller: " .. tostring(state.selected.reactorController),
     "Logic adapter: " .. tostring(state.selected.logicAdapter),
     "Laser: " .. tostring(state.selected.laser),
@@ -848,7 +898,7 @@ local function drawSummary(source, w, h, layout)
       local config = buildConfig()
       local valid, validationErr = validateBuiltConfig(config)
       if not valid then
-        state.status = "Config incomplète: " .. tostring(validationErr)
+        state.status = "Config incomplete: " .. tostring(validationErr)
         return
       end
 
@@ -864,7 +914,7 @@ local function drawSummary(source, w, h, layout)
       local config = buildConfig()
       local valid, validationErr = validateBuiltConfig(config)
       if not valid then
-        state.status = "Config incomplète: " .. tostring(validationErr)
+        state.status = "Config incomplete: " .. tostring(validationErr)
         return
       end
 
@@ -881,26 +931,13 @@ local function drawSummary(source, w, h, layout)
   }, left, right, 2)
 end
 
-local function render()
-  if state.uiOnMonitor and state.selected.monitor then
-    local mon = peripheral.wrap(state.selected.monitor)
-    if mon then
-      currentSource = "monitor"
-      currentSurface = mon
-      pcall(function() mon.setTextScale(sanitizeScale(state.monitorScale)) end)
-    else
-      currentSource = "term"
-      currentSurface = nativeTerm
-      state.uiOnMonitor = false
-    end
-  else
-    currentSource = "term"
-    currentSurface = nativeTerm
-  end
+local function renderOnSurface(source, surface)
+  currentSource = source
+  currentSurface = surface
 
   withSurface(function()
     local w, h = currentSurface.getSize()
-    clearHitboxes(currentSource)
+    clearHitboxes(source)
     currentSurface.setBackgroundColor(colors.black)
     currentSurface.setTextColor(colors.white)
     currentSurface.clear()
@@ -908,19 +945,42 @@ local function render()
     local layout = computeLayout(w, h)
 
     drawSteps(w, layout)
-    if state.step == 1 then drawWelcome(currentSource, w, h, layout)
-    elseif state.step == 2 then drawScan(currentSource, w, h, layout)
-    elseif state.step == 3 then drawMonitorStep(currentSource, w, h, layout)
-    elseif state.step == 4 then drawCoreDevices(currentSource, w, h, layout)
-    elseif state.step == 5 then drawRelays(currentSource, w, h, layout)
-    elseif state.step == 6 then drawReaders(currentSource, w, h, layout)
-    elseif state.step == 7 then drawTests(currentSource, w, h, layout)
-    elseif state.step == 8 then drawSummary(currentSource, w, h, layout)
+    if state.step == 1 then drawWelcome(source, w, h, layout)
+    elseif state.step == 2 then drawScan(source, w, h, layout)
+    elseif state.step == 3 then drawMonitorStep(source, w, h, layout)
+    elseif state.step == 4 then drawCoreDevices(source, w, h, layout)
+    elseif state.step == 5 then drawRelays(source, w, h, layout)
+    elseif state.step == 6 then drawReaders(source, w, h, layout)
+    elseif state.step == 7 then drawLaserCountStep(source, w, h, layout)
+    elseif state.step == 8 then drawTests(source, w, h, layout)
+    elseif state.step == 9 then drawSummary(source, w, h, layout)
     end
 
-    drawNavigation(currentSource, w, h, layout)
+    drawNavigation(source, w, h, layout)
     drawFooter(w, h, layout)
   end)
+end
+
+local function render()
+  local monitorSurface = nil
+  if state.uiOnMonitor and state.selected.monitor then
+    local mon = peripheral.wrap(state.selected.monitor)
+    if mon then
+      pcall(function() mon.setTextScale(sanitizeScale(state.monitorScale)) end)
+      monitorSurface = mon
+    else
+      state.uiOnMonitor = false
+      state.status = "Monitor UI desactivee: monitor introuvable."
+      clearHitboxes("monitor")
+    end
+  else
+    clearHitboxes("monitor")
+  end
+
+  renderOnSurface("term", nativeTerm)
+  if monitorSurface then
+    renderOnSurface("monitor", monitorSurface)
+  end
 end
 
 scanNow()
@@ -928,10 +988,10 @@ render()
 
 while state.running do
   local ev, p1, p2, p3 = os.pullEvent()
-  if ev == "mouse_click" and currentSource == "term" then
+  if ev == "mouse_click" then
     handleClick(p2, p3, "term")
     render()
-  elseif ev == "monitor_touch" and currentSource == "monitor" and p1 == state.selected.monitor then
+  elseif ev == "monitor_touch" and p1 == state.selected.monitor then
     handleClick(p2, p3, "monitor")
     render()
   elseif ev == "key" and p1 == keys.q then
@@ -953,5 +1013,5 @@ else
   term.setTextColor(colors.white)
   term.clear()
   term.setCursorPos(1, 1)
-  print("Installateur fermé.")
+  print("Installateur ferme.")
 end
