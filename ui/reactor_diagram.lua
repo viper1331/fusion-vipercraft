@@ -455,8 +455,10 @@ function M.build(api)
     local moduleW = clamp(math.min(gw * cellW - 2, 14), 10, 14)
     if moduleW % 2 ~= 0 then moduleW = moduleW - 1 end
     local moduleX = rx + math.floor((gw * cellW - moduleW) / 2)
-    local infoY = clamp(ry - 6, y + 1, ry - 4)
-    local moduleY = clamp(infoY + 3, y + 3, ry - 2)
+    -- Hierarchie visuelle LAS forcee:
+    -- niveau 1 (info) en haut, niveau 2 (bloc laser) juste dessous.
+    local infoY = clamp(ry - 8, y + 2, ry - 5)
+    local moduleY = clamp(infoY + 2, y + 4, ry - 4)
     local gapTop = moduleY + 1
     local gapBottom = ry - 1
     local beamX = rx + (gcx - 1) * cellW
@@ -505,13 +507,13 @@ function M.build(api)
     local stackCount = math.max(1, math.floor(tonumber(displayedLaserCount) or 1))
     -- La pile de modules appartient visuellement au bloc LAS et reste
     -- sous la ligne d'information pour conserver une separation nette.
-    local stackMinY = math.max(y + 2, moduleY)
-    local stackMaxY = math.min(y + h - 2, ry + gcy + 2)
+    local stackMinY = math.max(y + 2, infoY + 1)
+    local stackMaxY = math.min(y + h - 3, ry - 2)
     if stackMaxY < stackMinY then stackMaxY = stackMinY end
     local stackCapacity = math.max(1, stackMaxY - stackMinY + 1)
     local visibleStackCount = math.min(stackCount, stackCapacity)
     local hiddenStackCount = math.max(0, stackCount - visibleStackCount)
-    local stackStartY = math.max(stackMinY, moduleY)
+    local stackStartY = moduleY - math.floor((visibleStackCount - 1) / 2)
     if stackStartY < stackMinY then stackStartY = stackMinY end
     if stackStartY + visibleStackCount - 1 > stackMaxY then
       stackStartY = stackMaxY - visibleStackCount + 1
@@ -628,7 +630,7 @@ function M.build(api)
     -- - T PLAS ancree visuellement dans la zone coeur.
     -- - T STRUCT ancree sur le contour reacteur.
     -- Traces orthogonales uniquement (pas de diagonales).
-    local tempY = math.min(math.max(y + 2, moduleY + 1), math.max(y + 2, ry - 2))
+    local tempY = math.min(math.max(y + 2, ry - 2), y + h - 4)
     if tempY >= y + 2 and tempY <= y + h - 4 and w >= 50 then
       local plasText = "T PLAS " .. (state.reactorPresent and formatTemperature(state.plasmaTemp, { compact = true, decimals = 2 }) or "N/A")
       local structText = "T STRUCT " .. (state.reactorPresent and formatTemperature(state.caseTemp, { compact = true, decimals = 2 }) or "N/A")
