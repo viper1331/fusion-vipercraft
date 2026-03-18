@@ -65,7 +65,7 @@ function M.detectBestPeripheral(peripheralApi, preferredName, safePeripheral, va
   return nil, nil
 end
 
-function M.detectBestLaserPeripheral(peripheralApi, preferredName, safePeripheral, getTypeOf, contains)
+local function rankLaserPeripherals(peripheralApi, preferredName, safePeripheral, getTypeOf, contains)
   local energyMethods = { "getEnergy", "getEnergyStored", "getStored", "getMaxEnergy", "getMaxEnergyStored", "getCapacity" }
   local ampMethods = { "getMinThreshold", "getMaxThreshold", "setMinThreshold", "setMaxThreshold", "getEnergyFilledPercentage" }
 
@@ -110,20 +110,52 @@ function M.detectBestLaserPeripheral(peripheralApi, preferredName, safePeriphera
     return score
   end
 
-  local bestObj, bestName, bestScore = nil, nil, -1
+  local ranked = {}
   for _, name in ipairs(getSortedPeripheralNames(peripheralApi)) do
     local obj = safePeripheral(name)
     if obj then
       local score = scoreCandidate(name, obj)
-      if score and score > bestScore then
-        bestScore = score
-        bestObj = obj
-        bestName = name
+      if score then
+        ranked[#ranked + 1] = {
+          name = name,
+          obj = obj,
+          score = score,
+          ptype = tostring(getTypeOf(name) or ""),
+        }
       end
     end
   end
 
-  return bestObj, bestName
+  table.sort(ranked, function(a, b)
+    if a.score == b.score then
+      return a.name < b.name
+    end
+    return a.score > b.score
+  end)
+
+  return ranked
+end
+
+function M.listLaserPeripherals(peripheralApi, preferredName, safePeripheral, getTypeOf, contains)
+  local ranked = rankLaserPeripherals(peripheralApi, preferredName, safePeripheral, getTypeOf, contains)
+  local out = {}
+  for i = 1, #ranked do
+    out[i] = {
+      name = ranked[i].name,
+      obj = ranked[i].obj,
+      score = ranked[i].score,
+      ptype = ranked[i].ptype,
+    }
+  end
+  return out
+end
+
+function M.detectBestLaserPeripheral(peripheralApi, preferredName, safePeripheral, getTypeOf, contains)
+  local ranked = rankLaserPeripherals(peripheralApi, preferredName, safePeripheral, getTypeOf, contains)
+  if #ranked == 0 then
+    return nil, nil
+  end
+  return ranked[1].obj, ranked[1].name
 end
 
 function M.scanPeripherals(peripheralApi, hw, cfg, safePeripheral, getTypeOf, contains)
@@ -137,7 +169,10 @@ function M.scanPeripherals(peripheralApi, hw, cfg, safePeripheral, getTypeOf, co
   end)
   if hw.logicName then cfg.preferredLogicAdapter = hw.logicName end
 
-  hw.laser, hw.laserName = M.detectBestLaserPeripheral(peripheralApi, cfg.preferredLaser, safePeripheral, getTypeOf, contains)
+  local laserCandidates = M.listLaserPeripherals(peripheralApi, cfg.preferredLaser, safePeripheral, getTypeOf, contains)
+  hw.lasers = laserCandidates
+  hw.laser = laserCandidates[1] and laserCandidates[1].obj or nil
+  hw.laserName = laserCandidates[1] and laserCandidates[1].name or nil
   if hw.laserName then cfg.preferredLaser = hw.laserName end
 
   hw.induction, hw.inductionName = M.detectBestPeripheral(peripheralApi, cfg.preferredInduction, safePeripheral, function(obj)

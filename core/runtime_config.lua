@@ -13,6 +13,7 @@ function M.new()
     displayOutput = "monitor",
     monitorScale = 0.5,
     energyUnit = "j",
+    laserCount = 1,
     refreshDelay = 0.20,
 
     ignitionLaserEnergyThreshold = 2000000000,

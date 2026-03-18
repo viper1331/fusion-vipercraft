@@ -45,16 +45,28 @@ function M.drawIoPanel(ctx, x, y, w, h)
   local rx = x + 2
   local ry = y + 1
   local maxY = y + h - 2
-  ctx.writeAt(rx, ry, "OUT", C.info, C.panelDark)
-  if ry + 1 <= maxY then ctx.drawKeyValue(rx, ry + 1, "LAS", ctx.yesno(state.laserLineOn), C.dim, state.laserLineOn and C.ok or C.warn, w - 6) end
-  if ry + 2 <= maxY then ctx.drawKeyValue(rx, ry + 2, "T", ctx.yesno(state.tOpen), C.dim, state.tOpen and C.tritium or C.warn, w - 6) end
-  if ry + 3 <= maxY then ctx.drawKeyValue(rx, ry + 3, "D", ctx.yesno(state.dOpen), C.dim, state.dOpen and C.deuterium or C.warn, w - 6) end
-  if ry + 4 <= maxY then ctx.drawKeyValue(rx, ry + 4, "DT", ctx.yesno(state.dtOpen), C.dim, state.dtOpen and C.dtFuel or C.warn, w - 6) end
+  local laserState = tostring(state.laserState or "ABSENT")
+  local laserStatus = tostring(state.laserStatusText or laserState)
+  local laserStateTone = C.dim
+  if laserState == "READY" then
+    laserStateTone = C.ok
+  elseif laserState == "CHARGING" or laserState == "INSUFFICIENT" then
+    laserStateTone = C.warn
+  elseif laserState == "ABSENT" then
+    laserStateTone = C.bad
+  end
 
-  if ry + 5 <= maxY then ctx.writeAt(rx, ry + 5, "SENSE", C.info, C.panelDark) end
-  if ry + 6 <= maxY then ctx.drawKeyValue(rx, ry + 6, "R-T", hw.readerRoles.tritium and "OK" or "FAIL", C.dim, hw.readerRoles.tritium and C.ok or C.bad, w - 6) end
-  if ry + 7 <= maxY then ctx.drawKeyValue(rx, ry + 7, "R-D", hw.readerRoles.deuterium and "OK" or "FAIL", C.dim, hw.readerRoles.deuterium and C.ok or C.bad, w - 6) end
-  if ry + 8 <= maxY then ctx.drawKeyValue(rx, ry + 8, "R-AUX", hw.readerRoles.inventory and "OK" or "FAIL", C.dim, hw.readerRoles.inventory and C.ok or C.bad, w - 6) end
+  ctx.writeAt(rx, ry, "OUT", C.info, C.panelDark)
+  if ry + 1 <= maxY then ctx.drawKeyValue(rx, ry + 1, "LAS OUT", ctx.yesno(state.laserLineOn), C.dim, state.laserLineOn and C.ok or C.warn, w - 6) end
+  if ry + 2 <= maxY then ctx.drawKeyValue(rx, ry + 2, "LAS ST", laserStatus, C.dim, laserStateTone, w - 6) end
+  if ry + 3 <= maxY then ctx.drawKeyValue(rx, ry + 3, "T", ctx.yesno(state.tOpen), C.dim, state.tOpen and C.tritium or C.warn, w - 6) end
+  if ry + 4 <= maxY then ctx.drawKeyValue(rx, ry + 4, "D", ctx.yesno(state.dOpen), C.dim, state.dOpen and C.deuterium or C.warn, w - 6) end
+  if ry + 5 <= maxY then ctx.drawKeyValue(rx, ry + 5, "DT", ctx.yesno(state.dtOpen), C.dim, state.dtOpen and C.dtFuel or C.warn, w - 6) end
+
+  if ry + 6 <= maxY then ctx.writeAt(rx, ry + 6, "SENSE", C.info, C.panelDark) end
+  if ry + 7 <= maxY then ctx.drawKeyValue(rx, ry + 7, "R-T", hw.readerRoles.tritium and "OK" or "FAIL", C.dim, hw.readerRoles.tritium and C.ok or C.bad, w - 6) end
+  if ry + 8 <= maxY then ctx.drawKeyValue(rx, ry + 8, "R-D", hw.readerRoles.deuterium and "OK" or "FAIL", C.dim, hw.readerRoles.deuterium and C.ok or C.bad, w - 6) end
+  if ry + 9 <= maxY then ctx.drawKeyValue(rx, ry + 9, "R-AUX", hw.readerRoles.inventory and "OK" or "FAIL", C.dim, hw.readerRoles.inventory and C.ok or C.bad, w - 6) end
 end
 
 function M.drawStatusPanel(ctx, panel)
@@ -400,9 +412,11 @@ function M.buildButtons(ctx, layout)
   local function buildConfigButtons()
     local outputMode = "monitor"
     local energyUnit = "j"
+    local laserCount = 1
     if type(state.setup) == "table" and type(state.setup.working) == "table" and type(state.setup.working.ui) == "table" then
       outputMode = string.lower(tostring(state.setup.working.ui.output or "monitor"))
       energyUnit = string.lower(tostring(state.setup.working.ui.energyUnit or "j"))
+      laserCount = math.max(1, math.floor(tonumber(state.setup.working.ui.laserCount) or 1))
     end
     if outputMode ~= "terminal" and outputMode ~= "both" and outputMode ~= "monitor" then
       outputMode = "monitor"
@@ -427,6 +441,11 @@ function M.buildButtons(ctx, layout)
     addGridRow({
       { id = "cfgUnitJ", label = "UNIT J", bg = energyUnit == "j" and C.btnOn or C.panelMid, action = function() actions.setEnergyUnit("j") end },
       { id = "cfgUnitFE", label = "UNIT FE", bg = energyUnit == "fe" and C.btnOn or C.panelMid, action = function() actions.setEnergyUnit("fe") end },
+    }, 2, 1)
+    addGridRow({
+      { id = "cfgLasDown", label = "LAS -", bg = C.panelMid, action = function() actions.adjustLaserCount(-1) end },
+      { id = "cfgLasValue", label = "LAS " .. tostring(laserCount), bg = C.panel, action = function() end, disabled = true },
+      { id = "cfgLasUp", label = "LAS +", bg = C.btnAction, action = function() actions.adjustLaserCount(1) end },
     }, 2, 1)
     addGridRow({
       { id = "cfgSave", label = "SAVE CONFIG", bg = C.ok, action = actions.saveSetupConfig },

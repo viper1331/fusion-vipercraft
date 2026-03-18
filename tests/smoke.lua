@@ -126,6 +126,8 @@ local modules = {
   "temperature_units.lua",
   "laser_device_selection.lua",
   "laser_threshold.lua",
+  "ignition_blockers.lua",
+  "config_laser_count.lua",
 }
 
 local baseCtx = {

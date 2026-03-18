@@ -505,6 +505,7 @@ function M.run()
   -- Cette extraction reduit la complexite de app.lua et facilite les evolutions visuelles.
   local drawReactorDiagram = UIReactorDiagram.build({
     state = state,
+    CFG = CFG,
     C = C,
     drawBox = drawBox,
     writeAt = writeAt,
@@ -601,6 +602,7 @@ function M.run()
     merged.ui.scale = CoreConfig.sanitizeUiScale(merged.ui.scale, base.ui.scale or 1.0)
     merged.ui.output = CoreConfig.sanitizeDisplayOutput(merged.ui.output, base.ui.output or "monitor")
     merged.ui.energyUnit = CoreConfig.sanitizeEnergyUnit(merged.ui.energyUnit, base.ui.energyUnit or "j")
+    merged.ui.laserCount = CoreConfig.sanitizeLaserCount(merged.ui.laserCount, base.ui.laserCount or 1)
     merged.monitor.scale = CoreConfig.sanitizeMonitorScale(merged.monitor.scale, base.monitor.scale or 0.5)
     return merged
   end
@@ -2009,10 +2011,12 @@ function M.run()
     CFG.uiScale = CoreConfig.sanitizeUiScale(working.ui.scale, CFG.uiScale or 1.0)
     CFG.displayOutput = CoreConfig.sanitizeDisplayOutput(working.ui.output, CFG.displayOutput or "monitor")
     CFG.energyUnit = CoreConfig.sanitizeEnergyUnit(working.ui.energyUnit, CFG.energyUnit or "j")
+    CFG.laserCount = CoreConfig.sanitizeLaserCount(working.ui.laserCount, CFG.laserCount or 1)
     CFG.monitorScale = CoreConfig.sanitizeMonitorScale(working.monitor.scale, CFG.monitorScale or 0.5)
     working.ui.scale = CFG.uiScale
     working.ui.output = CFG.displayOutput
     working.ui.energyUnit = CFG.energyUnit
+    working.ui.laserCount = CFG.laserCount
     working.monitor.scale = CFG.monitorScale
 
     IoMonitor.setupMonitor(nativeTerm, hw, CFG, C)
@@ -2101,6 +2105,21 @@ function M.run()
     state.setup.dirty = true
     state.setup.lastMessage = "Energy unit: " .. string.upper(nextUnit)
     state.lastAction = "Unit " .. string.upper(nextUnit)
+    applySetupScaleRuntime(working)
+    pushEvent(state.lastAction)
+  end
+
+  local function adjustLaserCount(delta)
+    local working = ensureSetupWorking()
+    local uiCfg = working.ui or {}
+    working.ui = uiCfg
+
+    local current = CoreConfig.sanitizeLaserCount(uiCfg.laserCount, CFG.laserCount or 1)
+    local nextCount = CoreConfig.sanitizeLaserCount(current + toNumber(delta, 0), current)
+    uiCfg.laserCount = nextCount
+    state.setup.dirty = true
+    state.setup.lastMessage = "Lasers: " .. tostring(nextCount)
+    state.lastAction = "Laser count " .. tostring(nextCount)
     applySetupScaleRuntime(working)
     pushEvent(state.lastAction)
   end
@@ -2215,6 +2234,7 @@ function M.run()
       adjustInjectionRate = adjustInjectionRate,
       setDisplayOutput = setDisplayOutput,
       setEnergyUnit = setEnergyUnit,
+      adjustLaserCount = adjustLaserCount,
       saveSetupConfig = saveSetupConfig,
       reloadSetupConfig = reloadSetupConfig,
       runInstallerFromSetup = runInstallerFromSetup,

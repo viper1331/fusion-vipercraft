@@ -7,6 +7,7 @@ local M = {}
 
 function M.build(api)
   local state = api.state
+  local CFG = api.CFG or {}
   local C = api.C
   local drawBox = api.drawBox
   local writeAt = api.writeAt
@@ -66,6 +67,19 @@ function M.build(api)
     local tAnimating = now < lockAnimUntil.t
     local dtAnimating = now < lockAnimUntil.dt
     local dAnimating = now < lockAnimUntil.d
+    local laserState = tostring(state.laserState or "ABSENT")
+    local configuredLaserCount = math.max(1, math.floor(tonumber(CFG.laserCount) or 1))
+    local detectedLaserCount = math.max(0, math.floor(tonumber(state.laserDetectedCount) or 0))
+    local displayedLaserCount = configuredLaserCount
+
+    local laserStateTone = C.dim
+    if laserState == "READY" then
+      laserStateTone = C.ok
+    elseif laserState == "CHARGING" or laserState == "INSUFFICIENT" then
+      laserStateTone = C.warn
+    elseif laserState == "ABSENT" then
+      laserStateTone = C.bad
+    end
 
     local function cellColor(base)
       if state.alert == "DANGER" then return C.bad end
@@ -287,11 +301,17 @@ function M.build(api)
     end
     local hohlTone = hohlraumPresent and C.ok or C.bad
     local function redrawCoreCluster()
+      -- Le noyau est redessine en dernier pour ne jamais etre casse
+      -- par les flux carburant ou les overlays.
       drawCell(gcx, gcy, coreColor, coreCenterGlyph, hohlTone)
       drawCell(gcx - 1, gcy, ringColor, "[]", C.text)
       drawCell(gcx + 1, gcy, ringColor, "[]", C.text)
       drawCell(gcx, gcy - 1, ringColor, "[]", C.text)
       drawCell(gcx, gcy + 1, ringColor, "[]", C.text)
+      drawCell(gcx - 1, gcy - 1, structureColor)
+      drawCell(gcx + 1, gcy - 1, structureColor)
+      drawCell(gcx - 1, gcy + 1, structureColor)
+      drawCell(gcx + 1, gcy + 1, structureColor)
     end
     redrawCoreCluster()
 
@@ -299,9 +319,12 @@ function M.build(api)
     -- - D a droite rouge quand ouvert, orange quand ferme
     -- - DT violet quand ouvert, orange quand ferme
     -- Les 3 flux sont separes jusqu'au coeur.
-    local laserPulseActive = (now - tonumber(state.lastLaserPulseAt or 0)) <= 0.7
-    local laserOn = state.laserLineOn or laserPulseActive
-    local laserTone = laserOn and C.bad or C.dim
+    local lastPulseAt = tonumber(state.lastLaserPulseAt or -1)
+    local laserPulseActive = lastPulseAt > 0 and (now - lastPulseAt) <= 0.7
+    local laserBeamActive = (state.laserLineOn == true) or laserPulseActive
+    local laserChargingAnim = laserState == "CHARGING"
+    local laserReady = laserState == "READY"
+    local laserTone = laserStateTone
     local closedFuelColor = C.warn
     local dFlowColor = state.dOpen and C.bad or closedFuelColor
     local dtFlowColor = state.dtOpen and colors.purple or closedFuelColor
@@ -313,7 +336,7 @@ function M.build(api)
     if state.alert == "WARN" then conduitTone = C.warn end
     if state.alert == "DANGER" then conduitTone = C.bad end
 
-    local laserPathTone = laserOn and C.bad or conduitTone
+    local laserPathTone = laserBeamActive and C.bad or conduitTone
     local tPathTone = state.tOpen and C.tritium or closedFuelColor
     local dPathTone = dFlowColor
     local dtPathTone = dtFlowColor
@@ -325,16 +348,54 @@ function M.build(api)
     local moduleY = math.max(y + 1, ry - 3)
     local gapTop = moduleY + 1
     local gapBottom = ry - 1
+    local beamX = rx + (gcx - 1) * cellW
+    local moduleBg = C.panelMid
+    local moduleFg = C.dim
+    local moduleLabel = "LAS IDLE"
+
+    if laserState == "ABSENT" then
+      moduleBg = C.bad
+      moduleFg = colors.white
+      moduleLabel = "LAS ABS"
+    elseif laserBeamActive then
+      moduleBg = C.bad
+      moduleFg = colors.white
+      moduleLabel = "LAS FIRE"
+    elseif laserChargingAnim then
+      moduleBg = blink and C.warn or C.panelMid
+      moduleFg = blink and colors.white or C.warn
+      moduleLabel = pulse and "LAS CHG" or "CHG LAS"
+    elseif laserReady then
+      moduleBg = C.ok
+      moduleFg = colors.white
+      moduleLabel = "LAS READY"
+    elseif laserState == "INSUFFICIENT" then
+      moduleBg = C.warn
+      moduleFg = C.text
+      moduleLabel = "LAS LOW"
+    end
 
     for gxCol = moduleX, moduleX + moduleW - 1 do
-      writeAt(gxCol, moduleY, " ", C.text, laserOn and C.bad or C.panelMid)
+      writeAt(gxCol, moduleY, " ", C.text, moduleBg)
     end
-    local moduleLabel = laserOn and "LAS ON" or "LAS"
-    writeAt(moduleX + math.floor((moduleW - #moduleLabel) / 2), moduleY, moduleLabel, laserOn and colors.white or C.dim, laserOn and C.bad or C.panelMid)
+    writeAt(moduleX + math.floor((moduleW - #moduleLabel) / 2), moduleY, moduleLabel, moduleFg, moduleBg)
 
-    if laserOn then
+    local emittersY = moduleY - 1
+    if emittersY >= y + 1 then
+      local emitterSlots = clamp(math.floor(moduleW / 3), 1, 5)
+      local emitterCount = clamp(displayedLaserCount, 1, emitterSlots)
+      local emitterSpan = (emitterCount * 2) + math.max(0, emitterCount - 1)
+      local emitterX = moduleX + math.floor((moduleW - emitterSpan) / 2)
+      for i = 0, emitterCount - 1 do
+        local active = laserReady or (laserChargingAnim and (((state.tick + i) % 3) == 0))
+        local cellBg = active and (laserReady and C.ok or C.warn) or C.panelMid
+        writeAt(emitterX + (i * 3), emittersY, "[]", colors.black, cellBg)
+      end
+    end
+
+    if laserBeamActive then
       for yLine = gapTop, gapBottom do
-        writeAt(rx + (gcx - 1) * cellW, yLine, pulse and "!!" or "||", colors.white, C.panelDark)
+        writeAt(beamX, yLine, pulse and "!!" or "||", colors.white, C.panelDark)
       end
 
       for gyLine = 2, gcy - 2 do
@@ -342,7 +403,15 @@ function M.build(api)
       end
     else
       for yLine = gapTop, gapBottom do
-        writeAt(rx + (gcx - 1) * cellW, yLine, "  ", C.text, C.panelDark)
+        writeAt(beamX, yLine, "  ", C.text, C.panelDark)
+      end
+      if laserChargingAnim and gapBottom >= gapTop then
+        local travel = (gapBottom - gapTop) + 1
+        local yAnim = gapTop + (state.tick % travel)
+        for yLine = gapTop, gapBottom do
+          writeAt(beamX, yLine, "..", C.dim, C.panelDark)
+        end
+        writeAt(beamX, yAnim, pulse and "::" or "##", C.warn, C.panelDark)
       end
     end
 
@@ -387,18 +456,24 @@ function M.build(api)
     drawCell(gcx, legY - 1, dtPathTone, dtValveGlyph, C.text)
 
     -- Libelles d'etat (haut/bas du diagramme).
-    local topY = moduleY - 1
+    local topY = moduleY - 2
     if topY >= y + 1 then
-      local laserTxt = string.format("LAS %3.0f%%", state.laserPct)
+      local laserTxt = shortText(string.format("LAS x%d (%d) %3.0f%% %s", displayedLaserCount, detectedLaserCount, state.laserPct, tostring(state.laserStatusText or laserState)), gw * cellW - 2)
       writeAt(rx + math.floor((gw * cellW - #laserTxt) / 2), topY, laserTxt, laserTone, C.panelDark)
     elseif moduleX + moduleW + 1 <= x + w - 2 then
       local laserTxt = string.format("%3.0f%%", state.laserPct)
       writeAt(moduleX + moduleW + 1, moduleY, laserTxt, laserTone, C.panelDark)
     end
 
-    -- Telemetries temperature proches du schema reacteur.
-    local tempY = ry + 2
-    if tempY >= y + 2 and tempY <= y + h - 3 and w >= 50 then
+    local coreTempMarker = nil
+    local structTempMarker = nil
+
+    -- Telemetries temperature:
+    -- - T PLAS ancree visuellement dans la zone coeur.
+    -- - T STRUCT ancree sur le contour reacteur.
+    -- Traces orthogonales uniquement (pas de diagonales).
+    local tempY = math.max(y + 2, ry + 1)
+    if tempY >= y + 2 and tempY <= y + h - 4 and w >= 50 then
       local plasText = "T PLAS " .. (state.reactorPresent and formatTemperature(state.plasmaTemp, { compact = true, decimals = 2 }) or "N/A")
       local structText = "T STRUCT " .. (state.reactorPresent and formatTemperature(state.caseTemp, { compact = true, decimals = 2 }) or "N/A")
       local leftTextX = x + 3
@@ -409,24 +484,29 @@ function M.build(api)
         writeAt(leftTextX, tempY, plasText, plasTone, C.panelDark)
         writeAt(rightTextX, tempY, structText, structTone, C.panelDark)
 
-        local leftContourX, leftContourY = findContourAnchor("left")
-        local rightContourX, rightContourY = findContourAnchor("right")
-        local guideStartLeftX = leftTextX + #plasText + 1
-        local guideStartRightX = rightTextX - 1
-        local guideY = tempY + 1
+        local plasmaGuideY = tempY + 1
+        local plasmaGuideStartX = leftTextX + #plasText + 1
+        local coreTargetX = rx + (gcx - 1) * cellW + 1
+        local coreGuideTargetY = math.max(plasmaGuideY, ry - 1)
+        drawGuideH(plasmaGuideStartX, coreTargetX, plasmaGuideY, plasTone)
+        drawGuideV(coreTargetX, plasmaGuideY, coreGuideTargetY, plasTone)
+        drawGuideEnd(coreTargetX, coreGuideTargetY, plasTone)
+        coreTempMarker = { gx = gcx, gy = clamp(gcy - 1, 1, gh), tone = plasTone }
 
-        local guideLeftTargetX = leftContourX or (rx + (gcx - outerR) * cellW)
-        local guideRightTargetX = rightContourX or (rx + (gcx + outerR - 1) * cellW + 1)
-        local guideLeftTargetY = math.max(guideY, (leftContourY or (ry + 2)) - 1)
-        local guideRightTargetY = math.max(guideY, (rightContourY or (ry + 2)) - 1)
+        local contourX, contourY = findContourAnchor("right")
+        local structGuideY = tempY + 1
+        local structGuideStartX = rightTextX - 1
+        local structGuideTargetX = contourX or (rx + (gcx + outerR - 1) * cellW + 1)
+        local structGuideTargetY = math.max(structGuideY, (contourY or ry) - 1)
+        drawGuideH(structGuideStartX, structGuideTargetX, structGuideY, structTone)
+        drawGuideV(structGuideTargetX, structGuideY, structGuideTargetY, structTone)
+        drawGuideEnd(structGuideTargetX, structGuideTargetY, structTone)
 
-        drawGuideH(guideStartLeftX, guideLeftTargetX, guideY, plasTone)
-        drawGuideV(guideLeftTargetX, guideY, guideLeftTargetY, plasTone)
-        drawGuideEnd(guideLeftTargetX, guideLeftTargetY, plasTone)
-
-        drawGuideH(guideStartRightX, guideRightTargetX, guideY, structTone)
-        drawGuideV(guideRightTargetX, guideY, guideRightTargetY, structTone)
-        drawGuideEnd(guideRightTargetX, guideRightTargetY, structTone)
+        if contourX and contourY then
+          local contourGx = clamp(math.floor(((contourX - rx) / cellW) + 1), 1, gw)
+          local contourGy = clamp((contourY - ry) + 1, 1, gh)
+          structTempMarker = { gx = contourGx, gy = contourGy, tone = structTone }
+        end
       end
     end
 
@@ -491,6 +571,12 @@ function M.build(api)
 
     -- Redessine le noyau en dernier pour garantir sa lisibilite.
     redrawCoreCluster()
+    if coreTempMarker then
+      drawCell(coreTempMarker.gx, coreTempMarker.gy, coreColor, "::", coreTempMarker.tone)
+    end
+    if structTempMarker then
+      drawCell(structTempMarker.gx, structTempMarker.gy, contourColor, "[]", structTempMarker.tone)
+    end
 
     writeAt(
       x + 3,

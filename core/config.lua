@@ -77,6 +77,7 @@ function M.defaultFusionConfig(CFG, updateEnabled)
       scale = CFG.uiScale or 1.0,
       output = CFG.displayOutput or "monitor",
       energyUnit = CFG.energyUnit or "j",
+      laserCount = CFG.laserCount or 1,
       touchEnabled = true,
       refreshDelay = CFG.refreshDelay,
     },
@@ -138,6 +139,7 @@ function M.applyConfigToRuntime(config, CFG)
   CFG.uiScale = M.sanitizeUiScale(config.ui and config.ui.scale, CFG.uiScale or 1.0)
   CFG.displayOutput = M.sanitizeDisplayOutput(config.ui and config.ui.output, CFG.displayOutput or "monitor")
   CFG.energyUnit = M.sanitizeEnergyUnit(config.ui and config.ui.energyUnit, CFG.energyUnit or "j")
+  CFG.laserCount = M.sanitizeLaserCount(config.ui and config.ui.laserCount, CFG.laserCount or 1)
   CFG.refreshDelay = M.sanitizeRefreshDelay(config.ui and config.ui.refreshDelay, CFG.refreshDelay)
 
   CFG.preferredReactor = M.sanitizeDeviceName(config.devices and config.devices.reactorController, CFG.preferredReactor)
@@ -183,6 +185,15 @@ function M.sanitizeEnergyUnit(value, fallback)
   local unit = string.lower(tostring(value or ""))
   if VALID_ENERGY_UNITS[unit] then return unit end
   return fallback
+end
+
+function M.sanitizeLaserCount(value, fallback)
+  local numeric = tonumber(value)
+  if numeric == nil then return fallback end
+  numeric = math.floor(numeric + 0.5)
+  if numeric < 1 then return 1 end
+  if numeric > 16 then return 16 end
+  return numeric
 end
 
 function M.sanitizeRefreshDelay(value, fallback)
@@ -252,6 +263,10 @@ function M.validateConfig(config)
   local energyUnit = config.ui and config.ui.energyUnit
   if type(energyUnit) ~= "string" or not VALID_ENERGY_UNITS[string.lower(energyUnit)] then
     table.insert(errors, "ui.energyUnit is invalid")
+  end
+
+  if tonumber(config.ui and config.ui.laserCount) == nil then
+    table.insert(errors, "ui.laserCount is invalid")
   end
 
   local relaySides = {

@@ -1,5 +1,7 @@
 -- core/alerts.lua
 -- Calcul des alertes runtime et phases reactor.
+-- Cette version evite les faux positifs d'ignition lies a l'etat "LAS OFF"
+-- en se basant sur l'energie reellement exploitable.
 
 local M = {}
 local CoreEnergy = require("core.energy")
@@ -43,8 +45,56 @@ function M.build(api)
     return CoreEnergy.thresholdFromJToSource(thresholdJ, laserSourceUnit())
   end
 
+  function runtime.getLaserState()
+    local thresholdRaw = runtime.getLaserThresholdRaw()
+    local energyRaw = toNumber(state.laserEnergy, 0)
+    local present = state.laserPresent == true
+    local ready = present and energyRaw >= thresholdRaw
+    local chargingSignal = (state.laserChargeOn == true) or (state.laserLineOn == true)
+    local status = "ABSENT"
+
+    if not present then
+      status = "ABSENT"
+    elseif ready then
+      status = "READY"
+    elseif chargingSignal then
+      status = "CHARGING"
+    elseif energyRaw <= 0 then
+      status = "INACTIVE"
+    else
+      status = "INSUFFICIENT"
+    end
+
+    local labelByStatus = {
+      ABSENT = "LASER ABSENT",
+      INACTIVE = "LASER IDLE",
+      CHARGING = "LASER CHARGING",
+      READY = "LASER READY",
+      INSUFFICIENT = "LAS BELOW THRESHOLD",
+    }
+
+    local shortByStatus = {
+      ABSENT = "ABS",
+      INACTIVE = "IDLE",
+      CHARGING = "CHG",
+      READY = "READY",
+      INSUFFICIENT = "LOW",
+    }
+
+    return {
+      status = status,
+      present = present,
+      ready = ready,
+      charging = chargingSignal,
+      energyRaw = energyRaw,
+      thresholdRaw = thresholdRaw,
+      label = labelByStatus[status] or status,
+      short = shortByStatus[status] or status,
+    }
+  end
+
   function runtime.isLaserReady()
-    return toNumber(state.laserEnergy, 0) >= runtime.getLaserThresholdRaw()
+    return runtime.getLaserState().ready
   end
 
   function runtime.getRuntimeFuelMode()
@@ -62,10 +112,42 @@ function M.build(api)
     return (state.dOpen and state.tOpen) or state.dtOpen
   end
 
+  local function getCriticalIgnitionBlockers()
+    local blockers = {}
+    local laser = runtime.getLaserState()
+    local thresholdLabel = formatEnergyThreshold(CFG.ignitionLaserEnergyThreshold)
+
+    if not laser.present then
+      table.insert(blockers, "LASER ABSENT")
+    elseif not laser.ready then
+      table.insert(blockers, "LAS BELOW " .. thresholdLabel)
+    end
+
+    if not state.tOpen then table.insert(blockers, "T LOCK CLOSED") end
+    if not state.dOpen then table.insert(blockers, "D LOCK CLOSED") end
+    if not state.hohlraumPresent then table.insert(blockers, "HOHLRAUM ABSENT") end
+
+    if not state.reactorPresent then
+      table.insert(blockers, "REACTOR ABSENT")
+    elseif not state.reactorFormed then
+      table.insert(blockers, "REACTOR UNFORMED")
+    end
+
+    if not isRelayMappedAndPresent("laser_charge")
+      or not isRelayMappedAndPresent("deuterium")
+      or not isRelayMappedAndPresent("tritium") then
+      table.insert(blockers, "CONTROL LINE FAIL")
+    end
+
+    return blockers
+  end
+
   function runtime.reactorPhase()
-    if state.alert == "DANGER" then return "SAFE STOP" end
+    local laser = runtime.getLaserState()
+    if state.alert == "DANGER" and (not state.ignition) then return "SAFE STOP" end
     if not state.reactorPresent then return "OFFLINE" end
     if not state.reactorFormed then return "UNFORMED" end
+
     if state.ignition then
       if runtime.isRuntimeFuelOk() then
         local mode = runtime.getRuntimeFuelMode()
@@ -73,56 +155,61 @@ function M.build(api)
       end
       return "RUNNING / STARVED"
     end
+
     if #state.ignitionBlockers > 0 then return "BLOCKED" end
     if state.ignitionSequencePending then return "FIRING" end
-    if state.laserChargeOn or state.laserLineOn then return "CHARGING" end
 
-    local thresholdRaw = runtime.getLaserThresholdRaw()
-    local laserEnergy = toNumber(state.laserEnergy, 0)
-    if thresholdRaw > 0 and laserEnergy >= thresholdRaw then return "READY" end
-
-    return "READY"
+    if laser.status == "CHARGING" then return "CHARGING" end
+    if laser.status == "READY" then return "READY" end
+    if laser.status == "ABSENT" then return "LASER ABSENT" end
+    if laser.status == "INSUFFICIENT" then return "CHARGE LOW" end
+    return "LASER IDLE"
   end
 
   function runtime.phaseColor(phase)
     if contains(phase, "RUNNING") and not contains(phase, "STARVED") then return C.ok end
     if phase == "RUNNING" or phase == "IGNITED" then return C.ok end
-    if phase == "READY" then return C.warn end
-    if phase == "CHARGING" or phase == "FIRING" then return C.warn end
-    if phase == "SAFE STOP" or phase == "OFFLINE" or phase == "UNFORMED" or phase == "BLOCKED" or contains(phase, "STARVED") then return C.bad end
+    if phase == "READY" or phase == "CHARGING" or phase == "FIRING" or phase == "CHARGE LOW" then return C.warn end
+    if phase == "LASER IDLE" then return C.dim end
+    if phase == "SAFE STOP" or phase == "OFFLINE" or phase == "UNFORMED" or phase == "BLOCKED"
+      or phase == "LASER ABSENT" or contains(phase, "STARVED") then
+      return C.bad
+    end
     return C.dim
   end
 
   function runtime.getIgnitionChecklist()
     local thresholdLabel = formatEnergyThreshold(CFG.ignitionLaserEnergyThreshold)
+    local laser = runtime.getLaserState()
+    local laserItem
+    if not laser.present then
+      laserItem = { key = "LASER PRESENT", ok = false, wait = false }
+    else
+      laserItem = { key = "LAS >= " .. thresholdLabel, ok = laser.ready, wait = laser.status == "CHARGING" }
+    end
+
     return {
-      { key = "LAS >= " .. thresholdLabel, ok = runtime.isLaserReady(), wait = state.laserPresent },
+      laserItem,
       { key = "T LOCK OPEN", ok = state.tOpen },
       { key = "D LOCK OPEN", ok = state.dOpen },
       { key = "HOHLRAUM OK", ok = state.hohlraumPresent },
       { key = "REACTOR FORMED", ok = state.reactorPresent and state.reactorFormed },
-      { key = "SAFETY OK", ok = #state.safetyWarnings == 0 and state.alert ~= "DANGER" },
     }
   end
 
   function runtime.getIgnitionBlockers()
-    local blockers = {}
-    for _, item in ipairs(runtime.getIgnitionChecklist()) do
-      if not item.ok then
-        table.insert(blockers, item.key)
-      end
-    end
-    return blockers
+    return getCriticalIgnitionBlockers()
   end
 
   function runtime.canIgnite()
     if not CoreReactor.canIgnite(state) then return false end
-    return #runtime.getIgnitionBlockers() == 0
+    return #getCriticalIgnitionBlockers() == 0
   end
 
   function runtime.computeSafetyWarnings()
     local warnings = {}
     local critical = false
+    local laser = runtime.getLaserState()
 
     if not state.reactorPresent then
       table.insert(warnings, "REACTOR ABSENT")
@@ -131,9 +218,19 @@ function M.build(api)
       table.insert(warnings, "REACTOR UNFORMED")
     end
 
-    if (not state.ignition) and (not runtime.isLaserReady()) then
-      table.insert(warnings, "LAS BELOW " .. formatEnergyThreshold(CFG.ignitionLaserEnergyThreshold))
+    if not state.ignition then
+      local thresholdLabel = formatEnergyThreshold(CFG.ignitionLaserEnergyThreshold)
+      if laser.status == "ABSENT" then
+        table.insert(warnings, "LASER ABSENT")
+      elseif not laser.ready then
+        if laser.status == "CHARGING" then
+          table.insert(warnings, "LAS CHARGING " .. string.format("%3.0f%%", toNumber(state.laserPct, 0)))
+        else
+          table.insert(warnings, "LAS BELOW " .. thresholdLabel)
+        end
+      end
     end
+
     if state.ignition then
       if not runtime.isRuntimeFuelOk() then
         table.insert(warnings, "RUNTIME FUEL FAIL")
@@ -164,15 +261,26 @@ function M.build(api)
       table.insert(warnings, "IGNITION BLOCKED")
     end
 
-    if #hw.readerRoles.unknown > 0 then table.insert(warnings, "FALLBACK DETECTION") end
+    if #hw.readerRoles.unknown > 0 then
+      table.insert(warnings, "FALLBACK DETECTION")
+    end
+
     return warnings, critical
   end
 
   function runtime.updateAlerts()
+    local laser = runtime.getLaserState()
+    state.laserState = laser.status
+    state.laserStatusText = laser.short
+    state.laserReady = laser.ready
+    state.laserThresholdRaw = laser.thresholdRaw
+
     state.ignitionChecklist = runtime.getIgnitionChecklist()
-    state.ignitionBlockers = runtime.getIgnitionBlockers()
+    state.ignitionBlockers = getCriticalIgnitionBlockers()
+
     local warnings, critical = runtime.computeSafetyWarnings()
     state.safetyWarnings = warnings
+
     local preStartBlocked = (not state.ignition) and (#state.ignitionBlockers > 0)
     if critical then
       state.alert = "DANGER"

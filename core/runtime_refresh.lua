@@ -47,27 +47,46 @@ function M.build(api)
   end
 
   local function readLaser()
-    state.laserPresent = hw.laser ~= nil
-    if not hw.laser then
+    local laserDevices = {}
+    if type(hw.lasers) == "table" then
+      for _, entry in ipairs(hw.lasers) do
+        if type(entry) == "table" and entry.obj then
+          laserDevices[#laserDevices + 1] = entry.obj
+        elseif entry then
+          laserDevices[#laserDevices + 1] = entry
+        end
+      end
+    end
+    if #laserDevices == 0 and hw.laser then
+      laserDevices[1] = hw.laser
+    end
+
+    state.laserDetectedCount = #laserDevices
+    state.laserPresent = #laserDevices > 0
+    if not state.laserPresent then
       state.laserEnergy = 0
       state.laserMax = 1
       state.laserPct = 0
-      state.laserEnergySourceUnit = CoreEnergy.sanitizeUnit(CFG.energyUnit, "j")
+      state.laserEnergySourceUnit = "j"
       return
     end
 
+    local laser = laserDevices[1]
+
     local function sourceUnit()
-      local okUnit, unit = tryMethods(hw.laser, { "getEnergyUnit", "getUnit", "getEnergyDisplayUnit", "getTransferUnit" })
+      local okUnit, unit = tryMethods(laser, { "getEnergyUnit", "getUnit", "getEnergyDisplayUnit", "getTransferUnit" })
       if okUnit then
-        return CoreEnergy.sourceUnitFromString(unit, CFG.energyUnit)
+        return CoreEnergy.sourceUnitFromString(unit, "j")
       end
-      return CoreEnergy.sanitizeUnit(CFG.energyUnit, "j")
+      -- Fallback fixe en Joules: evite d'interpretter une mesure materielle
+      -- dans l'unite d'affichage UI (J/FE).
+      return "j"
     end
 
     local unit = sourceUnit()
-    local _, e = tryMethods(hw.laser, { "getEnergy", "getEnergyStored", "getStored" })
-    local _, m = tryMethods(hw.laser, { "getMaxEnergy", "getMaxEnergyStored", "getCapacity" })
-    local okPct, pct = tryMethods(hw.laser, { "getEnergyFilledPercentage", "getFilledPercentage" })
+    local _, e = tryMethods(laser, { "getEnergy", "getEnergyStored", "getStored" })
+    local _, m = tryMethods(laser, { "getMaxEnergy", "getMaxEnergyStored", "getCapacity" })
+    local okPct, pct = tryMethods(laser, { "getEnergyFilledPercentage", "getFilledPercentage" })
 
     state.laserEnergySourceUnit = unit
     state.laserEnergy = toNumber(e, 0)

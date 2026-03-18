@@ -83,11 +83,21 @@ function M.build(api)
     local tw, th = getSize()
     local phase = reactorPhase()
     local viewCode = resolveViewName(state.currentView or "supervision")
+    local laserState = tostring(state.laserState or "ABSENT")
+    local laserText = tostring(state.laserStatusText or laserState)
+    local laserTone = C.dim
+    if laserState == "READY" then
+      laserTone = C.ok
+    elseif laserState == "CHARGING" or laserState == "INSUFFICIENT" then
+      laserTone = C.warn
+    elseif laserState == "ABSENT" then
+      laserTone = C.bad
+    end
     local labels = {
       { key = "ACT", value = shortText(state.lastAction or "AUCUNE", 16), tone = C.text },
       { key = "VIEW", value = viewCode, tone = C.info },
       { key = "PHS", value = shortText(phase, 14), tone = phaseColor(phase) },
-      { key = "LAS", value = yesno(state.laserLineOn), tone = state.laserLineOn and C.warn or C.dim },
+      { key = "LAS", value = laserText, tone = laserTone },
       { key = "GRID", value = state.energyKnown and string.format("%3.0f%%", state.energyPct) or "N/A", tone = C.energy },
       { key = "FUEL", value = "D " .. formatFuelLevel(state.deuteriumAmount) .. " T " .. formatFuelLevel(state.tritiumAmount), tone = C.fuel },
       { key = "OUT", value = shortText(tostring(hw.monitorName or "term"), 10), tone = C.info },
