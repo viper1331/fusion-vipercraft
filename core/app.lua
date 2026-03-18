@@ -60,6 +60,7 @@ function M.run()
 
   local state = CoreState.new(CoreState.defaultRuntimeState(LOCAL_VERSION, UPDATE_ENABLED))
   local hw = CoreState.defaultHardwareState()
+  local setupMonitor
 
   local UI_PALETTE = {
     bgMain = colors.white,
@@ -488,6 +489,32 @@ function M.run()
     writeAt(x, y, k, keyColor or C.dim, C.panelDark)
     writeAt(x + keyWidth, y, " ", C.text, C.panelDark)
     writeAt(x + keyWidth + 1, y, v, valueColor or C.text, C.panelDark)
+  end
+
+  local function invokeSetupMonitor(context)
+    if type(setupMonitor) ~= "function" then
+      local msg = "Monitor setup unavailable"
+      if context and context ~= "" then
+        msg = msg .. " (" .. tostring(context) .. ")"
+      end
+      if type(state.setup) == "table" then
+        state.setup.lastMessage = msg
+      end
+      state.lastAction = msg
+      pushEvent(msg)
+      return false
+    end
+
+    local ok = setupMonitor()
+    if ok == false then
+      if type(state.setup) == "table" then
+        state.setup.lastMessage = "Monitor reconfiguration failed"
+      end
+      state.lastAction = "Monitor reconfiguration failed"
+      pushEvent("Monitor reconfiguration failed")
+      return false
+    end
+    return true
   end
 
   local function computeLayout(tw, th)
@@ -1030,7 +1057,7 @@ function M.run()
     applyConfigToRuntime(normalized)
     refreshSetupWorkingConfig(normalized)
     refreshSetupDeviceStatus()
-    setupMonitor()
+    invokeSetupMonitor("save cfg")
     setup.saveStatus = "CONFIG SAVED"
     setup.lastMessage = "Configuration saved"
     state.lastAction = "Config saved"
@@ -1078,7 +1105,7 @@ function M.run()
       applyConfigToRuntime(config)
       refreshSetupWorkingConfig(config)
       refreshSetupDeviceStatus()
-      setupMonitor()
+      invokeSetupMonitor("installer return")
       setup.saveStatus = "CONFIG RELOADED"
       setup.lastMessage = "Installer complete"
       state.lastAction = "Installer complete"
@@ -1670,11 +1697,15 @@ function M.run()
     return monitors[1]
   end
 
-  local function setupMonitor()
+  setupMonitor = function()
     local chosen = chooseMonitorAuto()
     hw.monitor = chosen and chosen.obj or nil
     hw.monitorName = chosen and chosen.name or nil
+    if type(IoMonitor.setupMonitor) ~= "function" then
+      return false
+    end
     IoMonitor.setupMonitor(nativeTerm, hw, CFG, C)
+    return true
   end
 
   local function resolveDisplayOutputMode()
@@ -2058,7 +2089,7 @@ function M.run()
     local m = state.monitorList[index]
     if not m then return end
     saveSelectedMonitorName(m.name)
-    setupMonitor()
+    invokeSetupMonitor("monitor select")
     stopMonitorSelection()
     state.lastAction = "Moniteur: " .. m.name
     pushEvent("Monitor changed")
@@ -2113,7 +2144,7 @@ function M.run()
     applyConfigToRuntime(config)
     refreshSetupWorkingConfig(config)
     refreshSetupDeviceStatus()
-    setupMonitor()
+    invokeSetupMonitor("reload cfg")
 
     state.setup.saveStatus = "CONFIG RELOADED"
     state.setup.lastMessage = "Configuration reloaded"
