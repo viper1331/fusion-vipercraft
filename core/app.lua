@@ -728,6 +728,8 @@ function M.run()
     end
     logger.info("Runtime config applied", {
       output = CFG.displayOutput,
+      displayBackend = CFG.displayBackend,
+      preferredMonitor = CFG.preferredMonitor or "none",
       monitorScale = CFG.monitorScale,
       uiScale = CFG.uiScale,
       logLevel = CFG.logLevel,
@@ -1766,19 +1768,61 @@ function M.run()
     return true, nil
   end
 
-  local function getMonitorCandidates()
+  local lastDisplayDiagnostics = nil
 
-    local candidates = IoDevices.getMonitorCandidates(peripheral, getTypeOf, safePeripheral, logger)
-    logger.debug("Display candidates scanned", { count = #candidates })
+  local function getMonitorCandidates()
+    local candidates, diagnostics = IoDevices.getMonitorCandidates(peripheral, getTypeOf, safePeripheral, logger)
+    lastDisplayDiagnostics = diagnostics
+    logger.debug("Display candidates scanned", {
+      count = #candidates,
+      tom = diagnostics and diagnostics.tomCandidates or 0,
+      cc = diagnostics and diagnostics.ccCandidates or 0,
+    })
     return candidates
+  end
+
+  local function findCandidateByName(candidates, name)
+    if type(name) ~= "string" or name == "" then
+      return nil
+    end
+    for _, candidate in ipairs(candidates) do
+      if candidate.name == name then
+        return candidate
+      end
+    end
+    return nil
+  end
+
+  local function keepTopBackendCandidates(candidates)
+    if #candidates == 0 then return {} end
+    local backend = candidates[1].backend
+    local filtered = {}
+    for _, candidate in ipairs(candidates) do
+      if candidate.backend == backend then
+        filtered[#filtered + 1] = candidate
+      end
+    end
+    return filtered
   end
 
   local function chooseMonitorAuto()
     local monitors = getMonitorCandidates()
-    if #monitors == 0 then return nil end
     local preferredBackend = CoreConfig.sanitizeDisplayBackend(CFG.displayBackend, "auto")
+    local saved = loadSavedMonitorName()
+    logger.info("Display preference loaded", {
+      backend = preferredBackend,
+      preferredMonitor = CFG.preferredMonitor or "none",
+      cachedMonitor = saved or "none",
+      tomCandidates = tostring((lastDisplayDiagnostics and lastDisplayDiagnostics.tomCandidates) or 0),
+      ccCandidates = tostring((lastDisplayDiagnostics and lastDisplayDiagnostics.ccCandidates) or 0),
+    })
+
+    if #monitors == 0 then
+      return nil, { reason = "no_candidates", preferredBackend = preferredBackend }
+    end
 
     local filtered = monitors
+    local fallbackReason = nil
     if preferredBackend ~= "auto" then
       filtered = {}
       for _, candidate in ipairs(monitors) do
@@ -1787,30 +1831,72 @@ function M.run()
         end
       end
       if #filtered == 0 then
+        fallbackReason = "preferred_backend_unavailable"
+        local rejectionLabel = preferredBackend == "toms_gpu"
+          and "Tom backend rejected"
+          or "Preferred backend rejected"
+        logger.warn(rejectionLabel, {
+          preferred = preferredBackend,
+          reason = "no_matching_candidate",
+          tomRejected = tostring((lastDisplayDiagnostics and lastDisplayDiagnostics.tomRejected) or 0),
+        })
         filtered = monitors
       end
     end
 
-    local saved = loadSavedMonitorName()
-    if saved then
-      for _, m in ipairs(filtered) do
-        if m.name == saved then return m end
+    local candidatesForNamePreference = filtered
+    if preferredBackend == "auto" then
+      candidatesForNamePreference = keepTopBackendCandidates(filtered)
+      local cachedOutsideTop = findCandidateByName(filtered, saved)
+      if cachedOutsideTop and not findCandidateByName(candidatesForNamePreference, saved) then
+        logger.info("Cached monitor ignored", {
+          cachedMonitor = saved,
+          cachedBackend = cachedOutsideTop.backend or "unknown",
+          reason = "higher_priority_backend_available",
+          selectedBackend = candidatesForNamePreference[1] and candidatesForNamePreference[1].backend or "unknown",
+        })
       end
     end
 
-    for _, m in ipairs(filtered) do
-      if m.name == CFG.preferredMonitor then
-        saveSelectedMonitorName(m.name)
-        return m
+    local selectionReason = "first_candidate"
+    local chosen = findCandidateByName(candidatesForNamePreference, CFG.preferredMonitor)
+    if chosen then
+      selectionReason = "config_preferred_monitor"
+    else
+      chosen = findCandidateByName(candidatesForNamePreference, saved)
+      if chosen then
+        selectionReason = "cache_monitor"
+      else
+        chosen = candidatesForNamePreference[1]
+        selectionReason = preferredBackend == "auto" and "auto_top_backend" or "backend_filtered_first"
       end
     end
 
-    saveSelectedMonitorName(filtered[1].name)
-    return filtered[1]
+    if not chosen then
+      chosen = filtered[1]
+      selectionReason = "filtered_first"
+    end
+
+    if preferredBackend ~= "auto" and chosen and chosen.backend ~= preferredBackend then
+      logger.warn("Fallback to " .. tostring(chosen.backend or "unknown"), {
+        preferred = preferredBackend,
+        selected = chosen.backend or "unknown",
+        reason = fallbackReason or "preferred_unusable",
+      })
+    end
+
+    if chosen then
+      saveSelectedMonitorName(chosen.name)
+    end
+    return chosen, {
+      reason = selectionReason,
+      preferredBackend = preferredBackend,
+      fallbackReason = fallbackReason,
+    }
   end
 
   setupMonitor = function()
-    local chosen = chooseMonitorAuto()
+    local chosen, selectionMeta = chooseMonitorAuto()
     hw.monitor = chosen and chosen.obj or nil
     hw.monitorName = chosen and chosen.name or nil
     if type(IoMonitor.setupMonitor) ~= "function" then
@@ -1819,11 +1905,19 @@ function M.run()
     end
     IoMonitor.setupMonitor(nativeTerm, hw, CFG, C, chosen, getTypeOf, logger)
     if chosen then
-      logger.info("Monitor selected", {
+      logger.info("Display backend selected", {
         name = chosen.name,
-        backend = chosen.backend or hw.monitorBackend or "unknown",
+        backend = hw.monitorBackend or chosen.backend or "unknown",
         size = tostring(chosen.w or 0) .. "x" .. tostring(chosen.h or 0),
+        reason = selectionMeta and selectionMeta.reason or "unknown",
       })
+      if selectionMeta and selectionMeta.fallbackReason then
+        logger.warn("Display fallback applied", {
+          preferred = selectionMeta.preferredBackend or "auto",
+          selected = hw.monitorBackend or chosen.backend or "unknown",
+          reason = selectionMeta.fallbackReason,
+        })
+      end
     else
       logger.warn("No monitor selected; terminal fallback active")
     end

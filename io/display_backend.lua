@@ -41,6 +41,15 @@ local function contains(haystack, needle)
   return tostring(haystack or ""):lower():find(tostring(needle or ""):lower(), 1, true) ~= nil
 end
 
+local function looksLikeTomTypeHint(ptype, name)
+  return contains(ptype, "tm_")
+    or contains(name, "tm_")
+    or contains(ptype, "tom")
+    or contains(name, "tom")
+    or contains(ptype, "gpu")
+    or contains(name, "gpu")
+end
+
 local function colorFromBlit(hex)
   if type(hex) ~= "string" or #hex ~= 1 then return nil end
   local n = tonumber(hex, 16)
@@ -93,6 +102,17 @@ local function readTomResolution(obj)
     end
   end
 
+  if type(obj.getSize) == "function" then
+    local ok, w, h = pcall(obj.getSize)
+    if ok then
+      w = tonumber(w)
+      h = tonumber(h)
+      if w and h and w > 0 and h > 0 then
+        return w, h
+      end
+    end
+  end
+
   return nil, nil
 end
 
@@ -103,7 +123,7 @@ local function sanitizeTomScale(scaleValue)
   return n
 end
 
-local function looksLikeTomGpu(ptype, obj)
+local function looksLikeTomGpu(ptype, name, obj)
   local gpuMethods = {
     "fill",
     "filledRectangle",
@@ -111,9 +131,16 @@ local function looksLikeTomGpu(ptype, obj)
     "drawText",
     "drawString",
     "drawChar",
+    "drawPixel",
+    "setPixel",
     "getResolution",
+    "getSize",
+    "getWidth",
+    "getHeight",
     "getTextLength",
     "sync",
+    "flush",
+    "update",
   }
 
   local pxW, pxH = readTomResolution(obj)
@@ -126,13 +153,15 @@ local function looksLikeTomGpu(ptype, obj)
     or type(obj and obj.fill) == "function"
 
   local score = methodCount(obj, gpuMethods)
-  local typeHint = contains(ptype, "tm_gpu")
-    or contains(ptype, "tom")
-    or contains(ptype, "gpu")
+  local hasSync = type(obj and obj.sync) == "function"
+    or type(obj and obj.flush) == "function"
+    or type(obj and obj.update) == "function"
+  local typeHint = looksLikeTomTypeHint(ptype, name)
 
   local strongCaps = hasResolution and hasDrawCall and hasFillCall and score >= 4
   local veryStrongCaps = hasResolution and hasDrawCall and hasFillCall and score >= 6
-  return strongCaps and (typeHint or veryStrongCaps)
+  local permissiveTomCaps = typeHint and hasDrawCall and hasFillCall and (score >= 4 or hasSync)
+  return (strongCaps and (typeHint or veryStrongCaps)) or permissiveTomCaps
 end
 
 local function looksLikeTermDisplay(ptype, obj)
@@ -165,7 +194,7 @@ function M.detectCandidate(name, obj, getTypeOf)
     if ok then ptype = tostring(t or "") end
   end
 
-  if looksLikeTomGpu(ptype, obj) then
+  if looksLikeTomGpu(ptype, name, obj) then
     local scale = 1
     local pxW, pxH = readTomResolution(obj)
     local charW = math.max(2, math.floor((6 * scale) + 0.5))
@@ -179,7 +208,7 @@ function M.detectCandidate(name, obj, getTypeOf)
       touchEvent = "tm_monitor_touch",
       w = w,
       h = h,
-    }
+    }, nil
   end
 
   if looksLikeTermDisplay(ptype, obj) then
@@ -192,10 +221,16 @@ function M.detectCandidate(name, obj, getTypeOf)
       touchEvent = touchEvent,
       w = w,
       h = h,
-    }
+    }, nil
   end
 
-  return nil
+  if looksLikeTomTypeHint(ptype, name) then
+    return nil, "tom_caps_missing"
+  end
+  if contains(ptype, "monitor") or contains(ptype, "display") then
+    return nil, "display_caps_missing"
+  end
+  return nil, "not_display"
 end
 
 local function buildTomTermSurface(gpu, cfg)

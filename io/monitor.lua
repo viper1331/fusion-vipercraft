@@ -43,6 +43,12 @@ local function logWarn(logger, message, meta)
   end
 end
 
+local function logDebug(logger, message, meta)
+  if type(logger) == "table" and type(logger.debug) == "function" then
+    logger.debug(message, meta)
+  end
+end
+
 local function resolveMonitorCandidate(hw, provided, getTypeOf)
   if type(provided) == "table" and provided.obj == hw.monitor then
     return provided
@@ -78,6 +84,14 @@ function M.setupMonitor(nativeTerm, hw, CFG, C, chosenCandidate, getTypeOf, logg
     hw.monitorTouchEvent = (meta and meta.touchEvent) or candidate.touchEvent or "monitor_touch"
     hw.monitorTouchMapper = meta and meta.mapPixel or nil
 
+    if candidate.kind and hw.monitorBackend and candidate.kind ~= hw.monitorBackend then
+      logWarn(logger, "Display backend downgraded", {
+        expected = candidate.kind,
+        selected = hw.monitorBackend,
+        monitor = candidate.name or hw.monitorName or "unknown",
+      })
+    end
+
     if (candidate.kind == "cc_monitor" or hw.monitorBackend == "cc_monitor")
       and type(hw.monitor.setTextScale) == "function" then
       pcall(hw.monitor.setTextScale, CFG and CFG.monitorScale)
@@ -88,6 +102,16 @@ function M.setupMonitor(nativeTerm, hw, CFG, C, chosenCandidate, getTypeOf, logg
     pcall(hw.displaySurface.clear)
     if type(hw.displaySurface.flush) == "function" then
       pcall(hw.displaySurface.flush)
+    end
+    if type(hw.displaySurface.getSize) == "function" then
+      local okSize, w, h = pcall(hw.displaySurface.getSize)
+      if okSize then
+        logDebug(logger, "Display surface active", {
+          backend = hw.monitorBackend or "unknown",
+          width = tostring(w or 0),
+          height = tostring(h or 0),
+        })
+      end
     end
 
     if outputMode == "monitor" then

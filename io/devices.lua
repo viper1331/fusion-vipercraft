@@ -57,6 +57,16 @@ local function logInfo(logger, message, meta)
   end
 end
 
+local function logWarn(logger, message, meta)
+  if type(logger) == "table" and type(logger.warn) == "function" then
+    logger.warn(message, meta)
+  end
+end
+
+local function contains(haystack, needle)
+  return tostring(haystack or ""):lower():find(tostring(needle or ""):lower(), 1, true) ~= nil
+end
+
 local function getSortedPeripheralNames(peripheralApi)
   local names = peripheralApi.getNames() or {}
   table.sort(names)
@@ -76,19 +86,57 @@ end
 
 function M.getMonitorCandidates(peripheralApi, getTypeOf, safePeripheral, logger)
   local monitors = {}
+  local diagnostics = {
+    scanned = 0,
+    tomCandidates = 0,
+    ccCandidates = 0,
+    tomRejected = 0,
+    tomRejectReasons = {},
+    tomRejectSamples = {},
+  }
+
   for _, name in ipairs(getSortedPeripheralNames(peripheralApi)) do
+    diagnostics.scanned = diagnostics.scanned + 1
     local obj = safePeripheral(name)
     if obj then
-      local candidate = DisplayBackend.detectCandidate(name, obj, getTypeOf)
+      local ptype = type(getTypeOf) == "function" and tostring(getTypeOf(name) or "") or ""
+      local candidate, rejectReason = DisplayBackend.detectCandidate(name, obj, getTypeOf)
       if candidate then
+        local backend = candidate.kind or "cc_monitor"
         table.insert(monitors, {
           name = name,
           obj = obj,
           w = candidate.w or 0,
           h = candidate.h or 0,
-          backend = candidate.kind or "cc_monitor",
+          backend = backend,
           touchEvent = candidate.touchEvent or "monitor_touch",
         })
+        if backend == "toms_gpu" then
+          diagnostics.tomCandidates = diagnostics.tomCandidates + 1
+          logInfo(logger, "Tom backend candidate detected", {
+            name = name,
+            type = ptype,
+            width = tostring(candidate.w or 0),
+            height = tostring(candidate.h or 0),
+          })
+        else
+          diagnostics.ccCandidates = diagnostics.ccCandidates + 1
+        end
+      else
+        local tomHint = contains(ptype, "tm_")
+          or contains(ptype, "tom")
+          or contains(ptype, "gpu")
+          or contains(name, "tm_")
+          or contains(name, "tom")
+          or contains(name, "gpu")
+        if tomHint then
+          diagnostics.tomRejected = diagnostics.tomRejected + 1
+          local key = tostring(rejectReason or "unknown")
+          diagnostics.tomRejectReasons[key] = (diagnostics.tomRejectReasons[key] or 0) + 1
+          if #diagnostics.tomRejectSamples < 3 then
+            diagnostics.tomRejectSamples[#diagnostics.tomRejectSamples + 1] = name .. ":" .. key
+          end
+        end
       end
     end
   end
@@ -104,8 +152,33 @@ function M.getMonitorCandidates(peripheralApi, getTypeOf, safePeripheral, logger
     end
     return a.name < b.name
   end)
-  logDebug(logger, "Display candidates listed", { count = #monitors })
-  return monitors
+
+  local reasonParts = {}
+  for reason, count in pairs(diagnostics.tomRejectReasons) do
+    reasonParts[#reasonParts + 1] = tostring(reason) .. "=" .. tostring(count)
+  end
+  table.sort(reasonParts)
+
+  logInfo(logger, "Display candidates listed", {
+    total = tostring(#monitors),
+    toms_gpu = tostring(diagnostics.tomCandidates),
+    cc_monitor = tostring(diagnostics.ccCandidates),
+    scanned = tostring(diagnostics.scanned),
+  })
+  if diagnostics.tomRejected > 0 and diagnostics.tomCandidates == 0 then
+    logWarn(logger, "Tom backend candidate rejected", {
+      count = tostring(diagnostics.tomRejected),
+      reasons = table.concat(reasonParts, ","),
+      samples = table.concat(diagnostics.tomRejectSamples, ","),
+    })
+  else
+    logDebug(logger, "Display backend diagnostics", {
+      tomRejected = tostring(diagnostics.tomRejected),
+      reasons = table.concat(reasonParts, ","),
+    })
+  end
+
+  return monitors, diagnostics
 end
 
 function M.hasMethods(obj, methods, minCount)

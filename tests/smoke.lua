@@ -130,6 +130,7 @@ local modules = {
   "config_laser_count.lua",
   "logger.lua",
   "display_backend.lua",
+  "display_selection_preference.lua",
   "install_display_dtfuel_config.lua",
   "reactor_diagram_render.lua",
   "responsive_render.lua",
