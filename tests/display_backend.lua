@@ -33,6 +33,15 @@ function M.run(ctx)
     ok("Detection monitor CC OK")
   end
 
+  local ccCandidateNoName = backend.detectCandidate("display_anything", ccMonitor, function()
+    return "monitor"
+  end)
+  if type(ccCandidateNoName) ~= "table" or ccCandidateNoName.kind ~= "cc_monitor" then
+    fail(810, "Detection monitor CC ne doit pas dependre du nom")
+  else
+    ok("Detection monitor CC sans nom hardcode OK")
+  end
+
   local ccSurface, ccMeta = backend.createSurface(ccCandidate, { monitorScale = 0.5 })
   if ccSurface ~= ccMonitor then
     fail(82, "Surface CC doit reutiliser l'objet monitor natif")
@@ -55,7 +64,7 @@ function M.run(ctx)
     sync = function() end,
   }
 
-  local gpuCandidate = backend.detectCandidate("tm_gpu_0", gpu, function()
+  local gpuCandidate = backend.detectCandidate("display_any_42", gpu, function()
     return "tm_gpu"
   end)
   if type(gpuCandidate) ~= "table" or gpuCandidate.kind ~= "toms_gpu" then
@@ -63,6 +72,15 @@ function M.run(ctx)
     return
   end
   ok("Detection Tom GPU OK")
+
+  local gpuCapsOnly = backend.detectCandidate("unknown_device", gpu, function()
+    return "vendor_device"
+  end)
+  if type(gpuCapsOnly) ~= "table" or gpuCapsOnly.kind ~= "toms_gpu" then
+    fail(841, "Detection Tom GPU doit fonctionner par capacites meme sans type explicite")
+    return
+  end
+  ok("Detection Tom GPU par capacites OK")
 
   local gpuSurface, gpuMeta = backend.createSurface(gpuCandidate, { monitorScale = 1 })
   if type(gpuSurface) ~= "table" then

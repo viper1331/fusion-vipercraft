@@ -105,7 +105,6 @@ function M.route(ev, p1, p2, p3, api)
   local hw = api.hw
   local log = api.log or {}
   local logDebug = type(log.debug) == "function" and log.debug or function() end
-  local logWarn = type(log.warn) == "function" and log.warn or function() end
 
   if ev == "char" then
     logDebug("Input char", { value = tostring(p1) })
@@ -126,26 +125,12 @@ function M.route(ev, p1, p2, p3, api)
     return
   end
 
-  if ev == "monitor_touch" then
-    logDebug("Monitor touch event", { backend = hw.monitorTouchEvent or "monitor_touch" })
-    if (hw.monitorTouchEvent or "monitor_touch") == "monitor_touch" then
-      local x, y = unpackMonitorCoords(hw, p1, p2, p3)
-      x, y = normalizeMonitorCoords(hw, x, y)
-      if x and y then
-        api.handleClick(x, y, "monitor")
-      end
-    end
-    return
-  end
-
-  if ev == "tm_monitor_touch" then
-    logDebug("Tom monitor touch event", { backend = hw.monitorTouchEvent or "monitor_touch" })
-    if (hw.monitorTouchEvent or "monitor_touch") == "tm_monitor_touch" then
-      local x, y = unpackMonitorCoords(hw, p1, p2, p3)
-      x, y = normalizeMonitorCoords(hw, x, y)
-      if x and y then
-        api.handleClick(x, y, "monitor")
-      end
+  if ev == "monitor_touch" or ev == "tm_monitor_touch" then
+    logDebug("Monitor touch event", { event = ev, backend = hw.monitorTouchEvent or "monitor_touch" })
+    local x, y = unpackMonitorCoords(hw, p1, p2, p3)
+    x, y = normalizeMonitorCoords(hw, x, y)
+    if x and y then
+      api.handleClick(x, y, "monitor")
     end
     return
   end

@@ -103,7 +103,7 @@ local function sanitizeTomScale(scaleValue)
   return n
 end
 
-local function looksLikeTomGpu(name, ptype, obj)
+local function looksLikeTomGpu(ptype, obj)
   local gpuMethods = {
     "fill",
     "filledRectangle",
@@ -116,6 +116,8 @@ local function looksLikeTomGpu(name, ptype, obj)
     "sync",
   }
 
+  local pxW, pxH = readTomResolution(obj)
+  local hasResolution = (pxW ~= nil and pxH ~= nil)
   local hasDrawCall = type(obj and obj.drawText) == "function"
     or type(obj and obj.drawString) == "function"
     or type(obj and obj.drawChar) == "function"
@@ -123,17 +125,17 @@ local function looksLikeTomGpu(name, ptype, obj)
     or type(obj and obj.fillRect) == "function"
     or type(obj and obj.fill) == "function"
 
-  local looksNamedTom = contains(ptype, "tm_gpu")
-    or contains(ptype, "tom")
-    or (contains(ptype, "gpu") and not contains(ptype, "openperipheral"))
-    or contains(name, "tm_gpu")
-    or contains(name, "tom")
-
   local score = methodCount(obj, gpuMethods)
-  return score >= 3 and hasDrawCall and hasFillCall and looksNamedTom
+  local typeHint = contains(ptype, "tm_gpu")
+    or contains(ptype, "tom")
+    or contains(ptype, "gpu")
+
+  local strongCaps = hasResolution and hasDrawCall and hasFillCall and score >= 4
+  local veryStrongCaps = hasResolution and hasDrawCall and hasFillCall and score >= 6
+  return strongCaps and (typeHint or veryStrongCaps)
 end
 
-local function looksLikeTermDisplay(name, ptype, obj)
+local function looksLikeTermDisplay(ptype, obj)
   local termMethods = {
     "getSize",
     "setCursorPos",
@@ -146,13 +148,11 @@ local function looksLikeTermDisplay(name, ptype, obj)
   if score < 5 then
     return false
   end
-  return contains(ptype, "monitor")
+  return ptype == "monitor"
+    or contains(ptype, "monitor")
     or contains(ptype, "display")
     or contains(ptype, "screen")
-    or contains(name, "monitor")
-    or contains(name, "display")
-    or contains(name, "screen")
-    or contains(name, "gpu")
+    or score >= 7
 end
 
 function M.detectCandidate(name, obj, getTypeOf)
@@ -165,7 +165,7 @@ function M.detectCandidate(name, obj, getTypeOf)
     if ok then ptype = tostring(t or "") end
   end
 
-  if looksLikeTomGpu(name, ptype, obj) then
+  if looksLikeTomGpu(ptype, obj) then
     local scale = 1
     local pxW, pxH = readTomResolution(obj)
     local charW = math.max(2, math.floor((6 * scale) + 0.5))
@@ -182,9 +182,9 @@ function M.detectCandidate(name, obj, getTypeOf)
     }
   end
 
-  if ptype == "monitor" or looksLikeTermDisplay(name, ptype, obj) then
+  if looksLikeTermDisplay(ptype, obj) then
     local w, h = readTermSize(obj)
-    local touchEvent = contains(ptype, "tm_") and "tm_monitor_touch" or "monitor_touch"
+    local touchEvent = (contains(ptype, "tm_") or contains(ptype, "tom")) and "tm_monitor_touch" or "monitor_touch"
     return {
       name = name,
       obj = obj,
