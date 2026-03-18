@@ -6,6 +6,17 @@ local function getSortedPeripheralNames(peripheralApi)
   return names
 end
 
+local function methodCount(obj, methods)
+  if not obj then return 0 end
+  local count = 0
+  for _, methodName in ipairs(methods) do
+    if type(obj[methodName]) == "function" then
+      count = count + 1
+    end
+  end
+  return count
+end
+
 function M.getMonitorCandidates(peripheralApi, getTypeOf, safePeripheral)
   local monitors = {}
   for _, name in ipairs(getSortedPeripheralNames(peripheralApi)) do
@@ -54,6 +65,62 @@ function M.detectBestPeripheral(peripheralApi, preferredName, safePeripheral, va
   return nil, nil
 end
 
+function M.detectBestLaserPeripheral(peripheralApi, preferredName, safePeripheral, getTypeOf, contains)
+  local energyMethods = { "getEnergy", "getEnergyStored", "getStored", "getMaxEnergy", "getMaxEnergyStored", "getCapacity" }
+  local ampMethods = { "getMinThreshold", "getMaxThreshold", "setMinThreshold", "setMaxThreshold", "getEnergyFilledPercentage" }
+
+  local function includes(haystack, needle)
+    if type(contains) == "function" then
+      return contains(haystack, needle)
+    end
+    return tostring(haystack or ""):lower():find(tostring(needle or ""):lower(), 1, true) ~= nil
+  end
+
+  local function scoreCandidate(name, obj)
+    if not M.hasMethods(obj, energyMethods, 2) then
+      return nil
+    end
+
+    local ptype = tostring(getTypeOf(name) or "")
+    local score = methodCount(obj, energyMethods)
+    score = score + methodCount(obj, ampMethods)
+
+    if includes(ptype, "laser_amplifier") or includes(name, "laser_amplifier") then
+      score = score + 20
+    elseif includes(ptype, "laser") or includes(name, "laser") then
+      score = score + 8
+    end
+
+    if type(obj.getEnergyFilledPercentage) == "function" then
+      score = score + 4
+    end
+    if type(obj.getMaxEnergy) == "function" then
+      score = score + 3
+    end
+
+    if type(preferredName) == "string" and preferredName ~= "" and name == preferredName then
+      score = score + 50
+    end
+
+    return score
+  end
+
+  local bestObj, bestName, bestScore = nil, nil, -1
+  for _, name in ipairs(getSortedPeripheralNames(peripheralApi)) do
+    local obj = safePeripheral(name)
+    if obj then
+      local score = scoreCandidate(name, obj)
+      if score and score > bestScore then
+        bestScore = score
+        bestObj = obj
+        bestName = name
+      end
+    end
+  end
+
+  return bestObj, bestName
+end
+
 function M.scanPeripherals(peripheralApi, hw, cfg, safePeripheral, getTypeOf, contains)
   hw.reactor, hw.reactorName = M.detectBestPeripheral(peripheralApi, cfg.preferredReactor, safePeripheral, function(obj)
     return M.hasMethods(obj, { "isIgnited", "getPlasmaTemperature", "getPlasmaTemp", "getPlasmaHeat", "getCaseTemperature", "getCasingTemperature" }, 2)
@@ -65,9 +132,7 @@ function M.scanPeripherals(peripheralApi, hw, cfg, safePeripheral, getTypeOf, co
   end)
   if hw.logicName then cfg.preferredLogicAdapter = hw.logicName end
 
-  hw.laser, hw.laserName = M.detectBestPeripheral(peripheralApi, cfg.preferredLaser, safePeripheral, function(obj)
-    return M.hasMethods(obj, { "getEnergy", "getEnergyStored", "getStored", "getMaxEnergy", "getMaxEnergyStored", "getCapacity" }, 2)
-  end)
+  hw.laser, hw.laserName = M.detectBestLaserPeripheral(peripheralApi, cfg.preferredLaser, safePeripheral, getTypeOf, contains)
   if hw.laserName then cfg.preferredLaser = hw.laserName end
 
   hw.induction, hw.inductionName = M.detectBestPeripheral(peripheralApi, cfg.preferredInduction, safePeripheral, function(obj)

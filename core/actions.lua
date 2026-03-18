@@ -44,6 +44,7 @@ function M.build(api)
     end
 
     if CFG.actions.laser_fire and relayWrite("laser_fire", true) then
+      state.lastLaserPulseAt = os.clock()
       state.lastAction = "Pulse LAS"
       pushEvent("Pulse LAS")
       return true
@@ -173,7 +174,7 @@ function M.build(api)
       return
     end
 
-    if (not state.ignition) and (not state.ignitionSequencePending) and state.laserEnergy >= CFG.ignitionLaserEnergyThreshold then
+    if (not state.ignition) and (not state.ignitionSequencePending) and runtimeAlerts.isLaserReady() then
       actions.triggerAutomaticIgnitionSequence()
       return
     end
@@ -185,7 +186,7 @@ function M.build(api)
           actions.openSeparatedGases(false)
           state.status = "Energie basse : D-T actif"
         elseif not state.ignition then
-          state.status = state.ignitionSequencePending and "Ignition en attente" or "Attente seuil 2.0G"
+          state.status = state.ignitionSequencePending and "Ignition en attente" or "Attente seuil LAS"
         end
       elseif state.energyPct >= CFG.energyHighPct and state.ignition then
         actions.openDTFuel(false)
@@ -199,7 +200,7 @@ function M.build(api)
         end
       end
     else
-      if not state.ignition and not state.ignitionSequencePending and state.laserEnergy >= CFG.ignitionLaserEnergyThreshold then
+      if not state.ignition and not state.ignitionSequencePending and runtimeAlerts.isLaserReady() then
         actions.triggerAutomaticIgnitionSequence()
       else
         if state.ignition and not runtimeAlerts.isRuntimeFuelOk() then

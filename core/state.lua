@@ -44,7 +44,9 @@ function M.defaultRuntimeState(localVersion, updateEnabled)
     laserEnergy = 0,
     laserMax = 1,
     laserPct = 0,
+    laserEnergySourceUnit = "j",
     laserChargeOn = false,
+    lastLaserPulseAt = 0,
 
     energyPresent = false,
     energyKnown = false,

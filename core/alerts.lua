@@ -2,6 +2,7 @@
 -- Calcul des alertes runtime et phases reactor.
 
 local M = {}
+local CoreEnergy = require("core.energy")
 
 function M.build(api)
   local state = api.state
@@ -14,7 +15,6 @@ function M.build(api)
   local CoreReactor = api.CoreReactor
 
   local runtime = {}
-  local ENERGY_FE_PER_J = 0.4
 
   local function isRelayMappedAndPresent(actionName)
     local action = type(CFG.actions) == "table" and CFG.actions[actionName] or nil
@@ -24,35 +24,27 @@ function M.build(api)
   end
 
   local function currentEnergyUnit()
-    local unit = string.lower(tostring(CFG.energyUnit or "j"))
-    if unit == "fe" then return "fe" end
-    return "j"
+    return CoreEnergy.sanitizeUnit(CFG.energyUnit, "j")
+  end
+
+  local function laserSourceUnit()
+    return CoreEnergy.sanitizeUnit(state.laserEnergySourceUnit, currentEnergyUnit())
   end
 
   local function formatEnergyThreshold(joules)
-    local value = toNumber(joules, 0)
-    local suffix = "J"
-    if currentEnergyUnit() == "fe" then
-      value = value * ENERGY_FE_PER_J
-      suffix = "FE"
-    end
+    return CoreEnergy.formatEnergyFromJ(toNumber(joules, 0), currentEnergyUnit(), {
+      compact = true,
+      decimals = 0,
+    })
+  end
 
-    local absn = math.abs(value)
-    local units = {
-      { 1e15, "P" },
-      { 1e12, "T" },
-      { 1e9, "G" },
-      { 1e6, "M" },
-      { 1e3, "k" },
-    }
+  function runtime.getLaserThresholdRaw()
+    local thresholdJ = toNumber(CFG and CFG.ignitionLaserEnergyThreshold, 0)
+    return CoreEnergy.thresholdFromJToSource(thresholdJ, laserSourceUnit())
+  end
 
-    for _, u in ipairs(units) do
-      if absn >= u[1] then
-        return string.format("%.2f %s%s", value / u[1], u[2], suffix)
-      end
-    end
-
-    return string.format("%.0f %s", value, suffix)
+  function runtime.isLaserReady()
+    return toNumber(state.laserEnergy, 0) >= runtime.getLaserThresholdRaw()
   end
 
   function runtime.getRuntimeFuelMode()
@@ -85,9 +77,9 @@ function M.build(api)
     if state.ignitionSequencePending then return "FIRING" end
     if state.laserChargeOn or state.laserLineOn then return "CHARGING" end
 
-    local threshold = toNumber(CFG and CFG.ignitionLaserEnergyThreshold, 0)
+    local thresholdRaw = runtime.getLaserThresholdRaw()
     local laserEnergy = toNumber(state.laserEnergy, 0)
-    if laserEnergy >= threshold and threshold > 0 then return "READY" end
+    if thresholdRaw > 0 and laserEnergy >= thresholdRaw then return "READY" end
 
     return "READY"
   end
@@ -104,10 +96,10 @@ function M.build(api)
   function runtime.getIgnitionChecklist()
     local thresholdLabel = formatEnergyThreshold(CFG.ignitionLaserEnergyThreshold)
     return {
-      { key = "LAS >= " .. thresholdLabel, ok = state.laserEnergy >= CFG.ignitionLaserEnergyThreshold, wait = state.laserPresent },
-      { key = "T OPEN", ok = state.tOpen },
-      { key = "D OPEN", ok = state.dOpen },
-      { key = "HOHLRAUM PRESENT", ok = state.hohlraumPresent },
+      { key = "LAS >= " .. thresholdLabel, ok = runtime.isLaserReady(), wait = state.laserPresent },
+      { key = "T LOCK OPEN", ok = state.tOpen },
+      { key = "D LOCK OPEN", ok = state.dOpen },
+      { key = "HOHLRAUM OK", ok = state.hohlraumPresent },
       { key = "REACTOR FORMED", ok = state.reactorPresent and state.reactorFormed },
       { key = "SAFETY OK", ok = #state.safetyWarnings == 0 and state.alert ~= "DANGER" },
     }
@@ -139,7 +131,7 @@ function M.build(api)
       table.insert(warnings, "REACTOR UNFORMED")
     end
 
-    if (not state.ignition) and state.laserEnergy < CFG.ignitionLaserEnergyThreshold then
+    if (not state.ignition) and (not runtime.isLaserReady()) then
       table.insert(warnings, "LAS BELOW " .. formatEnergyThreshold(CFG.ignitionLaserEnergyThreshold))
     end
     if state.ignition then

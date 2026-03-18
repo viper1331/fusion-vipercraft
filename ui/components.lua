@@ -10,8 +10,8 @@ end
 function M.shortText(txt, maxLen)
   txt = tostring(txt or "")
   if #txt <= maxLen then return txt end
-  if maxLen <= 1 then return txt:sub(1, maxLen) end
-  return txt:sub(1, maxLen - 1) .. "…"
+  if maxLen <= 0 then return "" end
+  return txt:sub(1, maxLen)
 end
 
 function M.drawValueBlock(ctx, x, y, w, label, value, unit, tone)

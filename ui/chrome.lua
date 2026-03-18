@@ -44,15 +44,16 @@ function M.build(api)
     local pulse = (state.tick % 8 < 4)
     local mainAlert = status or state.alert or "INFO"
     local firstWarn = warnings[1] or "NONE"
+    local sysText = "FUSION " .. resolveViewName(state.currentView or "supervision")
 
     if tw < 40 then
       hline(1, 1, tw, C.headerBg)
-      writeAt(2, 1, shortText("SYS " .. title .. " " .. string.upper(state.currentView or "sup"), tw - 2), C.headerText, C.headerBg)
+      writeAt(2, 1, shortText("SYS " .. sysText, tw - 2), C.headerText, C.headerBg)
       return
     end
 
     local segments = {
-      { key = "SYS", value = shortText(title, 14) .. " " .. resolveViewName(state.currentView or "supervision"), tone = C.headerText },
+      { key = "SYS", value = sysText, tone = C.headerText },
       { key = "PHS", value = shortText(phase, 14), tone = phaseColor(phase) },
       { key = "ALR", value = shortText(mainAlert, 14), tone = statusColor(mainAlert) },
       {

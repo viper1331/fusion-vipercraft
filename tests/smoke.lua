@@ -119,29 +119,30 @@ if expectFile(manifestPath, "Manifest", EXIT.MANIFEST_MISSING) then
   end
 end
 
-local structureModule = loadModule("project_structure.lua")
-local manifestModule = loadModule("manifest_consistency.lua")
+local modules = {
+  "project_structure.lua",
+  "manifest_consistency.lua",
+  "energy_units.lua",
+  "laser_threshold.lua",
+}
 
-local sharedCtx = {
+local baseCtx = {
   fail = fail,
   ok = ok,
   toPath = toPath,
   exists = fs.exists,
+  manifest = manifest,
+  version = versionValue,
 }
 
-if structureModule then
-  structureModule.run(sharedCtx)
-end
-
-if manifestModule then
-  manifestModule.run({
-    fail = fail,
-    ok = ok,
-    toPath = toPath,
-    exists = fs.exists,
-    manifest = manifest,
-    version = versionValue,
-  })
+for _, moduleName in ipairs(modules) do
+  local mod = loadModule(moduleName)
+  if mod then
+    local runOk, runErr = pcall(mod.run, baseCtx)
+    if not runOk then
+      fail(EXIT.MODULE_LOAD_ERROR, "Execution module " .. moduleName .. " echouee: " .. tostring(runErr))
+    end
+  end
 end
 
 if #failures > 0 then

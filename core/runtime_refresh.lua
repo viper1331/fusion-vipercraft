@@ -2,6 +2,7 @@
 -- Refresh cycle runtime (peripherals + mesures).
 
 local M = {}
+local CoreEnergy = require("core.energy")
 
 function M.build(api)
   local state = api.state
@@ -31,15 +32,50 @@ function M.build(api)
       state.laserEnergy = 0
       state.laserMax = 1
       state.laserPct = 0
+      state.laserEnergySourceUnit = CoreEnergy.sanitizeUnit(CFG.energyUnit, "j")
       return
     end
 
+    local function sourceUnit()
+      local okUnit, unit = tryMethods(hw.laser, { "getEnergyUnit", "getUnit", "getEnergyDisplayUnit", "getTransferUnit" })
+      if okUnit then
+        return CoreEnergy.sourceUnitFromString(unit, CFG.energyUnit)
+      end
+      return CoreEnergy.sanitizeUnit(CFG.energyUnit, "j")
+    end
+
+    local unit = sourceUnit()
     local _, e = tryMethods(hw.laser, { "getEnergy", "getEnergyStored", "getStored" })
     local _, m = tryMethods(hw.laser, { "getMaxEnergy", "getMaxEnergyStored", "getCapacity" })
+    local okPct, pct = tryMethods(hw.laser, { "getEnergyFilledPercentage", "getFilledPercentage" })
 
+    state.laserEnergySourceUnit = unit
     state.laserEnergy = toNumber(e, 0)
-    state.laserMax = math.max(1, toNumber(m, 1))
-    state.laserPct = clamp((state.laserEnergy * 100) / state.laserMax, 0, 100)
+    state.laserMax = toNumber(m, 0)
+
+    if okPct then
+      local rawPct = toNumber(pct, 0)
+      if rawPct <= 1.0 then rawPct = rawPct * 100 end
+      state.laserPct = clamp(rawPct, 0, 100)
+    else
+      state.laserPct = 0
+    end
+
+    if state.laserMax <= 0 then
+      if state.laserPct > 0 then
+        state.laserMax = math.max(1, (state.laserEnergy * 100) / state.laserPct)
+      else
+        state.laserMax = math.max(1, state.laserEnergy)
+      end
+    end
+
+    if state.laserMax < state.laserEnergy then
+      state.laserMax = state.laserEnergy
+    end
+
+    if not okPct then
+      state.laserPct = clamp((state.laserEnergy * 100) / state.laserMax, 0, 100)
+    end
   end
 
   local function parseHohlraumPayload(payload)

@@ -186,10 +186,9 @@ function M.build(api)
       end
     end
 
-    -- Croix centrale / spine.
+    -- Spine horizontal structurel.
     for i = -spineR, spineR do
       drawCell(gcx + i, gcy, spineColor)
-      drawCell(gcx, gcy + i, spineColor)
     end
 
     -- Flux RF gauche/droite.
@@ -216,24 +215,28 @@ function M.build(api)
       coreCenterGlyph = blink and hohlGlyph or "::"
     end
     local hohlTone = hohlraumPresent and C.ok or C.bad
-    drawCell(gcx, gcy, coreColor, coreCenterGlyph, hohlTone)
-    drawCell(gcx - 1, gcy, ringColor, "[]", C.text)
-    drawCell(gcx + 1, gcy, ringColor, "[]", C.text)
-    drawCell(gcx, gcy - 1, ringColor, "[]", C.text)
-    drawCell(gcx, gcy + 1, ringColor, "[]", C.text)
+    local function redrawCoreCluster()
+      drawCell(gcx, gcy, coreColor, coreCenterGlyph, hohlTone)
+      drawCell(gcx - 1, gcy, ringColor, "[]", C.text)
+      drawCell(gcx + 1, gcy, ringColor, "[]", C.text)
+      drawCell(gcx, gcy - 1, ringColor, "[]", C.text)
+      drawCell(gcx, gcy + 1, ringColor, "[]", C.text)
+    end
+    redrawCoreCluster()
 
     -- Lignes de flux:
     -- - D a droite rouge quand ouvert, orange quand ferme
     -- - DT violet quand ouvert, orange quand ferme
     -- Les 3 flux sont separes jusqu'au coeur.
-    local laserOn = state.laserChargeOn or state.laserLineOn or state.ignitionSequencePending
+    local laserPulseActive = (now - tonumber(state.lastLaserPulseAt or 0)) <= 0.7
+    local laserOn = state.laserLineOn or laserPulseActive
     local laserTone = laserOn and C.bad or C.dim
     local closedFuelColor = C.warn
     local dFlowColor = state.dOpen and C.bad or closedFuelColor
     local dtFlowColor = state.dtOpen and colors.purple or closedFuelColor
-    local dTone = dFlowColor
-    local tTone = state.tOpen and C.tritium or closedFuelColor
-    local dtTone = dtFlowColor
+    local dTone = state.dOpen and dFlowColor or C.dim
+    local tTone = state.tOpen and C.tritium or C.dim
+    local dtTone = state.dtOpen and dtFlowColor or C.dim
 
     local conduitTone = C.borderDim
     if state.alert == "WARN" then conduitTone = C.warn end
@@ -258,12 +261,18 @@ function M.build(api)
     local moduleLabel = laserOn and "LAS ON" or "LAS"
     writeAt(moduleX + math.floor((moduleW - #moduleLabel) / 2), moduleY, moduleLabel, laserOn and colors.white or C.dim, laserOn and C.bad or C.panelMid)
 
-    for yLine = gapTop, gapBottom do
-      writeAt(rx + (gcx - 1) * cellW, yLine, laserOn and (pulse and "!!" or "||") or "..", laserOn and colors.white or C.dim, C.panelDark)
-    end
+    if laserOn then
+      for yLine = gapTop, gapBottom do
+        writeAt(rx + (gcx - 1) * cellW, yLine, pulse and "!!" or "||", colors.white, C.panelDark)
+      end
 
-    for gyLine = 2, gcy - 2 do
-      drawCell(gcx, gyLine, laserPathTone, laserOn and (pulse and "!!" or "||") or "  ", laserOn and colors.white or C.text)
+      for gyLine = 2, gcy - 2 do
+        drawCell(gcx, gyLine, laserPathTone, pulse and "!!" or "||", colors.white)
+      end
+    else
+      for yLine = gapTop, gapBottom do
+        writeAt(rx + (gcx - 1) * cellW, yLine, "  ", C.text, C.panelDark)
+      end
     end
 
     -- Branches carburant vers les locks.
@@ -337,9 +346,12 @@ function M.build(api)
         local leftBranchX = rx + (gcx - branchOffset - 1) * cellW
         local rightBranchX = rx + (gcx + branchOffset - 1) * cellW
         local centerBranchX = rx + (gcx - 1) * cellW
-        writeAt(leftBranchX, labelY, tAnimating and (blink and "<>" or "||") or "||", tPathTone, C.panelDark)
-        writeAt(centerBranchX, labelY, dtAnimating and (blink and "<>" or "||") or "||", dtPathTone, C.panelDark)
-        writeAt(rightBranchX, labelY, dAnimating and (blink and "<>" or "||") or "||", dPathTone, C.panelDark)
+        local tIndicatorTone = state.tOpen and tPathTone or C.dim
+        local dtIndicatorTone = state.dtOpen and dtPathTone or C.dim
+        local dIndicatorTone = state.dOpen and dPathTone or C.dim
+        writeAt(leftBranchX, labelY, tAnimating and (blink and "<>" or "||") or "||", tIndicatorTone, C.panelDark)
+        writeAt(centerBranchX, labelY, dtAnimating and (blink and "<>" or "||") or "||", dtIndicatorTone, C.panelDark)
+        writeAt(rightBranchX, labelY, dAnimating and (blink and "<>" or "||") or "||", dIndicatorTone, C.panelDark)
 
         local lockY = labelY + 1
         if lockY <= y + h - 2 then
@@ -351,15 +363,15 @@ function M.build(api)
           local dLockX = rightBranchX - math.floor((#dLock - 2) / 2)
 
           local tLockBg = state.tOpen and C.tritium or C.panelMid
-          local dtLockBg = dtFlowColor
-          local dLockBg = dFlowColor
+          local dtLockBg = state.dtOpen and dtFlowColor or C.panelMid
+          local dLockBg = state.dOpen and dFlowColor or C.panelMid
           if tAnimating then tLockBg = blink and C.warn or tLockBg end
           if dtAnimating then dtLockBg = blink and C.warn or dtLockBg end
           if dAnimating then dLockBg = blink and C.warn or dLockBg end
 
-          writeAt(tLockX, lockY, tLock, C.text, tLockBg)
-          writeAt(dtLockX, lockY, dtLock, C.text, dtLockBg)
-          writeAt(dLockX, lockY, dLock, C.text, dLockBg)
+          writeAt(tLockX, lockY, tLock, state.tOpen and C.text or C.dim, tLockBg)
+          writeAt(dtLockX, lockY, dtLock, state.dtOpen and C.text or C.dim, dtLockBg)
+          writeAt(dLockX, lockY, dLock, state.dOpen and C.text or C.dim, dLockBg)
         end
       end
     end
@@ -369,8 +381,11 @@ function M.build(api)
       local tMx = rx
       local dMx = rx + gw * cellW - 6
       writeAt(tMx, tdModuleY, " TANK T", state.tOpen and C.text or C.dim, state.tOpen and C.tritium or C.panelMid)
-      writeAt(dMx, tdModuleY, " TANK D", state.dOpen and C.text or C.dim, dFlowColor)
+      writeAt(dMx, tdModuleY, " TANK D", state.dOpen and C.text or C.dim, state.dOpen and dFlowColor or C.panelMid)
     end
+
+    -- Redessine le noyau en dernier pour garantir sa lisibilite.
+    redrawCoreCluster()
 
     writeAt(
       x + 3,

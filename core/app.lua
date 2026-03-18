@@ -17,6 +17,7 @@ function M.run()
   local UIReactorDiagram = require("ui.reactor_diagram")
   local UIInductionDiagram = require("ui.induction_diagram")
   local CoreConfig = require("core.config")
+  local CoreEnergy = require("core.energy")
   local CoreUpdate = require("core.update")
   local CoreState = require("core.state")
   local CoreReactor = require("core.reactor")
@@ -140,8 +141,8 @@ function M.run()
   local function uiShortText(text, maxLen)
     text = tostring(text or "")
     if #text <= maxLen then return text end
-    if maxLen <= 3 then return text:sub(1, maxLen) end
-    return text:sub(1, maxLen - 3) .. "..."
+    if maxLen <= 0 then return "" end
+    return text:sub(1, maxLen)
   end
 
   local ui = {}
@@ -271,50 +272,14 @@ function M.run()
     return tostring(math.floor(n))
   end
 
-  local ENERGY_J_PER_FE = 2.5
-  local ENERGY_FE_PER_J = 1 / ENERGY_J_PER_FE
-
-  local function sanitizeEnergyUnit(value)
-    local unit = string.lower(tostring(value or "j"))
-    if unit == "fe" then return "fe" end
-    return "j"
-  end
-
-  local function toDisplayEnergy(joules, unit)
-    if unit == "fe" then
-      return joules * ENERGY_FE_PER_J
-    end
-    return joules
-  end
-
-  local function formatScaledEnergy(value, suffix)
-    local absn = math.abs(value)
-    local units = {
-      { 1e15, "P" },
-      { 1e12, "T" },
-      { 1e9, "G" },
-      { 1e6, "M" },
-      { 1e3, "k" },
-    }
-    for _, u in ipairs(units) do
-      if absn >= u[1] then
-        return string.format("%.2f%s%s", value / u[1], u[2], suffix)
-      end
-    end
-    return string.format("%.0f%s", value, suffix)
-  end
-
   local function formatEnergy(n)
     if type(n) ~= "number" then return tostring(n) end
-    local unit = sanitizeEnergyUnit(CFG.energyUnit)
-    local display = toDisplayEnergy(n, unit)
-    local suffix = unit == "fe" and "FE" or "J"
-    return formatScaledEnergy(display, suffix)
+    return CoreEnergy.formatEnergyFromJ(n, CFG.energyUnit, { compact = true, decimals = 2 })
   end
 
   local function formatEnergyPerTick(n)
     if type(n) ~= "number" then return tostring(n) end
-    return formatEnergy(n) .. "/t"
+    return CoreEnergy.formatEnergyPerTickFromJ(n, CFG.energyUnit, { compact = true, decimals = 2 })
   end
 
   local function formatMJ(n)
@@ -388,8 +353,8 @@ function M.run()
   local function shortText(txt, maxLen)
     txt = tostring(txt or "")
     if #txt <= maxLen then return txt end
-    if maxLen <= 3 then return txt:sub(1, maxLen) end
-    return txt:sub(1, maxLen - 3) .. "..."
+    if maxLen <= 0 then return "" end
+    return txt:sub(1, maxLen)
   end
 
   local function statusColor(status)
@@ -460,11 +425,14 @@ function M.run()
   end
 
   local function drawKeyValue(x, y, key, value, keyColor, valueColor, maxVal)
-    local k = shortText(tostring(key), 12)
-    local v = shortText(tostring(value), maxVal or 20)
+    local total = math.max(8, toNumber(maxVal, 20))
+    local keyWidth = clamp(math.floor(total * 0.36), 4, 10)
+    local valueWidth = math.max(1, total - keyWidth - 1)
+    local k = shortText(tostring(key), keyWidth)
+    local v = shortText(tostring(value), valueWidth)
     writeAt(x, y, k, keyColor or C.dim, C.panelDark)
-    writeAt(x + 12, y, " ", C.text, C.panelDark)
-    writeAt(x + 13, y, v, valueColor or C.text, C.panelDark)
+    writeAt(x + keyWidth, y, " ", C.text, C.panelDark)
+    writeAt(x + keyWidth + 1, y, v, valueColor or C.text, C.panelDark)
   end
 
   local function computeLayout(tw, th)
