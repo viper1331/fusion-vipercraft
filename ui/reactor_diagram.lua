@@ -455,8 +455,8 @@ function M.build(api)
     local moduleW = clamp(math.min(gw * cellW - 2, 14), 10, 14)
     if moduleW % 2 ~= 0 then moduleW = moduleW - 1 end
     local moduleX = rx + math.floor((gw * cellW - moduleW) / 2)
-    local infoY = clamp(ry - 5, y + 1, ry - 3)
-    local moduleY = clamp(infoY + 2, y + 2, ry - 2)
+    local infoY = clamp(ry - 6, y + 1, ry - 4)
+    local moduleY = clamp(infoY + 3, y + 3, ry - 2)
     local gapTop = moduleY + 1
     local gapBottom = ry - 1
     local beamX = rx + (gcx - 1) * cellW
