@@ -128,6 +128,7 @@ local modules = {
   "laser_threshold.lua",
   "ignition_blockers.lua",
   "config_laser_count.lua",
+  "reactor_diagram_render.lua",
 }
 
 local baseCtx = {

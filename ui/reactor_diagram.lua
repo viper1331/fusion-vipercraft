@@ -86,6 +86,16 @@ function M.build(api)
       return base
     end
 
+    -- Ecriture d'un pixel de repere. Si le point tombe sur la grille reacteur,
+    -- le fond actuel est conserve pour ne pas casser les couleurs de cuve/coeur.
+    local writeGuidePixel = function(xx, yy, ch, tone)
+      local xa = math.floor(xx)
+      local ya = math.floor(yy)
+      if xa >= x + 2 and xa <= x + w - 2 and ya >= y + 1 and ya <= y + h - 2 then
+        writeAt(xa, ya, ch, tone, C.panelDark)
+      end
+    end
+
     local function drawGuideH(x1, x2, yy, tone)
       local ya = math.floor(yy)
       if ya < y + 1 or ya > y + h - 2 then return end
@@ -93,7 +103,7 @@ function M.build(api)
       local xb = math.floor(math.max(x1, x2))
       for xx = xa, xb do
         if xx >= x + 2 and xx <= x + w - 2 then
-          writeAt(xx, ya, "-", tone, C.panelDark)
+          writeGuidePixel(xx, ya, "-", tone)
         end
       end
     end
@@ -105,16 +115,24 @@ function M.build(api)
       local yb = math.floor(math.max(y1, y2))
       for yy = ya, yb do
         if yy >= y + 1 and yy <= y + h - 2 then
-          writeAt(xa, yy, "|", tone, C.panelDark)
+          writeGuidePixel(xa, yy, "|", tone)
         end
       end
     end
 
-    local function drawGuideEnd(xx, yy, tone)
+    local function drawGuideCorner(xx, yy, tone)
       local xa = math.floor(xx)
       local ya = math.floor(yy)
       if xa >= x + 2 and xa <= x + w - 2 and ya >= y + 1 and ya <= y + h - 2 then
-        writeAt(xa, ya, "v", tone, C.panelDark)
+        writeGuidePixel(xa, ya, "+", tone)
+      end
+    end
+
+    local function drawGuideEnd(xx, yy, tone, glyph)
+      local xa = math.floor(xx)
+      local ya = math.floor(yy)
+      if xa >= x + 2 and xa <= x + w - 2 and ya >= y + 1 and ya <= y + h - 2 then
+        writeGuidePixel(xa, ya, glyph or "+", tone)
       end
     end
 
@@ -174,13 +192,31 @@ function M.build(api)
     local branchOffset = clamp(math.floor(outerR * 0.8), 4, 6)
 
     -- Ecrit une cellule logique (2 caracteres) dans la grille reacteur.
+    -- On garde aussi la couleur de fond pour les overlays (repères thermiques).
+    local gridBg = {}
     local function drawCell(gx, gy, bg, ch, tc)
       if gx < 1 or gx > gw or gy < 1 or gy > gh then return end
       local sx = rx + (gx - 1) * cellW
       local sy = ry + gy - 1
       local text = ch or "  "
       if #text == 1 then text = text .. " " end
+      if not gridBg[gy] then gridBg[gy] = {} end
+      gridBg[gy][gx] = bg
       writeAt(sx, sy, text, tc or C.text, bg)
+    end
+
+    writeGuidePixel = function(xx, yy, ch, tone)
+      local xa = math.floor(xx)
+      local ya = math.floor(yy)
+      if xa < x + 2 or xa > x + w - 2 or ya < y + 1 or ya > y + h - 2 then return end
+
+      local gx = math.floor((xa - rx) / cellW) + 1
+      local gy = (ya - ry) + 1
+      local bg = C.panelDark
+      if gx >= 1 and gx <= gw and gy >= 1 and gy <= gh and gridBg[gy] and gridBg[gy][gx] then
+        bg = gridBg[gy][gx]
+      end
+      writeAt(xa, ya, ch, tone, bg)
     end
 
     -- Construire les couches de forme (coque, anneau, coeur).
@@ -301,17 +337,26 @@ function M.build(api)
     end
     local hohlTone = hohlraumPresent and C.ok or C.bad
     local function redrawCoreCluster()
-      -- Le noyau est redessine en dernier pour ne jamais etre casse
-      -- par les flux carburant ou les overlays.
-      drawCell(gcx, gcy, coreColor, coreCenterGlyph, hohlTone)
-      drawCell(gcx - 1, gcy, ringColor, "[]", C.text)
-      drawCell(gcx + 1, gcy, ringColor, "[]", C.text)
-      drawCell(gcx, gcy - 1, ringColor, "[]", C.text)
-      drawCell(gcx, gcy + 1, ringColor, "[]", C.text)
-      drawCell(gcx - 1, gcy - 1, structureColor)
-      drawCell(gcx + 1, gcy - 1, structureColor)
-      drawCell(gcx - 1, gcy + 1, structureColor)
-      drawCell(gcx + 1, gcy + 1, structureColor)
+      -- Motif coeur 3x3 (capture cible): alternance cyan/violet
+      -- + noyau anime, redessine en dernier pour rester lisible.
+      local violetTone = state.reactorPresent and (pulse and colors.purple or C.dtFuel) or C.panelMid
+      local cyanTone = state.reactorPresent and (blink and C.info or colors.cyan) or C.panel
+      local swapGlyph = (math.floor(state.tick / 2) % 2) == 1
+      local shellGlyph = swapGlyph and "[]" or "##"
+      local nodeGlyph = swapGlyph and "##" or "[]"
+
+      for dy = -1, 1 do
+        for dx = -1, 1 do
+          if dx == 0 and dy == 0 then
+            drawCell(gcx, gcy, coreColor, coreCenterGlyph, hohlTone)
+          else
+            local checker = ((dx + dy) % 2 == 0)
+            local bg = checker and violetTone or cyanTone
+            local glyph = checker and shellGlyph or nodeGlyph
+            drawCell(gcx + dx, gcy + dy, bg, glyph, C.text)
+          end
+        end
+      end
     end
     redrawCoreCluster()
 
@@ -405,13 +450,24 @@ function M.build(api)
       for yLine = gapTop, gapBottom do
         writeAt(beamX, yLine, "  ", C.text, C.panelDark)
       end
+      for gyLine = 2, gcy - 2 do
+        drawCell(gcx, gyLine, conduitTone, "  ", C.text)
+      end
       if laserChargingAnim and gapBottom >= gapTop then
         local travel = (gapBottom - gapTop) + 1
         local yAnim = gapTop + (state.tick % travel)
         for yLine = gapTop, gapBottom do
-          writeAt(beamX, yLine, "..", C.dim, C.panelDark)
+          writeAt(beamX, yLine, pulse and "::" or "..", C.dim, C.panelDark)
         end
-        writeAt(beamX, yAnim, pulse and "::" or "##", C.warn, C.panelDark)
+        writeAt(beamX, yAnim, pulse and "##" or "[]", C.warn, C.panelDark)
+
+        local beamTravel = math.max(1, (gcy - 2) - 2 + 1)
+        local gyAnim = 2 + (state.tick % beamTravel)
+        for gyLine = 2, gcy - 2 do
+          local beamBg = ((state.tick + gyLine) % 2 == 0) and C.panelMid or conduitTone
+          drawCell(gcx, gyLine, beamBg, "..", C.warn)
+        end
+        drawCell(gcx, gyAnim, C.warn, pulse and "<>" or "##", colors.white)
       end
     end
 
@@ -465,14 +521,11 @@ function M.build(api)
       writeAt(moduleX + moduleW + 1, moduleY, laserTxt, laserTone, C.panelDark)
     end
 
-    local coreTempMarker = nil
-    local structTempMarker = nil
-
     -- Telemetries temperature:
     -- - T PLAS ancree visuellement dans la zone coeur.
     -- - T STRUCT ancree sur le contour reacteur.
     -- Traces orthogonales uniquement (pas de diagonales).
-    local tempY = math.max(y + 2, ry + 1)
+    local tempY = math.min(math.max(y + 2, moduleY + 1), math.max(y + 2, ry - 2))
     if tempY >= y + 2 and tempY <= y + h - 4 and w >= 50 then
       local plasText = "T PLAS " .. (state.reactorPresent and formatTemperature(state.plasmaTemp, { compact = true, decimals = 2 }) or "N/A")
       local structText = "T STRUCT " .. (state.reactorPresent and formatTemperature(state.caseTemp, { compact = true, decimals = 2 }) or "N/A")
@@ -484,29 +537,30 @@ function M.build(api)
         writeAt(leftTextX, tempY, plasText, plasTone, C.panelDark)
         writeAt(rightTextX, tempY, structText, structTone, C.panelDark)
 
-        local plasmaGuideY = tempY + 1
+        local plasmaGuideY = math.max(tempY + 1, ry - 1)
         local plasmaGuideStartX = leftTextX + #plasText + 1
         local coreTargetX = rx + (gcx - 1) * cellW + 1
-        local coreGuideTargetY = math.max(plasmaGuideY, ry - 1)
-        drawGuideH(plasmaGuideStartX, coreTargetX, plasmaGuideY, plasTone)
-        drawGuideV(coreTargetX, plasmaGuideY, coreGuideTargetY, plasTone)
-        drawGuideEnd(coreTargetX, coreGuideTargetY, plasTone)
-        coreTempMarker = { gx = gcx, gy = clamp(gcy - 1, 1, gh), tone = plasTone }
+        local coreTargetY = ry + gcy - 1
+        local coreEntryX = rx + (clamp(gcx - 2, 1, gw) - 1) * cellW + 1
+        local plasmaDropX = clamp(rx + (gcx - 2) * cellW + 1, plasmaGuideStartX, coreEntryX)
+        drawGuideH(plasmaGuideStartX, plasmaDropX, plasmaGuideY, plasTone)
+        drawGuideCorner(plasmaDropX, plasmaGuideY, plasTone)
+        drawGuideV(plasmaDropX, plasmaGuideY, coreTargetY, plasTone)
+        drawGuideCorner(plasmaDropX, coreTargetY, plasTone)
+        drawGuideH(plasmaDropX, coreEntryX, coreTargetY, plasTone)
+        drawGuideEnd(coreEntryX, coreTargetY, plasTone, ">")
 
         local contourX, contourY = findContourAnchor("right")
-        local structGuideY = tempY + 1
-        local structGuideStartX = rightTextX - 1
-        local structGuideTargetX = contourX or (rx + (gcx + outerR - 1) * cellW + 1)
-        local structGuideTargetY = math.max(structGuideY, (contourY or ry) - 1)
-        drawGuideH(structGuideStartX, structGuideTargetX, structGuideY, structTone)
-        drawGuideV(structGuideTargetX, structGuideY, structGuideTargetY, structTone)
-        drawGuideEnd(structGuideTargetX, structGuideTargetY, structTone)
-
-        if contourX and contourY then
-          local contourGx = clamp(math.floor(((contourX - rx) / cellW) + 1), 1, gw)
-          local contourGy = clamp((contourY - ry) + 1, 1, gh)
-          structTempMarker = { gx = contourGx, gy = contourGy, tone = structTone }
-        end
+        local structGuideY = math.max(tempY + 1, ry - 1)
+        local structGuideStartX = rightTextX - 2
+        local structTargetX = contourX or (rx + (gcx + outerR) * cellW + 1)
+        local structTargetY = contourY or (ry + math.max(1, gcy - outerR + 1))
+        local structDropX = clamp(structTargetX + 1, structTargetX, structGuideStartX)
+        drawGuideH(structGuideStartX, structDropX, structGuideY, structTone)
+        drawGuideCorner(structDropX, structGuideY, structTone)
+        drawGuideV(structDropX, structGuideY, structTargetY, structTone)
+        drawGuideH(structDropX, structTargetX, structTargetY, structTone)
+        drawGuideEnd(structTargetX, structTargetY, structTone, "<")
       end
     end
 
@@ -571,13 +625,6 @@ function M.build(api)
 
     -- Redessine le noyau en dernier pour garantir sa lisibilite.
     redrawCoreCluster()
-    if coreTempMarker then
-      drawCell(coreTempMarker.gx, coreTempMarker.gy, coreColor, "::", coreTempMarker.tone)
-    end
-    if structTempMarker then
-      drawCell(structTempMarker.gx, structTempMarker.gy, contourColor, "[]", structTempMarker.tone)
-    end
-
     writeAt(
       x + 3,
       y + 2,
