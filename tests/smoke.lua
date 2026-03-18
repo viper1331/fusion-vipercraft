@@ -129,6 +129,7 @@ local modules = {
   "ignition_blockers.lua",
   "config_laser_count.lua",
   "reactor_diagram_render.lua",
+  "responsive_render.lua",
 }
 
 local baseCtx = {

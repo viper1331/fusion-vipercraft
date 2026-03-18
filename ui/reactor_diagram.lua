@@ -49,12 +49,74 @@ function M.build(api)
     end
   end
 
-  local function drawReactorDiagram(x, y, w, h)
+  local function drawCompactReactorDiagram(x, y, w, h)
     drawBox(x, y, w, h, "FUSION CHAMBER", C.border)
-    if w < 30 or h < 16 then
-      writeAt(x + 2, y + 2, "Schema top-down indisponible", C.dim, C.panelDark)
+    if w < 20 or h < 9 then
+      writeAt(x + 2, y + 2, shortText("Reactor UI too small", math.max(1, w - 4)), C.dim, C.panelDark)
       return
     end
+
+    local pulse = (state.tick % 6 < 3)
+    local blink = (state.tick % 4 < 2)
+    local laserState = tostring(state.laserState or "ABSENT")
+    local laserTone = C.dim
+    if laserState == "READY" then
+      laserTone = C.ok
+    elseif laserState == "CHARGING" or laserState == "INSUFFICIENT" then
+      laserTone = C.warn
+    elseif laserState == "ABSENT" then
+      laserTone = C.bad
+    end
+
+    local statusLabel = state.reactorPresent and (state.reactorFormed and "FORMED" or "UNFORMED") or "ABSENT"
+    writeAt(x + 2, y + 1, shortText("CORE " .. statusLabel, w - 4), state.reactorPresent and C.info or C.bad, C.panelDark)
+    if h >= 10 then
+      writeAt(x + 2, y + 2, shortText("LAS " .. laserState, w - 4), laserTone, C.panelDark)
+    end
+
+    local bodyW = clamp(math.floor(w * 0.44), 10, math.max(10, w - 6))
+    local bodyH = clamp(math.floor(h * 0.45), 5, math.max(5, h - 6))
+    local bodyX = x + math.floor((w - bodyW) / 2)
+    local bodyY = y + math.floor((h - bodyH) / 2)
+    local shell = state.reactorPresent and C.info or C.panelMid
+    for yy = bodyY, bodyY + bodyH - 1 do
+      writeAt(bodyX, yy, string.rep(" ", bodyW), C.text, shell)
+    end
+    writeAt(bodyX, bodyY, string.rep(" ", bodyW), C.text, colors.black)
+    writeAt(bodyX, bodyY + bodyH - 1, string.rep(" ", bodyW), C.text, colors.black)
+    for yy = bodyY + 1, bodyY + bodyH - 2 do
+      writeAt(bodyX, yy, " ", C.text, colors.black)
+      writeAt(bodyX + bodyW - 1, yy, " ", C.text, colors.black)
+    end
+
+    local coreX = bodyX + math.floor(bodyW / 2) - 1
+    local coreY = bodyY + math.floor(bodyH / 2)
+    local coreColor = state.ignition and (pulse and colors.red or colors.green) or (blink and colors.purple or colors.cyan)
+    writeAt(coreX, coreY, pulse and "##" or "[]", C.text, coreColor)
+
+    if h >= 12 then
+      local tLabel = "T " .. (state.tOpen and "ON" or "OFF")
+      local dtLabel = "DT " .. (state.dtOpen and "ON" or "OFF")
+      local dLabel = "D " .. (state.dOpen and "ON" or "OFF")
+      writeAt(x + 2, y + h - 3, shortText(tLabel, 8), state.tOpen and C.tritium or C.dim, C.panelDark)
+      writeAt(x + math.floor((w - #dtLabel) / 2), y + h - 3, dtLabel, state.dtOpen and C.dtFuel or C.dim, C.panelDark)
+      writeAt(x + w - #dLabel - 2, y + h - 3, dLabel, state.dOpen and C.bad or C.dim, C.panelDark)
+    end
+
+    if h >= 13 then
+      local plas = formatTemperature(state.plasmaTemp, { compact = true, decimals = 1 })
+      local struct = formatTemperature(state.caseTemp, { compact = true, decimals = 1 })
+      writeAt(x + 2, y + h - 2, shortText("P " .. tostring(plas), math.max(8, math.floor((w - 4) / 2))), C.warn, C.panelDark)
+      writeAt(x + math.floor(w / 2), y + h - 2, shortText("S " .. tostring(struct), math.max(8, math.floor((w - 4) / 2))), C.bad, C.panelDark)
+    end
+  end
+
+  local function drawReactorDiagram(x, y, w, h)
+    if w < 30 or h < 16 then
+      drawCompactReactorDiagram(x, y, w, h)
+      return
+    end
+    drawBox(x, y, w, h, "FUSION CHAMBER", C.border)
 
     local innerX, innerY = x + 1, y + 1
     local innerW, innerH = w - 2, h - 2

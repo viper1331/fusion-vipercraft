@@ -77,12 +77,62 @@ function M.drawStatusPanel(ctx, panel)
   local x = panel.x + 2
   local y = panel.y + 1
   local w = panel.w - 3
+  local maxY = panel.y + panel.h - 2
+
+  -- Mode compact pour petites surfaces: informations essentielles uniquement.
+  if panel.h < 22 or panel.w < 20 then
+    local phase = ctx.reactorPhase()
+    local tempDisplay = ctx.fmt(state.plasmaTemp)
+    if type(ctx.formatTemperature) == "function" then
+      tempDisplay = ctx.formatTemperature(state.plasmaTemp, { compact = true, decimals = 2 })
+    end
+    local rows = {
+      { "State", phase, ctx.phaseColor(phase) },
+      { "Core", state.reactorPresent and (state.reactorFormed and "FORMED" or "UNFORMED") or "OFFLINE", state.reactorPresent and C.info or C.bad },
+      { "Temp P", tempDisplay, C.info },
+      { "Ign", state.ignition and "RUNNING" or "IDLE", state.ignition and C.ok or C.warn },
+    }
+    local ry = y + 1
+    for i = 1, #rows do
+      if ry > maxY then break end
+      local row = rows[i]
+      ctx.drawKeyValue(x, ry, row[1], row[2], C.dim, row[3], w - 2)
+      ry = ry + 1
+    end
+
+    if ry <= maxY then
+      local warnings = state.safetyWarnings or {}
+      if #warnings > 0 then
+        ctx.writeAt(x + 1, ry, ctx.shortText("- " .. tostring(warnings[1]), w - 3), C.warn, C.panelDark)
+        ry = ry + 1
+      end
+    end
+    if ry <= maxY then
+      local logs = state.eventLog or {}
+      local log = logs[1] or "No event"
+      ctx.writeAt(x + 1, ry, ctx.shortText(log, w - 3), C.info, C.panelDark)
+    end
+    return
+  end
 
   local b1h = ctx.clamp(math.floor(panel.h * 0.23), 5, 7)
   local b2h = ctx.clamp(math.floor(panel.h * 0.22), 5, 7)
   local b3h = ctx.clamp(math.floor(panel.h * 0.26), 6, 8)
   local sectionGap = 1
-  local b4h = panel.h - b1h - b2h - b3h - (sectionGap * 3) - 3
+  local budget = panel.h - 2 - (sectionGap * 3)
+  local b4h = budget - b1h - b2h - b3h
+  while b4h < 4 do
+    if b3h > 5 then
+      b3h = b3h - 1
+    elseif b2h > 5 then
+      b2h = b2h - 1
+    elseif b1h > 5 then
+      b1h = b1h - 1
+    else
+      break
+    end
+    b4h = budget - b1h - b2h - b3h
+  end
   if b4h < 4 then
     b4h = 4
   end
@@ -161,32 +211,56 @@ function M.drawUpdateInfoPanel(ctx, infoPanel)
   ctx.drawBox(infoPanel.x, infoPanel.y, infoPanel.w, infoPanel.h, "UPDATE CENTER", C.info)
   local x = infoPanel.x + 2
   local w = infoPanel.w - 4
+  local yTop = infoPanel.y + 1
+  local yBottom = infoPanel.y + infoPanel.h - 2
 
-  ctx.drawBox(x - 1, infoPanel.y + 1, w, 7, "VERSIONS", C.borderDim)
-  ctx.drawKeyValue(x, infoPanel.y + 2, "Local", state.update.localVersion, C.dim, C.ok, w - 4)
-  ctx.drawKeyValue(x, infoPanel.y + 3, "Remote", state.update.remoteVersion, C.dim, C.info, w - 4)
-  ctx.drawKeyValue(x, infoPanel.y + 4, "Manifest", state.update.manifestLoaded and "LOADED" or "MISSING", C.dim, state.update.manifestLoaded and C.ok or C.warn, w - 4)
-  ctx.drawKeyValue(x, infoPanel.y + 5, "Files", tostring(state.update.filesToUpdate or 0), C.dim, C.info, w - 4)
-  ctx.drawKeyValue(x, infoPanel.y + 6, "Status", state.update.status, C.dim, ctx.statusColor(state.update.available and "WARN" or "OK", C), w - 4)
+  local function drawSection(title, rows, maxRowsWanted)
+    if yTop > yBottom then return false end
+    local available = yBottom - yTop + 1
+    if available < 4 then return false end
+    local rowCap = math.max(1, available - 2)
+    local wanted = maxRowsWanted or #rows
+    local rowsToDraw = math.min(#rows, wanted, rowCap)
+    local h = rowsToDraw + 2
+    ctx.drawBox(x - 1, yTop, w, h, title, C.borderDim)
+    for i = 1, rowsToDraw do
+      local row = rows[i]
+      if row.kind == "kv" then
+        ctx.drawKeyValue(x, yTop + i, row.key, row.value, C.dim, row.tone or C.info, w - 4)
+      else
+        ctx.writeAt(x, yTop + i, ctx.shortText(row.text, w - 3), row.tone or C.info, C.panelDark)
+      end
+    end
+    yTop = yTop + h + 1
+    return true
+  end
 
-  ctx.drawBox(x - 1, infoPanel.y + 8, w, 6, "NETWORK", C.borderDim)
-  ctx.drawKeyValue(x, infoPanel.y + 9, "HTTP", state.update.httpStatus, C.dim, state.update.httpStatus == "OK" and C.ok or C.warn, w - 4)
-  ctx.drawKeyValue(x, infoPanel.y + 10, "Enabled", ctx.UPDATE_ENABLED and "YES" or "NO", C.dim, ctx.UPDATE_ENABLED and C.ok or C.bad, w - 4)
-  ctx.drawKeyValue(x, infoPanel.y + 11, "Error", state.update.lastError ~= "" and state.update.lastError or "None", C.dim, state.update.lastError ~= "" and C.bad or C.info, w - 4)
+  drawSection("VERSIONS", {
+    { kind = "kv", key = "Local", value = state.update.localVersion, tone = C.ok },
+    { kind = "kv", key = "Remote", value = state.update.remoteVersion, tone = C.info },
+    { kind = "kv", key = "Manifest", value = state.update.manifestLoaded and "LOADED" or "MISSING", tone = state.update.manifestLoaded and C.ok or C.warn },
+    { kind = "kv", key = "Files", value = tostring(state.update.filesToUpdate or 0), tone = C.info },
+    { kind = "kv", key = "Status", value = state.update.status, tone = ctx.statusColor(state.update.available and "WARN" or "OK", C) },
+  }, 5)
 
-  local resultY = infoPanel.y + 14
-  local resultH = math.max(8, infoPanel.h - 15)
-  ctx.drawBox(x - 1, resultY, w, resultH, "RESULT", C.borderDim)
-  ctx.writeAt(x, resultY + 1, ctx.shortText("Check: " .. tostring(state.update.lastCheckResult or "Never"), w - 3), C.info, C.panelDark)
-  ctx.writeAt(x, resultY + 2, ctx.shortText("Update: " .. tostring(state.update.lastApplyResult or "Never"), w - 3), C.info, C.panelDark)
-  ctx.writeAt(x, resultY + 3, ctx.shortText("Manifest err: " .. (state.update.lastManifestError ~= "" and state.update.lastManifestError or "None"), w - 3), C.dim, C.panelDark)
+  drawSection("NETWORK", {
+    { kind = "kv", key = "HTTP", value = state.update.httpStatus, tone = state.update.httpStatus == "OK" and C.ok or C.warn },
+    { kind = "kv", key = "Enabled", value = ctx.UPDATE_ENABLED and "YES" or "NO", tone = ctx.UPDATE_ENABLED and C.ok or C.bad },
+    { kind = "kv", key = "Error", value = state.update.lastError ~= "" and state.update.lastError or "None", tone = state.update.lastError ~= "" and C.bad or C.info },
+  }, 3)
+
   local hasBackup = false
   if type(ctx.rollbackTargetList) == "function" and type(ctx.hasAnyRollbackBackup) == "function" then
     hasBackup = ctx.hasAnyRollbackBackup(ctx.rollbackTargetList(true))
   end
-  ctx.writeAt(x, resultY + 4, ctx.shortText("Backup set: " .. (hasBackup and "AVAILABLE" or "MISSING"), w - 3), hasBackup and C.ok or C.warn, C.panelDark)
-  ctx.writeAt(x, resultY + 5, ctx.shortText("Temp dir: " .. (ctx.fs.exists(ctx.UPDATE_TEMP_DIR) and "READY" or "EMPTY"), w - 3), C.dim, C.panelDark)
-  ctx.writeAt(x, resultY + 6, ctx.shortText("Restart: " .. (state.update.restartRequired and "REQUIRED" or "NOT REQUIRED"), w - 3), state.update.restartRequired and C.warn or C.ok, C.panelDark)
+  drawSection("RESULT", {
+    { kind = "txt", text = "Check: " .. tostring(state.update.lastCheckResult or "Never"), tone = C.info },
+    { kind = "txt", text = "Update: " .. tostring(state.update.lastApplyResult or "Never"), tone = C.info },
+    { kind = "txt", text = "Manifest err: " .. (state.update.lastManifestError ~= "" and state.update.lastManifestError or "None"), tone = C.dim },
+    { kind = "txt", text = "Backup set: " .. (hasBackup and "AVAILABLE" or "MISSING"), tone = hasBackup and C.ok or C.warn },
+    { kind = "txt", text = "Temp dir: " .. (ctx.fs.exists(ctx.UPDATE_TEMP_DIR) and "READY" or "EMPTY"), tone = C.dim },
+    { kind = "txt", text = "Restart: " .. (state.update.restartRequired and "REQUIRED" or "NOT REQUIRED"), tone = state.update.restartRequired and C.warn or C.ok },
+  })
 end
 
 
@@ -202,13 +276,17 @@ function M.buildButtons(ctx, layout)
     local boxW = ctx.clamp(layout.width - 6, 24, 60)
     local x = math.floor((layout.width - boxW) / 2) + 1
     local y0 = layout.top + 4
-    for i = 1, 4 do
+    local monitorList = type(state.monitorList) == "table" and state.monitorList or {}
+    local usableRows = math.max(1, math.floor((layout.bottom - y0 - 4) / 3))
+    local visibleCount = math.min(#monitorList, usableRows, 9)
+    for i = 1, visibleCount do
       local rowY = y0 + (i - 1) * 3
       local rowAction = function() actions.selectMonitorByIndex(i) end
       addRowButton("mrow" .. i, x + 1, rowY, boxW - 2, 2, "", C.panelDark, C.text, rowAction)
       addButton("m" .. i, x + boxW - 8, rowY, 6, 2, tostring(i), C.btnAction, nil, rowAction, { kind = "small" })
     end
-    addButton("cancelMon", x + 1, layout.bottom - 3, boxW - 2, 2, "ANNULER", C.bad, nil, actions.stopMonitorSelection)
+    local cancelY = math.max(y0 + (visibleCount * 3), layout.bottom - 3)
+    addButton("cancelMon", x + 1, cancelY, boxW - 2, 2, "ANNULER", C.bad, nil, actions.stopMonitorSelection)
   end
 
   if state.choosingMonitor then

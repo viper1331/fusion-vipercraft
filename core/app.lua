@@ -149,14 +149,62 @@ function M.run()
   local ui = {}
 
   function ui.write(x, y, txt, tc, bc)
+    local tw, th = term.getSize()
+    if y < 1 or y > th then return end
+    txt = tostring(txt or "")
+    if #txt == 0 then return end
+
+    local sx = x
+    local text = txt
+    if sx < 1 then
+      local cut = 1 - sx
+      if cut >= #text then return end
+      text = string.sub(text, cut + 1)
+      sx = 1
+    end
+    if sx > tw then return end
+    if sx + #text - 1 > tw then
+      text = string.sub(text, 1, tw - sx + 1)
+    end
+    if #text == 0 then return end
+
     if bc then term.setBackgroundColor(bc) end
     if tc then term.setTextColor(tc) end
-    term.setCursorPos(x, y)
-    term.write(txt)
+    term.setCursorPos(sx, y)
+    term.write(text)
   end
 
   function ui.blit(x, y, text, fg, bg)
-    term.setCursorPos(x, y)
+    local tw, th = term.getSize()
+    if y < 1 or y > th then return end
+    text = tostring(text or "")
+    fg = tostring(fg or "")
+    bg = tostring(bg or "")
+    local n = math.min(#text, #fg, #bg)
+    if n <= 0 then return end
+    text = string.sub(text, 1, n)
+    fg = string.sub(fg, 1, n)
+    bg = string.sub(bg, 1, n)
+
+    local sx = x
+    if sx < 1 then
+      local cut = 1 - sx
+      if cut >= n then return end
+      text = string.sub(text, cut + 1)
+      fg = string.sub(fg, cut + 1)
+      bg = string.sub(bg, cut + 1)
+      sx = 1
+    end
+    if sx > tw then return end
+    if sx + #text - 1 > tw then
+      local keep = tw - sx + 1
+      text = string.sub(text, 1, keep)
+      fg = string.sub(fg, 1, keep)
+      bg = string.sub(bg, 1, keep)
+    end
+    if #text == 0 then return end
+
+    term.setCursorPos(sx, y)
     term.blit(text, fg, bg)
   end
 
@@ -468,7 +516,36 @@ function M.run()
     local layout = { mode = mode, top = top, bottom = bottom, height = h, width = tw, tooSmall = false, uiScale = uiScale }
 
     if mode == "compact" then
-      local lw = clamp(math.floor(tw * 0.56), 16, tw - 12)
+      -- Compact responsive:
+      -- - Priorite a un layout empile (status / diagram / control) quand la hauteur le permet.
+      -- - Fallback en 2 colonnes sur tres petites hauteurs.
+      local canStack = (th >= 20 and tw >= 34)
+      if canStack then
+        local gapY = 1
+        local statusH = clamp(math.floor(h * 0.34), 8, 12)
+        local controlH = clamp(math.floor(h * 0.30), 7, 11)
+        local centerH = h - statusH - controlH - (gapY * 2)
+
+        if centerH < 7 then
+          local deficit = 7 - centerH
+          local cutStatus = math.min(deficit, math.max(0, statusH - 7))
+          statusH = statusH - cutStatus
+          deficit = deficit - cutStatus
+          local cutControl = math.min(deficit, math.max(0, controlH - 6))
+          controlH = controlH - cutControl
+          centerH = h - statusH - controlH - (gapY * 2)
+        end
+
+        if centerH >= 7 then
+          layout.stack = true
+          layout.left = { x = 1, y = top, w = tw, h = statusH }
+          layout.center = { x = 1, y = top + statusH + gapY, w = tw, h = centerH }
+          layout.right = { x = 1, y = top + statusH + gapY + centerH + gapY, w = tw, h = controlH }
+          return layout
+        end
+      end
+
+      local lw = clamp(math.floor(tw * 0.56), 14, tw - 12)
       layout.left = { x = 1, y = top, w = lw, h = h }
       layout.right = { x = lw + 1 + gap, y = top, w = tw - lw - gap, h = h }
     elseif mode == "standard" then

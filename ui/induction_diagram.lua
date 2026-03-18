@@ -108,18 +108,31 @@ function M.build(api)
   end
 
   local function drawInductionDiagramInfo(x, y, w, h, geo, status, tone)
-    writeAt(x + 2, y + 1, string.format("STATE %s", status), tone, C.panelDark)
-    writeAt(geo.infoX, geo.sy + 1, string.format("FILL  %5.1f%%", state.inductionPct), C.energy, C.panelDark)
-    writeAt(geo.infoX, geo.sy + 2, string.format("STORED %s", formatEnergy(state.inductionEnergy)), C.text, C.panelDark)
-    writeAt(geo.infoX, geo.sy + 3, string.format("MAX    %s", formatEnergy(state.inductionMax)), C.dim, C.panelDark)
-    writeAt(geo.infoX, geo.sy + 4, string.format("NEEDED %s", formatEnergy(state.inductionNeeded)), C.dim, C.panelDark)
-    writeAt(geo.infoX, geo.sy + 6, string.format("IN   %s", formatEnergyPerTick(state.inductionInput)), C.ok, C.panelDark)
-    writeAt(geo.infoX, geo.sy + 7, string.format("OUT  %s", formatEnergyPerTick(state.inductionOutput)), C.warn, C.panelDark)
-    writeAt(geo.infoX, geo.sy + 8, string.format("CAP  %s", formatEnergyPerTick(state.inductionTransferCap)), C.info, C.panelDark)
-    writeAt(geo.infoX, geo.sy + 9, string.format("PORT  %s", state.inductionPortMode), C.info, C.panelDark)
-    writeAt(geo.infoX, geo.sy + 10, string.format("CELLS %d", state.inductionCells), C.info, C.panelDark)
-    writeAt(geo.infoX, geo.sy + 11, string.format("PROV  %d", state.inductionProviders), C.info, C.panelDark)
-    writeAt(geo.infoX, geo.sy + 12, string.format("DIM   %dx%dx%d", state.inductionLength, state.inductionWidth, state.inductionHeight), C.text, C.panelDark)
+    local maxY = y + h - 2
+    local infoX = clamp(geo.infoX, x + 2, x + w - 2)
+    local infoW = math.max(8, (x + w - 2) - infoX + 1)
+
+    writeAt(x + 2, y + 1, shortText(string.format("STATE %s", status), w - 4), tone, C.panelDark)
+    local rows = {
+      { text = string.format("FILL  %5.1f%%", state.inductionPct), tone = C.energy },
+      { text = string.format("STORED %s", formatEnergy(state.inductionEnergy)), tone = C.text },
+      { text = string.format("MAX    %s", formatEnergy(state.inductionMax)), tone = C.dim },
+      { text = string.format("NEEDED %s", formatEnergy(state.inductionNeeded)), tone = C.dim },
+      { text = string.format("IN   %s", formatEnergyPerTick(state.inductionInput)), tone = C.ok },
+      { text = string.format("OUT  %s", formatEnergyPerTick(state.inductionOutput)), tone = C.warn },
+      { text = string.format("CAP  %s", formatEnergyPerTick(state.inductionTransferCap)), tone = C.info },
+      { text = string.format("PORT %s", state.inductionPortMode), tone = C.info },
+      { text = string.format("CELLS %d", state.inductionCells), tone = C.info },
+      { text = string.format("PROV  %d", state.inductionProviders), tone = C.info },
+      { text = string.format("DIM %dx%dx%d", state.inductionLength, state.inductionWidth, state.inductionHeight), tone = C.text },
+    }
+    local rowY = geo.sy + 1
+    for i = 1, #rows do
+      if rowY > maxY then break end
+      local row = rows[i]
+      writeAt(infoX, rowY, shortText(row.text, infoW), row.tone, C.panelDark)
+      rowY = rowY + 1
+    end
     writeAt(
       x + 2,
       y + h - 2,
@@ -132,14 +145,45 @@ function M.build(api)
     )
   end
 
-  return function(x, y, w, h)
+  local function drawCompactInductionDiagram(x, y, w, h, status, tone)
     drawBox(x, y, w, h, "INDUCTION MATRIX", C.border)
-    if w < 34 or h < 16 then
-      writeAt(x + 2, y + 2, "Schema matrix indisponible", C.dim, C.panelDark)
+    if w < 20 or h < 8 then
+      writeAt(x + 2, y + 2, shortText("Matrix UI too small", math.max(1, w - 4)), C.dim, C.panelDark)
       return
     end
 
+    local innerX = x + 2
+    local innerY = y + 2
+    local innerW = math.max(10, w - 4)
+    local barW = math.max(6, innerW - 2)
+    local fill = clamp(math.floor((barW * getInductionFillRatio()) + 0.5), 0, barW)
+
+    writeAt(innerX, innerY - 1, shortText("STATE " .. tostring(status), innerW), tone, C.panelDark)
+    writeAt(innerX, innerY, "[" .. string.rep("#", fill) .. string.rep("-", barW - fill) .. "]", C.energy, C.panelDark)
+
+    local rows = {
+      "FILL " .. string.format("%5.1f%%", state.inductionPct),
+      "E " .. formatEnergy(state.inductionEnergy),
+      "IN " .. formatEnergyPerTick(state.inductionInput),
+      "OUT " .. formatEnergyPerTick(state.inductionOutput),
+      "PORT " .. tostring(state.inductionPortMode or "N/A"),
+    }
+    local rowY = innerY + 2
+    for i = 1, #rows do
+      if rowY > y + h - 2 then break end
+      writeAt(innerX, rowY, shortText(rows[i], innerW), C.text, C.panelDark)
+      rowY = rowY + 1
+    end
+  end
+
+  return function(x, y, w, h)
     local status, tone = inductionStatus()
+    if w < 34 or h < 16 then
+      drawCompactInductionDiagram(x, y, w, h, status, tone)
+      return
+    end
+
+    drawBox(x, y, w, h, "INDUCTION MATRIX", C.border)
     local geo = inductionDiagramGeometry(x, y, w, h)
     local pulse = (state.tick % 6 < 3)
     local fillTone = inductionFillTone(status, pulse)

@@ -271,11 +271,29 @@ local function withSurface(fn)
 end
 
 local function drawText(x, y, text, fg, bg)
+  local w, h = currentSurface.getSize()
+  if y < 1 or y > h then return end
   local safeText = sanitizeUiText(text)
-  currentSurface.setCursorPos(x, y)
+  if #safeText == 0 then return end
+
+  local sx = x
+  local visible = safeText
+  if sx < 1 then
+    local cut = 1 - sx
+    if cut >= #visible then return end
+    visible = visible:sub(cut + 1)
+    sx = 1
+  end
+  if sx > w then return end
+  if sx + #visible - 1 > w then
+    visible = visible:sub(1, w - sx + 1)
+  end
+  if #visible == 0 then return end
+
+  currentSurface.setCursorPos(sx, y)
   if bg then currentSurface.setBackgroundColor(bg) end
   if fg then currentSurface.setTextColor(fg) end
-  currentSurface.write(safeText)
+  currentSurface.write(visible)
 end
 
 local function fitText(text, maxWidth)
@@ -287,10 +305,16 @@ local function fitText(text, maxWidth)
 end
 
 local function fillRect(x1, y1, x2, y2, bg)
+  local w, h = currentSurface.getSize()
+  local xa = math.max(1, math.min(x1, x2))
+  local xb = math.min(w, math.max(x1, x2))
+  local ya = math.max(1, math.min(y1, y2))
+  local yb = math.min(h, math.max(y1, y2))
+  if xa > xb or ya > yb then return end
   currentSurface.setBackgroundColor(bg)
-  for y = y1, y2 do
-    currentSurface.setCursorPos(x1, y)
-    currentSurface.write(string.rep(" ", math.max(0, x2 - x1 + 1)))
+  for y = ya, yb do
+    currentSurface.setCursorPos(xa, y)
+    currentSurface.write(string.rep(" ", math.max(0, xb - xa + 1)))
   end
 end
 
@@ -309,7 +333,7 @@ local function computeLayout(w, h)
   local marginX = compact and 2 or 3
   local contentTop = 5
   local footerHeight = compact and 4 or 3
-  local navY = h - footerHeight - 3
+  local navY = math.max(contentTop + 4, h - footerHeight - 3)
 
   return {
     compact = compact,
@@ -335,23 +359,66 @@ local drawButton
 
 local function drawButtonRow(source, y, defs, left, right, gap)
   local count = #defs
-  if count == 0 then return end
-  local totalGap = gap * (count - 1)
-  local available = right - left + 1 - totalGap
-  if available < count * 6 then return end
-  local base = math.floor(available / count)
-  local extra = available - (base * count)
-  local x = left
+  if count == 0 then return 0 end
+  local space = right - left + 1
+  if space < 6 then return 0 end
 
-  for i, def in ipairs(defs) do
-    local width = base + (i <= extra and 1 or 0)
-    local label = fitText(def.label, math.max(1, width - 2))
-    drawButton(source, def.id, x, y, width, label, def.kind, def.action)
-    x = x + width + gap
+  local rows = {}
+  local idx = 1
+  while idx <= count do
+    local row = {}
+    local used = 0
+    while idx <= count do
+      local def = defs[idx]
+      local minW = math.max(6, #(sanitizeUiText(def.label or "")) + 2)
+      local nextUsed = used + ((#row > 0) and gap or 0) + minW
+      if #row > 0 and nextUsed > space then break end
+      row[#row + 1] = { def = def, minW = minW }
+      used = nextUsed
+      idx = idx + 1
+    end
+    if #row == 0 then
+      local def = defs[idx]
+      row[1] = { def = def, minW = math.max(6, space) }
+      idx = idx + 1
+    end
+    rows[#rows + 1] = row
   end
+
+  for rowIndex, row in ipairs(rows) do
+    local rowY = y + ((rowIndex - 1) * 3)
+    local minTotal = 0
+    for _, entry in ipairs(row) do
+      minTotal = minTotal + entry.minW
+    end
+    local totalGap = gap * math.max(0, #row - 1)
+    local extra = math.max(0, space - minTotal - totalGap)
+    local x = left
+    for i, entry in ipairs(row) do
+      local stretch = 0
+      if extra > 0 then
+        local slots = #row - i + 1
+        stretch = math.floor(extra / slots)
+        extra = extra - stretch
+      end
+      local width = entry.minW + stretch
+      if i == #row then
+        width = math.max(6, (right - x + 1))
+      end
+      local label = fitText(entry.def.label, math.max(1, width - 2))
+      drawButton(source, entry.def.id, x, rowY, width, label, entry.def.kind, entry.def.action)
+      x = x + width + gap
+    end
+  end
+  return #rows
 end
 
 drawButton = function(source, id, x, y, w, label, kind, action)
+  local sw, sh = currentSurface.getSize()
+  if y > sh or x > sw or (x + w - 1) < 1 or y < 1 then return end
+  x = math.max(1, x)
+  y = math.max(1, y)
+  w = math.min(w, sw - x + 1)
   if w < 4 then return end
   local clipped = fitText(label, w - 2)
   local bg, fg, shade = buttonColors(kind, false)
@@ -452,13 +519,19 @@ local function drawNavigation(source, w, _, layout)
   local y = layout.navY
   local left = layout.marginX
   local right = w - layout.marginX
+  local available = right - left + 1
+  local dual = state.step > 1 and state.step < #stepTitles
+  local gap = dual and 1 or 0
+  local btnW = dual and math.max(8, math.floor((available - gap) / 2)) or math.max(8, math.min(14, available))
+
   if state.step > 1 then
-    drawButton(source, "back", left, y, 12, "BACK", "secondary", function()
+    drawButton(source, "back", left, y, btnW, "BACK", "secondary", function()
       state.step = math.max(1, state.step - 1)
     end)
   end
   if state.step < #stepTitles then
-    drawButton(source, "next", right - 11, y, 12, "NEXT", "primary", function()
+    local nextX = dual and (right - btnW + 1) or left
+    drawButton(source, "next", nextX, y, btnW, "NEXT", "primary", function()
       state.step = math.min(#stepTitles, state.step + 1)
     end)
   end
@@ -529,7 +602,9 @@ local function drawMonitorStep(source, w, h, layout)
   local left = layout.marginX
   local right = w - layout.marginX
   local listTop = layout.contentTop + 3
+  local canSideScroll = (right - left + 1) >= 30
   local scrollX = right - 8
+  local listRight = canSideScroll and (scrollX - 1) or right
 
   drawText(left, layout.contentTop, fitText("Choisissez le monitor principal:", right - left + 1), colors.white, colors.black)
   drawText(left, layout.contentTop + 1, fitText("Terminal mouse + monitor touch restent actifs.", right - left + 1), colors.lightGray, colors.black)
@@ -540,14 +615,16 @@ local function drawMonitorStep(source, w, h, layout)
   createListRows(state.devices.monitors, state.selected.monitor, listTop, rows, state.monitorScroll, source, function(name)
     state.selected.monitor = name
     state.status = "Monitor selectionne: " .. name
-  end, left, scrollX - 1)
+  end, left, listRight)
 
-  drawButton(source, "mup", scrollX, listTop, 8, "UP", "secondary", function()
-    state.monitorScroll = math.max(0, state.monitorScroll - 1)
-  end)
-  drawButton(source, "mdown", scrollX, listTop + 4, 8, "DOWN", "secondary", function()
-    state.monitorScroll = math.min(maxScroll, state.monitorScroll + 1)
-  end)
+  if canSideScroll then
+    drawButton(source, "mup", scrollX, listTop, 8, "UP", "secondary", function()
+      state.monitorScroll = math.max(0, state.monitorScroll - 1)
+    end)
+    drawButton(source, "mdown", scrollX, listTop + 4, 8, "DOWN", "secondary", function()
+      state.monitorScroll = math.min(maxScroll, state.monitorScroll + 1)
+    end)
+  end
 
   drawButtonRow(source, layout.navY - 4, {
     { id = "test_monitor", label = "TEST MONITOR", kind = "primary", action = function()
@@ -594,7 +671,9 @@ end
 local function drawCoreDevices(source, w, h, layout)
   local left = layout.marginX
   local right = w - layout.marginX
+  local canSideScroll = (right - left + 1) >= 30
   local scrollX = right - 8
+  local listRight = canSideScroll and (scrollX - 1) or right
   drawText(left, layout.contentTop, fitText("Choisissez un role puis cliquez un device.", right - left + 1), colors.white, colors.black)
 
   local roles = {
@@ -624,10 +703,12 @@ local function drawCoreDevices(source, w, h, layout)
   createListRows(state.devices.all, currentRoleValue(), listTop, rows, state.roleScroll, source, function(name)
     setCurrentRole(name)
     state.status = "Assignation " .. state.activeRole .. " -> " .. name
-  end, left, scrollX - 1)
+  end, left, listRight)
 
-  drawButton(source, "rup", scrollX, listTop, 8, "UP", "secondary", function() state.roleScroll = math.max(0, state.roleScroll - 1) end)
-  drawButton(source, "rdown", scrollX, listTop + 4, 8, "DOWN", "secondary", function() state.roleScroll = math.min(maxScroll, state.roleScroll + 1) end)
+  if canSideScroll then
+    drawButton(source, "rup", scrollX, listTop, 8, "UP", "secondary", function() state.roleScroll = math.max(0, state.roleScroll - 1) end)
+    drawButton(source, "rdown", scrollX, listTop + 4, 8, "DOWN", "secondary", function() state.roleScroll = math.min(maxScroll, state.roleScroll + 1) end)
+  end
 end
 
 local relayRoleMap = {
@@ -639,7 +720,9 @@ local relayRoleMap = {
 local function drawRelays(source, w, h, layout)
   local left = layout.marginX
   local right = w - layout.marginX
+  local canSideScroll = (right - left + 1) >= 30
   local scrollX = right - 8
+  local listRight = canSideScroll and (scrollX - 1) or right
 
   local roleDefs = {}
   for _, role in ipairs({ "laser", "tritium", "deuterium" }) do
@@ -666,28 +749,36 @@ local function drawRelays(source, w, h, layout)
   createListRows(state.devices.relays, selectedRelay, listTop, rows, scroll, source, function(name)
     state.selected[meta.key] = name
     state.status = meta.label .. " -> " .. name
-  end, left, scrollX - 1)
+  end, left, listRight)
 
-  drawButton(source, "lup", scrollX, listTop, 8, "UP", "secondary", function()
-    state.relayScroll[state.activeRelay] = math.max(0, state.relayScroll[state.activeRelay] - 1)
-  end)
-  drawButton(source, "ldown", scrollX, listTop + 4, 8, "DOWN", "secondary", function()
-    state.relayScroll[state.activeRelay] = math.min(maxScroll, state.relayScroll[state.activeRelay] + 1)
-  end)
-
-  local sideY = layout.navY - 8
-  drawText(left, sideY - 1, fitText("Selection face:", right - left + 1), colors.white, colors.black)
-  local sideDefs = {}
-  for _, side in ipairs(SIDES) do
-    local selectedSide = state.selected[meta.side] == side
-    table.insert(sideDefs, {
-      id = "side_" .. side,
-      label = side:upper(),
-      kind = selectedSide and "primary" or "secondary",
-      action = function() state.selected[meta.side] = side end,
-    })
+  if canSideScroll then
+    drawButton(source, "lup", scrollX, listTop, 8, "UP", "secondary", function()
+      state.relayScroll[state.activeRelay] = math.max(0, state.relayScroll[state.activeRelay] - 1)
+    end)
+    drawButton(source, "ldown", scrollX, listTop + 4, 8, "DOWN", "secondary", function()
+      state.relayScroll[state.activeRelay] = math.min(maxScroll, state.relayScroll[state.activeRelay] + 1)
+    end)
   end
-  drawButtonRow(source, sideY, sideDefs, left, right, 1)
+
+  local sideY = math.max(listTop + rows + 1, layout.navY - 8)
+  local latestSideY = layout.navY - 7
+  if sideY > latestSideY then
+    sideY = latestSideY
+  end
+  if sideY >= listTop then
+    drawText(left, sideY - 1, fitText("Selection face:", right - left + 1), colors.white, colors.black)
+    local sideDefs = {}
+    for _, side in ipairs(SIDES) do
+      local selectedSide = state.selected[meta.side] == side
+      table.insert(sideDefs, {
+        id = "side_" .. side,
+        label = side:upper(),
+        kind = selectedSide and "primary" or "secondary",
+        action = function() state.selected[meta.side] = side end,
+      })
+    end
+    drawButtonRow(source, sideY, sideDefs, left, right, 1)
+  end
 
   drawButton(source, "test_relay", left, layout.navY - 4, math.min(18, right - left + 1), "TEST RELAY", "primary", function()
     local ok, msg = runRelayTest(state.selected[meta.key], state.selected[meta.side])
@@ -705,7 +796,9 @@ local readerRoleMap = {
 local function drawReaders(source, w, h, layout)
   local left = layout.marginX
   local right = w - layout.marginX
+  local canSideScroll = (right - left + 1) >= 30
   local scrollX = right - 8
+  local listRight = canSideScroll and (scrollX - 1) or right
 
   local roleDefs = {}
   for _, role in ipairs({ "tritium", "deuterium", "aux" }) do
@@ -728,10 +821,12 @@ local function drawReaders(source, w, h, layout)
   createListRows(state.devices.readers, state.selected[meta.key], listTop, rows, state.readerScroll, source, function(name)
     state.selected[meta.key] = name
     state.status = meta.label .. " -> " .. name
-  end, left, scrollX - 1)
+  end, left, listRight)
 
-  drawButton(source, "reader_up", scrollX, listTop, 8, "UP", "secondary", function() state.readerScroll = math.max(0, state.readerScroll - 1) end)
-  drawButton(source, "reader_down", scrollX, listTop + 4, 8, "DOWN", "secondary", function() state.readerScroll = math.min(maxScroll, state.readerScroll + 1) end)
+  if canSideScroll then
+    drawButton(source, "reader_up", scrollX, listTop, 8, "UP", "secondary", function() state.readerScroll = math.max(0, state.readerScroll - 1) end)
+    drawButton(source, "reader_down", scrollX, listTop + 4, 8, "DOWN", "secondary", function() state.readerScroll = math.min(maxScroll, state.readerScroll + 1) end)
+  end
 end
 
 local LASER_COUNT_OPTIONS = { 1, 2, 3, 4, 6, 8 }

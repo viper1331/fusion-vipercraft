@@ -32,6 +32,7 @@ function M.run(ctx)
     "tests/ignition_blockers.lua",
     "tests/config_laser_count.lua",
     "tests/reactor_diagram_render.lua",
+    "tests/responsive_render.lua",
     "ui/chrome.lua",
     "ui/views.lua",
     "ui/components.lua",
