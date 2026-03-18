@@ -829,7 +829,53 @@ local function drawReaders(source, w, h, layout)
   end
 end
 
+local LASER_COUNT_MIN = 1
+local LASER_COUNT_MAX = 8
 local LASER_COUNT_OPTIONS = { 1, 2, 3, 4, 6, 8 }
+
+local function setLaserCount(value, sourceLabel)
+  local numeric = tonumber(value)
+  if numeric == nil then
+    state.status = "Laser count invalide: nombre requis."
+    return false
+  end
+
+  numeric = math.floor(numeric + 0.5)
+  if numeric < LASER_COUNT_MIN or numeric > LASER_COUNT_MAX then
+    state.status = string.format(
+      "Laser count invalide: plage %d-%d.",
+      LASER_COUNT_MIN,
+      LASER_COUNT_MAX
+    )
+    return false
+  end
+
+  state.laserCount = CoreConfig.sanitizeLaserCount(numeric, state.laserCount or LASER_COUNT_MIN)
+  state.status = "Laser count " .. tostring(sourceLabel or "set") .. ": " .. tostring(state.laserCount)
+  return true
+end
+
+local function promptLaserCountInput()
+  local previous = term.current()
+  term.redirect(nativeTerm)
+  term.setBackgroundColor(colors.black)
+  term.setTextColor(colors.white)
+  term.clear()
+  term.setCursorPos(1, 1)
+  print("LASER COUNT INPUT")
+  print(string.format("Enter a value between %d and %d.", LASER_COUNT_MIN, LASER_COUNT_MAX))
+  print("Current value: " .. tostring(state.laserCount))
+  write("> ")
+  local raw = read()
+  term.redirect(previous)
+
+  local entry = sanitizeUiText(raw or "")
+  if entry == "" then
+    state.status = "Laser count invalide: entree vide."
+    return
+  end
+  setLaserCount(entry, "manuel")
+end
 
 local function drawLaserCountStep(source, w, h, layout)
   local left = layout.marginX
@@ -841,30 +887,56 @@ local function drawLaserCountStep(source, w, h, layout)
   fillRect(left, panelTop, right, panelBottom, colors.black)
   drawText(left, panelTop, fitText("Choisissez le nombre de lasers:", titleW), colors.white, colors.black)
   drawText(left + 1, panelTop + 2, fitText("Valeur active: " .. tostring(state.laserCount), titleW - 1), colors.yellow, colors.black)
-  drawText(left + 1, panelTop + 3, fitText("Selection rapide par boutons.", titleW - 1), colors.lightGray, colors.black)
+  drawText(left + 1, panelTop + 3, fitText("Selection rapide + saisie manuelle.", titleW - 1), colors.lightGray, colors.black)
 
   local defs = {}
   for _, value in ipairs(LASER_COUNT_OPTIONS) do
     local active = tonumber(state.laserCount) == value
-    table.insert(defs, {
-      id = "laser_count_" .. tostring(value),
-      label = tostring(value),
-      kind = active and "primary" or "secondary",
-      action = function()
-        state.laserCount = value
-        state.status = "Laser count choisi: " .. tostring(value)
-      end,
-    })
+      table.insert(defs, {
+        id = "laser_count_" .. tostring(value),
+        label = tostring(value),
+        kind = active and "primary" or "secondary",
+        action = function()
+          setLaserCount(value, "choisi")
+        end,
+      })
   end
 
   local rowY = panelTop + 6
+  local rowsUsed = 0
   if rowY <= panelBottom - 1 then
-    drawButtonRow(source, rowY, defs, left + 1, right - 1, layout.compact and 1 or 2)
+    rowsUsed = drawButtonRow(source, rowY, defs, left + 1, right - 1, layout.compact and 1 or 2)
   end
 
-  local hintY = math.min(panelBottom - 1, rowY + 4)
+  local inputY = rowY + (rowsUsed * 3) + 1
+  if inputY > panelBottom - 1 then
+    inputY = math.max(panelTop + 4, panelBottom - 2)
+  end
+  if inputY <= panelBottom - 1 then
+    drawButtonRow(source, inputY, {
+      {
+        id = "laser_count_input",
+        label = "INPUT VALUE",
+        kind = "primary",
+        action = function()
+          promptLaserCountInput()
+        end,
+      },
+    }, left + 1, right - 1, 1)
+  end
+
+  local hintY = math.min(panelBottom - 1, inputY + 3)
   if hintY > panelTop then
-    drawText(left + 1, hintY, fitText("Options: 1, 2, 3, 4, 6, 8", titleW - 1), colors.gray, colors.black)
+    drawText(
+      left + 1,
+      hintY,
+      fitText(
+        string.format("Range: %d-%d | Quick: 1,2,3,4,6,8", LASER_COUNT_MIN, LASER_COUNT_MAX),
+        titleW - 1
+      ),
+      colors.gray,
+      colors.black
+    )
   end
 end
 

@@ -453,6 +453,7 @@ function M.build(api)
     if moduleW % 2 ~= 0 then moduleW = moduleW - 1 end
     local moduleX = rx + math.floor((gw * cellW - moduleW) / 2)
     local moduleY = math.max(y + 1, ry - 3)
+    local topY = moduleY - 2
     local gapTop = moduleY + 1
     local gapBottom = ry - 1
     local beamX = rx + (gcx - 1) * cellW
@@ -487,17 +488,53 @@ function M.build(api)
     end
     writeAt(moduleX + math.floor((moduleW - #moduleLabel) / 2), moduleY, moduleLabel, moduleFg, moduleBg)
 
-    local emittersY = moduleY - 1
-    if emittersY >= y + 1 then
-      local emitterSlots = clamp(math.floor(moduleW / 3), 1, 5)
-      local emitterCount = clamp(displayedLaserCount, 1, emitterSlots)
-      local emitterSpan = (emitterCount * 2) + math.max(0, emitterCount - 1)
-      local emitterX = moduleX + math.floor((moduleW - emitterSpan) / 2)
-      for i = 0, emitterCount - 1 do
-        local active = laserReady or (laserChargingAnim and (((state.tick + i) % 3) == 0))
-        local cellBg = active and (laserReady and C.ok or C.warn) or C.panelMid
-        writeAt(emitterX + (i * 3), emittersY, "[]", colors.black, cellBg)
+    -- Representation LAS: 1 petit module = 1 laser.
+    -- Les modules sont empiles verticalement (plus d'alignement horizontal).
+    local stackX = beamX
+    local leftStackX = moduleX - 3
+    local rightStackX = moduleX + moduleW + 1
+    if leftStackX >= x + 2 then
+      stackX = leftStackX
+    elseif rightStackX <= x + w - 3 then
+      stackX = rightStackX
+    end
+
+    local stackCount = math.max(1, math.floor(tonumber(displayedLaserCount) or 1))
+    local stackMinY = math.max(y + 1, topY + 1)
+    local stackMaxY = math.min(y + h - 2, ry + gcy + 2)
+    if stackMaxY < stackMinY then stackMaxY = stackMinY end
+    local stackCapacity = math.max(1, stackMaxY - stackMinY + 1)
+    local visibleStackCount = math.min(stackCount, stackCapacity)
+    local hiddenStackCount = math.max(0, stackCount - visibleStackCount)
+    local stackStartY = moduleY - math.floor((visibleStackCount - 1) / 2)
+    if stackStartY < stackMinY then stackStartY = stackMinY end
+    if stackStartY + visibleStackCount - 1 > stackMaxY then
+      stackStartY = stackMaxY - visibleStackCount + 1
+    end
+
+    for i = 0, visibleStackCount - 1 do
+      local active = laserBeamActive
+        or laserReady
+        or (laserChargingAnim and (((state.tick + i) % 3) == 0))
+      local cellBg = C.panelMid
+      local cellFg = colors.black
+      if laserState == "ABSENT" then
+        cellBg = C.bad
+        cellFg = colors.white
+      elseif laserBeamActive then
+        cellBg = C.bad
+        cellFg = colors.white
+      elseif active then
+        cellBg = laserReady and C.ok or C.warn
+      elseif laserState == "INSUFFICIENT" then
+        cellBg = C.warn
+        cellFg = C.text
       end
+      writeAt(stackX, stackStartY + i, "[]", cellFg, cellBg)
+    end
+
+    if hiddenStackCount > 0 and stackStartY > (y + 1) then
+      writeAt(stackX, stackStartY - 1, "+" .. tostring(hiddenStackCount), C.dim, C.panelDark)
     end
 
     if laserBeamActive then
@@ -574,7 +611,6 @@ function M.build(api)
     drawCell(gcx, legY - 1, dtPathTone, dtValveGlyph, C.text)
 
     -- Libelles d'etat (haut/bas du diagramme).
-    local topY = moduleY - 2
     if topY >= y + 1 then
       local laserTxt = shortText(string.format("LAS x%d (%d) %3.0f%% %s", displayedLaserCount, detectedLaserCount, state.laserPct, tostring(state.laserStatusText or laserState)), gw * cellW - 2)
       writeAt(rx + math.floor((gw * cellW - #laserTxt) / 2), topY, laserTxt, laserTone, C.panelDark)

@@ -17,6 +17,7 @@ function M.run(ctx)
   end
 
   local writes = 0
+  local laserModuleWrites = {}
   local state = {
     tick = 0,
     alert = "NONE",
@@ -55,8 +56,11 @@ function M.run(ctx)
     dtFuel = colors.purple,
   }
 
-  local function writeAt(_, _, txt)
+  local function writeAt(x, y, txt, fg, bg)
     writes = writes + #(tostring(txt or ""))
+    if txt == "[]" and bg == colors.green and y <= 16 then
+      table.insert(laserModuleWrites, { x = x, y = y, fg = fg, bg = bg })
+    end
   end
 
   local function drawBox(_, _, _, _, _, _)
@@ -106,6 +110,35 @@ function M.run(ctx)
       fail(102, "Aucune sortie graphique detectee (" .. scenario.name .. ")")
       return
     end
+  end
+
+  -- Verification specifique: en mode READY et multi-lasers, les modules
+  -- LAS doivent former une pile verticale (meme colonne, plusieurs lignes).
+  laserModuleWrites = {}
+  state.tick = 4
+  state.ignition = false
+  state.laserLineOn = false
+  state.laserState = "READY"
+  local okStack, errStack = pcall(draw, 1, 1, 120, 38)
+  if not okStack then
+    fail(103, "Erreur rendu verification pile LAS: " .. tostring(errStack))
+    return
+  end
+
+  local perColumn = {}
+  for _, cell in ipairs(laserModuleWrites) do
+    perColumn[cell.x] = perColumn[cell.x] or {}
+    perColumn[cell.x][cell.y] = true
+  end
+  local bestVertical = 0
+  for _, rows in pairs(perColumn) do
+    local count = 0
+    for _ in pairs(rows) do count = count + 1 end
+    if count > bestVertical then bestVertical = count end
+  end
+  if bestVertical < 3 then
+    fail(104, "Pile verticale LAS non detectee (1 module = 1 laser)")
+    return
   end
 
   ok("Renderer reacteur stable (idle/charging/firing)")
