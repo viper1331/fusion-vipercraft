@@ -750,6 +750,7 @@ function M.run()
     if merged.ui.preferredView == "CONFIG" then merged.ui.preferredView = "CFG" end
     merged.ui.scale = CoreConfig.sanitizeUiScale(merged.ui.scale, base.ui.scale or 1.0)
     merged.ui.output = CoreConfig.sanitizeDisplayOutput(merged.ui.output, base.ui.output or "monitor")
+    merged.ui.displayBackend = CoreConfig.sanitizeDisplayBackend(merged.ui.displayBackend, base.ui.displayBackend or "auto")
     merged.ui.energyUnit = CoreConfig.sanitizeEnergyUnit(merged.ui.energyUnit, base.ui.energyUnit or "j")
     merged.ui.laserCount = CoreConfig.sanitizeLaserCount(merged.ui.laserCount, base.ui.laserCount or 1)
     merged.monitor.scale = CoreConfig.sanitizeMonitorScale(merged.monitor.scale, base.monitor.scale or 0.5)
@@ -1775,23 +1776,37 @@ function M.run()
   local function chooseMonitorAuto()
     local monitors = getMonitorCandidates()
     if #monitors == 0 then return nil end
+    local preferredBackend = CoreConfig.sanitizeDisplayBackend(CFG.displayBackend, "auto")
+
+    local filtered = monitors
+    if preferredBackend ~= "auto" then
+      filtered = {}
+      for _, candidate in ipairs(monitors) do
+        if candidate.backend == preferredBackend then
+          filtered[#filtered + 1] = candidate
+        end
+      end
+      if #filtered == 0 then
+        filtered = monitors
+      end
+    end
 
     local saved = loadSavedMonitorName()
     if saved then
-      for _, m in ipairs(monitors) do
+      for _, m in ipairs(filtered) do
         if m.name == saved then return m end
       end
     end
 
-    for _, m in ipairs(monitors) do
+    for _, m in ipairs(filtered) do
       if m.name == CFG.preferredMonitor then
         saveSelectedMonitorName(m.name)
         return m
       end
     end
 
-    saveSelectedMonitorName(monitors[1].name)
-    return monitors[1]
+    saveSelectedMonitorName(filtered[1].name)
+    return filtered[1]
   end
 
   setupMonitor = function()
@@ -2214,11 +2229,13 @@ function M.run()
 
     CFG.uiScale = CoreConfig.sanitizeUiScale(working.ui.scale, CFG.uiScale or 1.0)
     CFG.displayOutput = CoreConfig.sanitizeDisplayOutput(working.ui.output, CFG.displayOutput or "monitor")
+    CFG.displayBackend = CoreConfig.sanitizeDisplayBackend(working.ui.displayBackend, CFG.displayBackend or "auto")
     CFG.energyUnit = CoreConfig.sanitizeEnergyUnit(working.ui.energyUnit, CFG.energyUnit or "j")
     CFG.laserCount = CoreConfig.sanitizeLaserCount(working.ui.laserCount, CFG.laserCount or 1)
     CFG.monitorScale = CoreConfig.sanitizeMonitorScale(working.monitor.scale, CFG.monitorScale or 0.5)
     working.ui.scale = CFG.uiScale
     working.ui.output = CFG.displayOutput
+    working.ui.displayBackend = CFG.displayBackend
     working.ui.energyUnit = CFG.energyUnit
     working.ui.laserCount = CFG.laserCount
     working.monitor.scale = CFG.monitorScale

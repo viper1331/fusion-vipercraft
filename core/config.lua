@@ -26,6 +26,12 @@ local VALID_OUTPUTS = {
   both = true,
 }
 
+local VALID_DISPLAY_BACKENDS = {
+  auto = true,
+  cc_monitor = true,
+  toms_gpu = true,
+}
+
 local VALID_ENERGY_UNITS = {
   j = true,
   fe = true,
@@ -84,10 +90,17 @@ function M.defaultFusionConfig(CFG, updateEnabled)
       preferredView = "SUP",
       scale = CFG.uiScale or 1.0,
       output = CFG.displayOutput or "monitor",
+      displayBackend = CFG.displayBackend or "auto",
       energyUnit = CFG.energyUnit or "j",
       laserCount = CFG.laserCount or 1,
       touchEnabled = true,
       refreshDelay = CFG.refreshDelay,
+    },
+    actions = {
+      dt_fuel = {
+        relay = CFG.actions and CFG.actions.dt_fuel and CFG.actions.dt_fuel.relay or nil,
+        side = CFG.actions and CFG.actions.dt_fuel and CFG.actions.dt_fuel.side or "front",
+      },
     },
     update = {
       enabled = updateEnabled,
@@ -154,6 +167,7 @@ function M.applyConfigToRuntime(config, CFG)
   CFG.monitorScale = M.sanitizeMonitorScale(config.monitor and config.monitor.scale, CFG.monitorScale)
   CFG.uiScale = M.sanitizeUiScale(config.ui and config.ui.scale, CFG.uiScale or 1.0)
   CFG.displayOutput = M.sanitizeDisplayOutput(config.ui and config.ui.output, CFG.displayOutput or "monitor")
+  CFG.displayBackend = M.sanitizeDisplayBackend(config.ui and config.ui.displayBackend, CFG.displayBackend or "auto")
   CFG.energyUnit = M.sanitizeEnergyUnit(config.ui and config.ui.energyUnit, CFG.energyUnit or "j")
   CFG.laserCount = M.sanitizeLaserCount(config.ui and config.ui.laserCount, CFG.laserCount or 1)
   CFG.refreshDelay = M.sanitizeRefreshDelay(config.ui and config.ui.refreshDelay, CFG.refreshDelay)
@@ -179,6 +193,27 @@ function M.applyConfigToRuntime(config, CFG)
   CFG.knownRelays.tritium.side = M.sanitizeRelaySide(config.relays and config.relays.tritium and config.relays.tritium.side, CFG.knownRelays.tritium.side)
   CFG.knownRelays.deuterium.relay = M.sanitizeDeviceName(config.relays and config.relays.deuterium and config.relays.deuterium.name, CFG.knownRelays.deuterium.relay)
   CFG.knownRelays.deuterium.side = M.sanitizeRelaySide(config.relays and config.relays.deuterium and config.relays.deuterium.side, CFG.knownRelays.deuterium.side)
+
+  local dtFuelRelay = M.sanitizeDeviceName(
+    (config.actions and config.actions.dt_fuel and config.actions.dt_fuel.relay)
+      or (config.relays and config.relays.dtFuel and config.relays.dtFuel.name),
+    CFG.actions and CFG.actions.dt_fuel and CFG.actions.dt_fuel.relay
+  )
+  local dtFuelSide = M.sanitizeRelaySide(
+    (config.actions and config.actions.dt_fuel and config.actions.dt_fuel.side)
+      or (config.relays and config.relays.dtFuel and config.relays.dtFuel.side),
+    (CFG.actions and CFG.actions.dt_fuel and CFG.actions.dt_fuel.side) or "front"
+  )
+  CFG.actions = type(CFG.actions) == "table" and CFG.actions or {}
+  if dtFuelRelay then
+    CFG.actions.dt_fuel = type(CFG.actions.dt_fuel) == "table" and CFG.actions.dt_fuel or {}
+    CFG.actions.dt_fuel.relay = dtFuelRelay
+    CFG.actions.dt_fuel.side = dtFuelSide
+    CFG.actions.dt_fuel.analog = tonumber(CFG.actions.dt_fuel.analog) or 15
+    CFG.actions.dt_fuel.pulse = false
+  else
+    CFG.actions.dt_fuel = nil
+  end
 end
 
 function M.sanitizeMonitorScale(value, fallback)
@@ -200,6 +235,12 @@ end
 function M.sanitizeDisplayOutput(value, fallback)
   local mode = string.lower(tostring(value or ""))
   if VALID_OUTPUTS[mode] then return mode end
+  return fallback
+end
+
+function M.sanitizeDisplayBackend(value, fallback)
+  local mode = string.lower(tostring(value or ""))
+  if VALID_DISPLAY_BACKENDS[mode] then return mode end
   return fallback
 end
 
@@ -283,6 +324,8 @@ function M.validateConfig(config)
     table.insert(errors, "Configuration root must be a table")
     return false, errors
   end
+  local relays = type(config.relays) == "table" and config.relays or {}
+  local actions = type(config.actions) == "table" and config.actions or nil
 
   local function optionalBindingName(value, path)
     if value == nil then return end
@@ -301,9 +344,11 @@ function M.validateConfig(config)
   optionalBindingName(config.readers and config.readers.tritium, "readers.tritium")
   optionalBindingName(config.readers and config.readers.deuterium, "readers.deuterium")
   optionalBindingName(config.readers and config.readers.aux, "readers.aux")
-  optionalBindingName(config.relays and config.relays.laser and config.relays.laser.name, "relays.laser.name")
-  optionalBindingName(config.relays and config.relays.tritium and config.relays.tritium.name, "relays.tritium.name")
-  optionalBindingName(config.relays and config.relays.deuterium and config.relays.deuterium.name, "relays.deuterium.name")
+  optionalBindingName(relays.laser and relays.laser.name, "relays.laser.name")
+  optionalBindingName(relays.tritium and relays.tritium.name, "relays.tritium.name")
+  optionalBindingName(relays.deuterium and relays.deuterium.name, "relays.deuterium.name")
+  optionalBindingName(relays.dtFuel and relays.dtFuel.name, "relays.dtFuel.name")
+  optionalBindingName(actions and actions.dt_fuel and actions.dt_fuel.relay, "actions.dt_fuel.relay")
 
   local preferredView = config.ui and config.ui.preferredView
   if type(preferredView) ~= "string" or not VALID_VIEWS[preferredView] then
@@ -317,6 +362,11 @@ function M.validateConfig(config)
   local outputMode = config.ui and config.ui.output
   if type(outputMode) ~= "string" or not VALID_OUTPUTS[string.lower(outputMode)] then
     table.insert(errors, "ui.output is invalid")
+  end
+
+  local displayBackend = config.ui and config.ui.displayBackend
+  if displayBackend ~= nil and (type(displayBackend) ~= "string" or not VALID_DISPLAY_BACKENDS[string.lower(displayBackend)]) then
+    table.insert(errors, "ui.displayBackend is invalid")
   end
 
   local energyUnit = config.ui and config.ui.energyUnit
@@ -358,14 +408,34 @@ function M.validateConfig(config)
   end
 
   local relaySides = {
-    { path = "relays.laser.side", value = config.relays and config.relays.laser and config.relays.laser.side },
-    { path = "relays.tritium.side", value = config.relays and config.relays.tritium and config.relays.tritium.side },
-    { path = "relays.deuterium.side", value = config.relays and config.relays.deuterium and config.relays.deuterium.side },
+    { path = "relays.laser.side", value = relays.laser and relays.laser.side },
+    { path = "relays.tritium.side", value = relays.tritium and relays.tritium.side },
+    { path = "relays.deuterium.side", value = relays.deuterium and relays.deuterium.side },
   }
 
   for _, relay in ipairs(relaySides) do
     if type(relay.value) ~= "string" or not VALID_SIDES[relay.value] then
       table.insert(errors, relay.path .. " is invalid")
+    end
+  end
+
+  if relays.dtFuel and relays.dtFuel.side ~= nil then
+    local side = relays.dtFuel.side
+    if type(side) ~= "string" or not VALID_SIDES[side] then
+      table.insert(errors, "relays.dtFuel.side is invalid")
+    end
+  end
+
+  if config.actions ~= nil and type(config.actions) ~= "table" then
+    table.insert(errors, "actions must be a table")
+  elseif actions and actions.dt_fuel ~= nil then
+    if type(actions.dt_fuel) ~= "table" then
+      table.insert(errors, "actions.dt_fuel must be a table")
+    elseif actions.dt_fuel.side ~= nil then
+      local side = actions.dt_fuel.side
+      if type(side) ~= "string" or not VALID_SIDES[side] then
+        table.insert(errors, "actions.dt_fuel.side is invalid")
+      end
     end
   end
 

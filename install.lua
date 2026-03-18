@@ -6,12 +6,101 @@ local VERSION_FILE = "fusion.version"
 local DEFAULT_VERSION = "1.1.0"
 
 local CoreConfig = require("core.config")
+local function loadDisplayBackend()
+  if type(require) == "function" then
+    local ok, mod = pcall(require, "io.display_backend")
+    if ok and type(mod) == "table" then
+      return mod
+    end
+  end
+  return {
+    detectCandidate = function(name, obj)
+      if not obj then return nil end
+      if type(obj.getSize) == "function" then
+        local ok, w, h = pcall(obj.getSize)
+        if ok then
+          return {
+            name = name,
+            obj = obj,
+            kind = "cc_monitor",
+            touchEvent = "monitor_touch",
+            w = tonumber(w) or 0,
+            h = tonumber(h) or 0,
+          }
+        end
+      end
+      return nil
+    end,
+    createSurface = function(candidate)
+      return candidate and candidate.obj or nil, {
+        kind = (candidate and candidate.kind) or "cc_monitor",
+        touchEvent = (candidate and candidate.touchEvent) or "monitor_touch",
+        mapPixel = nil,
+      }
+    end,
+  }
+end
+
+local DisplayBackend = loadDisplayBackend()
+local state
 
 local SIDES = { "top", "bottom", "left", "right", "front", "back" }
 
 local function contains(str, sub)
   return type(str) == "string" and type(sub) == "string"
     and string.find(string.lower(str), string.lower(sub), 1, true) ~= nil
+end
+
+local function getTypeOf(name)
+  local ok, ptype = pcall(peripheral.getType, name)
+  if ok then return ptype end
+  return nil
+end
+
+local function safePeripheral(name)
+  if type(name) ~= "string" or name == "" then return nil end
+  if not peripheral.isPresent(name) then return nil end
+  local ok, obj = pcall(peripheral.wrap, name)
+  if ok then return obj end
+  return nil
+end
+
+local function hasMethods(obj, methods, minCount)
+  if not obj then return false end
+  local count = 0
+  for _, methodName in ipairs(methods) do
+    if type(obj[methodName]) == "function" then
+      count = count + 1
+    end
+  end
+  return count >= (minCount or 1), count
+end
+
+local function normalizeDisplayCandidate(name, obj)
+  if not obj then return nil end
+  local candidate = DisplayBackend.detectCandidate(name, obj, getTypeOf)
+  if not candidate then return nil end
+
+  local width = tonumber(candidate.w) or 0
+  local height = tonumber(candidate.h) or 0
+  if (width <= 0 or height <= 0) and type(obj.getSize) == "function" then
+    local ok, w, h = pcall(obj.getSize)
+    if ok then
+      width = tonumber(w) or width
+      height = tonumber(h) or height
+    end
+  end
+
+  local backend = tostring(candidate.kind or "cc_monitor")
+  local touchEvent = tostring(candidate.touchEvent or "monitor_touch")
+  return {
+    name = name,
+    obj = obj,
+    backend = backend,
+    touchEvent = touchEvent,
+    w = math.max(0, math.floor(width)),
+    h = math.max(0, math.floor(height)),
+  }
 end
 
 local function gatherPeripherals()
@@ -21,76 +110,285 @@ local function gatherPeripherals()
   local devices = {
     all = names,
     byType = {},
+    byName = {},
     monitors = {},
+    displays = {},
+    displayCandidates = {},
+    displayByName = {},
+    displayBackends = { cc_monitor = 0, toms_gpu = 0, other = 0 },
     readers = {},
     relays = {},
   }
 
   for _, name in ipairs(names) do
-    local ptype = peripheral.getType(name) or "unknown"
+    local ptype = getTypeOf(name) or "unknown"
+    local obj = safePeripheral(name)
+
+    devices.byName[name] = { type = ptype, obj = obj }
     devices.byType[ptype] = devices.byType[ptype] or {}
     table.insert(devices.byType[ptype], name)
 
-    if ptype == "monitor" then table.insert(devices.monitors, name) end
-    if ptype == "block_reader" or contains(name, "block_reader") then table.insert(devices.readers, name) end
-    if ptype == "redstone_relay" or contains(name, "relay") then table.insert(devices.relays, name) end
+    local displayCandidate = normalizeDisplayCandidate(name, obj)
+    if displayCandidate then
+      devices.displayCandidates[#devices.displayCandidates + 1] = displayCandidate
+      devices.displayByName[name] = displayCandidate
+      devices.displays[#devices.displays + 1] = name
+      devices.monitors[#devices.monitors + 1] = name
+      if displayCandidate.backend == "toms_gpu" then
+        devices.displayBackends.toms_gpu = devices.displayBackends.toms_gpu + 1
+      elseif displayCandidate.backend == "cc_monitor" then
+        devices.displayBackends.cc_monitor = devices.displayBackends.cc_monitor + 1
+      else
+        devices.displayBackends.other = devices.displayBackends.other + 1
+      end
+    end
+
+    local isReader = hasMethods(obj, {
+      "getBlockData",
+      "getBlockName",
+      "listMethods",
+    }, 1)
+    if ptype == "block_reader" or isReader or contains(ptype, "reader") then
+      devices.readers[#devices.readers + 1] = name
+    end
+
+    local isRelay = hasMethods(obj, {
+      "setOutput",
+      "setAnalogOutput",
+      "setAnalogueOutput",
+      "getOutput",
+    }, 1)
+    if ptype == "redstone_relay" or isRelay or contains(ptype, "relay") or contains(name, "relay") then
+      devices.relays[#devices.relays + 1] = name
+    end
   end
+
+  local backendPriority = {
+    toms_gpu = 1,
+    cc_monitor = 2,
+  }
+  table.sort(devices.displayCandidates, function(a, b)
+    local pa = backendPriority[a.backend] or 99
+    local pb = backendPriority[b.backend] or 99
+    if pa ~= pb then return pa < pb end
+    return a.name < b.name
+  end)
+  table.sort(devices.readers)
+  table.sort(devices.relays)
 
   return devices
 end
 
-local function suggestByName(names, keywords)
-  for _, name in ipairs(names) do
-    for _, key in ipairs(keywords) do
-      if contains(name, key) then
-        return name
+local function pickUnused(list, used)
+  for _, name in ipairs(list) do
+    if not used[name] then
+      used[name] = true
+      return name
+    end
+  end
+  return nil
+end
+
+local function pickByKeywords(list, keywords, used)
+  for _, name in ipairs(list) do
+    if not used[name] then
+      for _, key in ipairs(keywords) do
+        if contains(name, key) then
+          used[name] = true
+          return name
+        end
       end
     end
   end
   return nil
 end
 
+local function countMethods(obj, methods)
+  local _, count = hasMethods(obj, methods, 1)
+  return count or 0
+end
+
+local function pickBestByRule(devices, scorer)
+  local bestName = nil
+  local bestScore = nil
+  for _, name in ipairs(devices.all) do
+    local info = devices.byName[name]
+    if info and info.obj then
+      local score = scorer(name, info.obj, tostring(info.type or ""))
+      if score ~= nil and (bestScore == nil or score > bestScore or (score == bestScore and name < bestName)) then
+        bestScore = score
+        bestName = name
+      end
+    end
+  end
+  return bestName
+end
+
 local function listCandidates(devices)
-  local generic = devices.all
+  local usedRelay = {}
+  local usedReader = {}
+
+  local displayCandidate = devices.displayCandidates[1]
+  local monitorName = displayCandidate and displayCandidate.name or nil
+  local monitorBackend = displayCandidate and displayCandidate.backend or "auto"
+
+  local reactorController = pickBestByRule(devices, function(name, obj, ptype)
+    local valid = hasMethods(obj, {
+      "isIgnited",
+      "getPlasmaTemperature",
+      "getPlasmaTemp",
+      "getPlasmaHeat",
+      "getCaseTemperature",
+      "getCasingTemperature",
+    }, 2)
+    if not valid then return nil end
+    local score = countMethods(obj, {
+      "isIgnited",
+      "getPlasmaTemperature",
+      "getPlasmaTemp",
+      "getPlasmaHeat",
+      "getCaseTemperature",
+      "getCasingTemperature",
+    })
+    if contains(ptype, "fusion_reactor_controller") then score = score + 20 end
+    if contains(name, "reactor") then score = score + 2 end
+    return score
+  end)
+
+  local logicAdapter = pickBestByRule(devices, function(name, obj, ptype)
+    local valid = hasMethods(obj, {
+      "isFormed",
+      "isIgnited",
+      "setInjectionRate",
+      "getInjectionRate",
+      "getPlasmaTemperature",
+      "getCaseTemperature",
+    }, 3)
+    if not valid then return nil end
+    local score = countMethods(obj, {
+      "isFormed",
+      "isIgnited",
+      "setInjectionRate",
+      "getInjectionRate",
+      "getPlasmaTemperature",
+      "getCaseTemperature",
+    })
+    if contains(ptype, "logic") then score = score + 8 end
+    if contains(name, "logic") then score = score + 2 end
+    return score
+  end)
+
+  local laser = pickBestByRule(devices, function(name, obj, ptype)
+    local valid = hasMethods(obj, {
+      "getEnergy",
+      "getEnergyStored",
+      "getMaxEnergy",
+      "getMaxEnergyStored",
+      "getEnergyFilledPercentage",
+    }, 2)
+    if not valid then return nil end
+    local score = countMethods(obj, {
+      "getEnergy",
+      "getEnergyStored",
+      "getMaxEnergy",
+      "getMaxEnergyStored",
+      "getEnergyFilledPercentage",
+    })
+    if contains(ptype, "laser") or contains(name, "laser") then score = score + 10 end
+    return score
+  end)
+
+  local induction = pickBestByRule(devices, function(name, obj, ptype)
+    local valid = hasMethods(obj, {
+      "isFormed",
+      "getEnergy",
+      "getMaxEnergy",
+      "getLastInput",
+      "getLastOutput",
+      "getTransferCap",
+    }, 3)
+    if not valid then return nil end
+    local score = countMethods(obj, {
+      "isFormed",
+      "getEnergy",
+      "getMaxEnergy",
+      "getLastInput",
+      "getLastOutput",
+      "getTransferCap",
+    })
+    if contains(ptype, "induction") or contains(name, "induction") then score = score + 10 end
+    if contains(ptype, "matrix") or contains(name, "matrix") then score = score + 2 end
+    return score
+  end)
+
+  local relayLaser = pickByKeywords(devices.relays, { "laser", "las" }, usedRelay) or pickUnused(devices.relays, usedRelay)
+  local relayTritium = pickByKeywords(devices.relays, { "tritium", "tank_t", "tankt" }, usedRelay) or pickUnused(devices.relays, usedRelay)
+  local relayDeuterium = pickByKeywords(devices.relays, { "deuterium", "tank_d", "tankd" }, usedRelay) or pickUnused(devices.relays, usedRelay)
+  local relayDTFuel = pickByKeywords(devices.relays, { "dt", "fuel", "mix" }, usedRelay) or pickUnused(devices.relays, usedRelay)
+
+  local readerTritium = pickByKeywords(devices.readers, { "tritium", "tank_t", "tankt" }, usedReader) or pickUnused(devices.readers, usedReader)
+  local readerDeuterium = pickByKeywords(devices.readers, { "deuterium", "tank_d", "tankd" }, usedReader) or pickUnused(devices.readers, usedReader)
+  local readerAux = pickByKeywords(devices.readers, { "aux", "inventory", "inv" }, usedReader) or pickUnused(devices.readers, usedReader)
+
   return {
-    monitor = suggestByName(devices.monitors, { "monitor" }),
-    reactorController = suggestByName(generic, { "fusion_reactor_controller", "reactor_controller", "fusionreactor" }),
-    logicAdapter = suggestByName(generic, { "logic_adapter", "fusionreactorlogicadapter", "logic" }),
-    laser = suggestByName(generic, { "laser", "amplifier" }),
-    induction = suggestByName(generic, { "induction", "matrix", "port" }),
-    relayLaser = suggestByName(devices.relays, { "relay_0", "laser", "las" }),
-    relayTritium = suggestByName(devices.relays, { "relay_2", "tritium", "tank_t" }),
-    relayDeuterium = suggestByName(devices.relays, { "relay_1", "deuterium", "tank_d" }),
-    readerTritium = suggestByName(devices.readers, { "reader_2", "tritium" }),
-    readerDeuterium = suggestByName(devices.readers, { "reader_1", "deuterium" }),
-    readerAux = suggestByName(devices.readers, { "reader_6", "aux", "inventory" }),
+    monitor = monitorName,
+    displayBackend = monitorBackend,
+    reactorController = reactorController,
+    logicAdapter = logicAdapter,
+    laser = laser,
+    induction = induction,
+    relayLaser = relayLaser,
+    relayTritium = relayTritium,
+    relayDeuterium = relayDeuterium,
+    relayDTFuel = relayDTFuel,
+    readerTritium = readerTritium,
+    readerDeuterium = readerDeuterium,
+    readerAux = readerAux,
   }
 end
 
 local function runMonitorTest(name)
-  if not name then return false, "Monitor non configure" end
-  local mon = peripheral.wrap(name)
-  if not mon then return false, "Monitor introuvable" end
+  if not name then return false, "Display non configure" end
+  local obj = safePeripheral(name)
+  if not obj then return false, "Display introuvable" end
+  local scale = tonumber(state.monitorScale) or 0.5
+  if scale < 0.5 then scale = 0.5 end
+  if scale > 5 then scale = 5 end
+
+  local candidate = normalizeDisplayCandidate(name, obj)
+  if not candidate then return false, "Display non compatible" end
+
+  local surface, meta = DisplayBackend.createSurface(candidate, { monitorScale = scale })
+  surface = surface or obj
+  if candidate.backend == "cc_monitor" and type(obj.setTextScale) == "function" then
+    pcall(obj.setTextScale, scale)
+  end
 
   local ok = pcall(function()
-    mon.setBackgroundColor(colors.blue)
-    mon.setTextColor(colors.white)
-    mon.clear()
-    mon.setCursorPos(2, 2)
-    mon.write("Fusion installer: monitor test")
-    mon.setCursorPos(2, 4)
-    mon.write("Touch this monitor now")
+    surface.setBackgroundColor(colors.blue)
+    surface.setTextColor(colors.white)
+    surface.clear()
+    surface.setCursorPos(2, 2)
+    surface.write("Fusion installer: display test")
+    surface.setCursorPos(2, 4)
+    surface.write("Touch this display now")
+    if type(surface.flush) == "function" then
+      surface.flush()
+    elseif type(surface.sync) == "function" then
+      surface.sync()
+    end
   end)
 
-  if not ok then return false, "Echec ecriture monitor" end
+  if not ok then return false, "Echec ecriture display" end
+  local expectedTouch = (meta and meta.touchEvent) or candidate.touchEvent or "monitor_touch"
   local timer = os.startTimer(5)
   while true do
     local ev, p1 = os.pullEvent()
-    if ev == "monitor_touch" and p1 == name then
-      return true, "Touch monitor detecte"
+    if (ev == expectedTouch or ev == "monitor_touch" or ev == "tm_monitor_touch") and p1 == name then
+      return true, "Touch display detecte"
     end
     if ev == "timer" and p1 == timer then
-      return true, "Monitor visible (pas de touch detecte)"
+      return true, "Display visible (pas de touch detecte)"
     end
   end
 end
@@ -177,7 +475,7 @@ local function ensureVersionFile()
   end
 end
 
-local state = {
+state = {
   step = 1,
   running = true,
   devices = gatherPeripherals(),
@@ -189,12 +487,14 @@ local state = {
   energyUnit = "j",
   laserCount = 1,
   monitorScale = 0.5,
+  monitorTouchEvent = "monitor_touch",
+  monitorTouchMapper = nil,
   preferredView = "SUP",
   touchEnabled = true,
   uiOnMonitor = false,
   monitorScroll = 0,
   roleScroll = 0,
-  relayScroll = { laser = 0, tritium = 0, deuterium = 0 },
+  relayScroll = { laser = 0, tritium = 0, deuterium = 0, dtFuel = 0 },
   readerScroll = 0,
   activeRole = "reactorController",
   activeRelay = "laser",
@@ -206,12 +506,15 @@ local state = {
     logicAdapter = nil,
     laser = nil,
     induction = nil,
+    displayBackend = "auto",
     relayLaser = nil,
     relayLaserSide = "top",
     relayTritium = nil,
     relayTritiumSide = "front",
     relayDeuterium = nil,
     relayDeuteriumSide = "front",
+    relayDTFuel = nil,
+    relayDTFuelSide = "front",
     readerTritium = nil,
     readerDeuterium = nil,
     readerAux = nil,
@@ -445,7 +748,7 @@ end
 local stepTitles = {
   "Accueil",
   "Scan devices",
-  "Selection monitor",
+  "Display backend",
   "Devices principaux",
   "Relays & faces",
   "Readers",
@@ -461,8 +764,8 @@ local function drawSteps(w, layout)
   drawText(2, 1, fitText(title, w - 2), colors.white, colors.gray)
   drawText(2, 2, fitText(txt, w - 2), colors.yellow, colors.gray)
   local hint = isCompactLayout(layout)
-    and "Touch: souris/monitor"
-    or "Navigation tactile: clic souris + monitor_touch"
+    and "Touch: souris/monitor/tm"
+    or "Navigation tactile: souris + monitor_touch + tm_monitor_touch"
   drawText(2, 3, fitText(hint, w - 2), colors.white, colors.gray)
 end
 
@@ -490,7 +793,78 @@ local function scanNow()
       state.selected[k] = v
     end
   end
+  if type(state.selected.displayBackend) ~= "string" or state.selected.displayBackend == "" then
+    state.selected.displayBackend = "auto"
+  end
+  if state.selected.displayBackend ~= "auto" then
+    local foundBackend = false
+    for _, candidate in ipairs(state.devices.displayCandidates) do
+      if candidate.backend == state.selected.displayBackend then
+        foundBackend = true
+        break
+      end
+    end
+    if not foundBackend then
+      state.selected.displayBackend = "auto"
+    end
+  end
+
+  if state.selected.monitor and not state.devices.displayByName[state.selected.monitor] then
+    state.selected.monitor = nil
+  end
+  if not state.selected.monitor and state.suggested.monitor then
+    state.selected.monitor = state.suggested.monitor
+  end
   state.status = string.format("SCAN COMPLETE - %d DEVICES FOUND", #state.devices.all)
+end
+
+local function backendLabel(backend)
+  if backend == "toms_gpu" then return "Tom GPU" end
+  if backend == "cc_monitor" then return "CC Monitor" end
+  return tostring(backend or "auto")
+end
+
+local function displayBackendMatches(candidate, preferredBackend)
+  if type(candidate) ~= "table" then return false end
+  local pref = tostring(preferredBackend or "auto")
+  if pref == "auto" then return true end
+  return tostring(candidate.backend or "") == pref
+end
+
+local function getDisplayCandidatesByPreference()
+  local pref = state.selected.displayBackend or "auto"
+  local filtered = {}
+  for _, candidate in ipairs(state.devices.displayCandidates) do
+    if displayBackendMatches(candidate, pref) then
+      filtered[#filtered + 1] = candidate
+    end
+  end
+  if #filtered == 0 then
+    for _, candidate in ipairs(state.devices.displayCandidates) do
+      filtered[#filtered + 1] = candidate
+    end
+  end
+  return filtered
+end
+
+local function resolveSelectedDisplayCandidate()
+  local preferred = getDisplayCandidatesByPreference()
+  if #preferred == 0 then
+    return nil
+  end
+
+  local selectedName = state.selected.monitor
+  if selectedName then
+    for _, candidate in ipairs(preferred) do
+      if candidate.name == selectedName then
+        return candidate
+      end
+    end
+  end
+
+  local fallback = preferred[1]
+  state.selected.monitor = fallback.name
+  return fallback
 end
 
 local function createListRows(items, selected, startY, rows, scroll, source, onSelect, x1, x2)
@@ -580,7 +954,9 @@ local function drawScan(source, w, h, layout)
   y = y + 2
 
   local entries = {
-    { "Monitors", #state.devices.monitors },
+    { "Displays", #state.devices.displayCandidates },
+    { "CC monitors", state.devices.displayBackends.cc_monitor or 0 },
+    { "Tom GPU", state.devices.displayBackends.toms_gpu or 0 },
     { "Relays", #state.devices.relays },
     { "Readers", #state.devices.readers },
     { "Reactor devices", #(state.devices.byType["fusion_reactor_controller"] or {}) + #(state.devices.byType["fusionReactorLogicAdapter"] or {}) },
@@ -601,21 +977,42 @@ end
 local function drawMonitorStep(source, w, h, layout)
   local left = layout.marginX
   local right = w - layout.marginX
-  local listTop = layout.contentTop + 3
+  local listTop = layout.contentTop + 4
   local canSideScroll = (right - left + 1) >= 30
   local scrollX = right - 8
   local listRight = canSideScroll and (scrollX - 1) or right
+  local displayCandidates = getDisplayCandidatesByPreference()
 
-  drawText(left, layout.contentTop, fitText("Choisissez le monitor principal:", right - left + 1), colors.white, colors.black)
-  drawText(left, layout.contentTop + 1, fitText("Terminal mouse + monitor touch restent actifs.", right - left + 1), colors.lightGray, colors.black)
-  local rows = math.max(3, layout.navY - listTop - 2)
-  local maxScroll = math.max(0, #state.devices.monitors - rows)
+  drawText(left, layout.contentTop, fitText("Choisissez la surface display principale:", right - left + 1), colors.white, colors.black)
+  drawText(left, layout.contentTop + 1, fitText("Terminal + monitor/tm touch restent actifs en parallele.", right - left + 1), colors.lightGray, colors.black)
+  local selectedBackend = tostring(state.selected.displayBackend or "auto")
+  drawText(left, layout.contentTop + 2, fitText("Backend prefere: " .. string.upper(selectedBackend), right - left + 1), colors.yellow, colors.black)
+
+  local rows = math.max(3, layout.navY - listTop - 10)
+  local maxScroll = math.max(0, #displayCandidates - rows)
   if state.monitorScroll > maxScroll then state.monitorScroll = maxScroll end
 
-  createListRows(state.devices.monitors, state.selected.monitor, listTop, rows, state.monitorScroll, source, function(name)
-    state.selected.monitor = name
-    state.status = "Monitor selectionne: " .. name
-  end, left, listRight)
+  fillRect(left, listTop, listRight, listTop + rows - 1, colors.black)
+  if #displayCandidates == 0 then
+    drawText(left + 1, listTop, fitText("Aucun display compatible detecte (fallback terminal).", listRight - left - 1), colors.orange, colors.black)
+  end
+  for i = 1, rows do
+    local idx = state.monitorScroll + i
+    local y = listTop + i - 1
+    local candidate = displayCandidates[idx]
+    if candidate then
+      local isSel = state.selected.monitor == candidate.name
+      local bg = isSel and colors.blue or colors.black
+      local fg = isSel and colors.white or colors.lightGray
+      fillRect(left, y, listRight, y, bg)
+      local itemText = string.format("[%02d] %s (%s %dx%d)", idx, candidate.name, backendLabel(candidate.backend), candidate.w or 0, candidate.h or 0)
+      drawText(left + 1, y, fitText(itemText, listRight - left - 1), fg, bg)
+      addHitbox(source, "display_" .. tostring(idx), left, y, listRight, y, function()
+        state.selected.monitor = candidate.name
+        state.status = "Display selectionne: " .. candidate.name .. " (" .. backendLabel(candidate.backend) .. ")"
+      end)
+    end
+  end
 
   if canSideScroll then
     drawButton(source, "mup", scrollX, listTop, 8, "UP", "secondary", function()
@@ -626,6 +1023,78 @@ local function drawMonitorStep(source, w, h, layout)
     end)
   end
 
+  local settingsY = math.min(layout.navY - 8, listTop + rows + 1)
+  local backendDefs = {
+    {
+      id = "backend_auto",
+      label = "B: AUTO",
+      kind = selectedBackend == "auto" and "primary" or "secondary",
+      action = function()
+        state.selected.displayBackend = "auto"
+        state.monitorScroll = 0
+        local chosen = resolveSelectedDisplayCandidate()
+        if chosen then state.selected.monitor = chosen.name end
+        state.status = "Backend prefere: AUTO"
+      end,
+    },
+    {
+      id = "backend_tom",
+      label = "B: TOM GPU",
+      kind = selectedBackend == "toms_gpu" and "primary" or "secondary",
+      action = function()
+        state.selected.displayBackend = "toms_gpu"
+        state.monitorScroll = 0
+        local chosen = resolveSelectedDisplayCandidate()
+        if chosen then state.selected.monitor = chosen.name end
+        state.status = "Backend prefere: TOM GPU"
+      end,
+    },
+    {
+      id = "backend_cc",
+      label = "B: CC MON",
+      kind = selectedBackend == "cc_monitor" and "primary" or "secondary",
+      action = function()
+        state.selected.displayBackend = "cc_monitor"
+        state.monitorScroll = 0
+        local chosen = resolveSelectedDisplayCandidate()
+        if chosen then state.selected.monitor = chosen.name end
+        state.status = "Backend prefere: CC MONITOR"
+      end,
+    },
+  }
+  drawButtonRow(source, settingsY, backendDefs, left, right, 1)
+
+  local outputDefs = {
+    {
+      id = "output_terminal",
+      label = "OUT TERM",
+      kind = state.outputMode == "terminal" and "primary" or "secondary",
+      action = function()
+        state.outputMode = "terminal"
+        state.status = "Sortie UI: TERMINAL"
+      end,
+    },
+    {
+      id = "output_monitor",
+      label = "OUT MON",
+      kind = state.outputMode == "monitor" and "primary" or "secondary",
+      action = function()
+        state.outputMode = "monitor"
+        state.status = "Sortie UI: MONITOR"
+      end,
+    },
+    {
+      id = "output_both",
+      label = "OUT BOTH",
+      kind = state.outputMode == "both" and "primary" or "secondary",
+      action = function()
+        state.outputMode = "both"
+        state.status = "Sortie UI: BOTH"
+      end,
+    },
+  }
+  drawButtonRow(source, settingsY + 3, outputDefs, left, right, 1)
+
   drawButtonRow(source, layout.navY - 4, {
     { id = "test_monitor", label = "TEST MONITOR", kind = "primary", action = function()
       local ok, msg = runMonitorTest(state.selected.monitor)
@@ -635,21 +1104,19 @@ local function drawMonitorStep(source, w, h, layout)
     { id = "toggle_surface", label = state.uiOnMonitor and "MONITOR UI OFF" or "MONITOR UI ON", kind = "secondary", action = function()
       if state.uiOnMonitor then
         state.uiOnMonitor = false
+        state.monitorTouchEvent = "monitor_touch"
+        state.monitorTouchMapper = nil
         state.status = "Affichage revenu sur terminal."
         return
       end
-      if not state.selected.monitor then
-        state.status = "Selectionnez un monitor avant activation UI monitor."
+      local candidate = resolveSelectedDisplayCandidate()
+      if not candidate then
+        state.status = "Aucune surface display compatible detectee."
         return
       end
-      local mon = peripheral.wrap(state.selected.monitor)
-      if not mon then
-        state.status = "Monitor introuvable."
-        return
-      end
-      pcall(function() mon.setTextScale(sanitizeScale(state.monitorScale)) end)
+      state.selected.monitor = candidate.name
       state.uiOnMonitor = true
-      state.status = "UI active sur monitor + terminal (clic et touch)."
+      state.status = "UI active sur display + terminal (" .. backendLabel(candidate.backend) .. ")."
     end },
   }, left, right, layout.compact and 1 or 2)
 end
@@ -715,6 +1182,7 @@ local relayRoleMap = {
   laser = { key = "relayLaser", side = "relayLaserSide", label = "Relay LAS" },
   tritium = { key = "relayTritium", side = "relayTritiumSide", label = "Relay T" },
   deuterium = { key = "relayDeuterium", side = "relayDeuteriumSide", label = "Relay D" },
+  dtFuel = { key = "relayDTFuel", side = "relayDTFuelSide", label = "Relay DT-FUEL" },
 }
 
 local function drawRelays(source, w, h, layout)
@@ -725,7 +1193,7 @@ local function drawRelays(source, w, h, layout)
   local listRight = canSideScroll and (scrollX - 1) or right
 
   local roleDefs = {}
-  for _, role in ipairs({ "laser", "tritium", "deuterium" }) do
+  for _, role in ipairs({ "laser", "tritium", "deuterium", "dtFuel" }) do
     local active = state.activeRelay == role
     table.insert(roleDefs, {
       id = "relay_role_" .. role,
@@ -944,12 +1412,21 @@ local function runNamedTest(id)
   local ok, msg = false, ""
   if id == "monitor" then
     ok, msg = runMonitorTest(state.selected.monitor)
+  elseif id == "display" then
+    local candidate = resolveSelectedDisplayCandidate()
+    if not candidate then
+      ok, msg = false, "Aucun display compatible"
+    else
+      ok, msg = true, "Display valide: " .. candidate.name .. " (" .. backendLabel(candidate.backend) .. ")"
+    end
   elseif id == "relayLaser" then
     ok, msg = runRelayTest(state.selected.relayLaser, state.selected.relayLaserSide)
   elseif id == "relayTritium" then
     ok, msg = runRelayTest(state.selected.relayTritium, state.selected.relayTritiumSide)
   elseif id == "relayDeuterium" then
     ok, msg = runRelayTest(state.selected.relayDeuterium, state.selected.relayDeuteriumSide)
+  elseif id == "relayDTFuel" then
+    ok, msg = runRelayTest(state.selected.relayDTFuel, state.selected.relayDTFuelSide)
   elseif id == "readerTritium" then
     ok, msg = runReaderTest(state.selected.readerTritium)
   elseif id == "readerDeuterium" then
@@ -965,10 +1442,12 @@ end
 
 local function drawTests(source, w, h, layout)
   local tests = {
+    { "display", "TEST DISPLAY CFG" },
     { "monitor", "TEST MONITOR" },
     { "relayLaser", "TEST RELAY LAS" },
     { "relayTritium", "TEST RELAY T" },
     { "relayDeuterium", "TEST RELAY D" },
+    { "relayDTFuel", "TEST RELAY DT" },
     { "readerTritium", "TEST READER T" },
     { "readerDeuterium", "TEST READER D" },
     { "laser", "TEST LASER" },
@@ -1008,6 +1487,13 @@ local function buildConfig()
       laser = { name = state.selected.relayLaser, side = state.selected.relayLaserSide },
       tritium = { name = state.selected.relayTritium, side = state.selected.relayTritiumSide },
       deuterium = { name = state.selected.relayDeuterium, side = state.selected.relayDeuteriumSide },
+      dtFuel = { name = state.selected.relayDTFuel, side = state.selected.relayDTFuelSide },
+    },
+    actions = {
+      dt_fuel = {
+        relay = state.selected.relayDTFuel,
+        side = state.selected.relayDTFuelSide,
+      },
     },
     readers = {
       tritium = state.selected.readerTritium,
@@ -1018,6 +1504,7 @@ local function buildConfig()
       preferredView = state.preferredView,
       scale = state.uiScale,
       output = state.outputMode,
+      displayBackend = state.selected.displayBackend,
       energyUnit = state.energyUnit,
       laserCount = state.laserCount,
       touchEnabled = state.touchEnabled,
@@ -1040,6 +1527,8 @@ local function drawSummary(source, w, h, layout)
   local right = w - layout.marginX
   local lines = {
     "Monitor: " .. tostring(state.selected.monitor),
+    "Display backend: " .. tostring(state.selected.displayBackend or "auto"),
+    "Display output: " .. tostring(state.outputMode),
     "Laser count: " .. tostring(state.laserCount),
     "Reactor controller: " .. tostring(state.selected.reactorController),
     "Logic adapter: " .. tostring(state.selected.logicAdapter),
@@ -1048,6 +1537,7 @@ local function drawSummary(source, w, h, layout)
     "Relay LAS: " .. tostring(state.selected.relayLaser) .. " / " .. tostring(state.selected.relayLaserSide),
     "Relay T: " .. tostring(state.selected.relayTritium) .. " / " .. tostring(state.selected.relayTritiumSide),
     "Relay D: " .. tostring(state.selected.relayDeuterium) .. " / " .. tostring(state.selected.relayDeuteriumSide),
+    "Relay DT-FUEL: " .. tostring(state.selected.relayDTFuel) .. " / " .. tostring(state.selected.relayDTFuelSide),
     "Reader T: " .. tostring(state.selected.readerTritium),
     "Reader D: " .. tostring(state.selected.readerDeuterium),
     "Reader Aux: " .. tostring(state.selected.readerAux),
@@ -1125,19 +1615,41 @@ local function renderOnSurface(source, surface)
 
     drawNavigation(source, w, h, layout)
     drawFooter(w, h, layout)
+
+    if type(currentSurface.flush) == "function" then
+      pcall(currentSurface.flush)
+    elseif type(currentSurface.sync) == "function" then
+      pcall(currentSurface.sync)
+    end
   end)
 end
 
 local function render()
   local monitorSurface = nil
+  state.monitorTouchEvent = "monitor_touch"
+  state.monitorTouchMapper = nil
   if state.uiOnMonitor and state.selected.monitor then
-    local mon = peripheral.wrap(state.selected.monitor)
-    if mon then
-      pcall(function() mon.setTextScale(sanitizeScale(state.monitorScale)) end)
-      monitorSurface = mon
+    local selected = resolveSelectedDisplayCandidate()
+    if selected then
+      local obj = safePeripheral(selected.name)
+      local candidate = normalizeDisplayCandidate(selected.name, obj)
+      if candidate and candidate.obj then
+        state.selected.monitor = candidate.name
+        if candidate.backend == "cc_monitor" and type(candidate.obj.setTextScale) == "function" then
+          pcall(candidate.obj.setTextScale, sanitizeScale(state.monitorScale))
+        end
+        local surface, meta = DisplayBackend.createSurface(candidate, { monitorScale = sanitizeScale(state.monitorScale) })
+        monitorSurface = surface or candidate.obj
+        state.monitorTouchEvent = (meta and meta.touchEvent) or candidate.touchEvent or "monitor_touch"
+        state.monitorTouchMapper = meta and meta.mapPixel or nil
+      else
+        state.uiOnMonitor = false
+        state.status = "Monitor UI desactivee: display indisponible."
+        clearHitboxes("monitor")
+      end
     else
       state.uiOnMonitor = false
-      state.status = "Monitor UI desactivee: monitor introuvable."
+      state.status = "Monitor UI desactivee: aucune surface compatible."
       clearHitboxes("monitor")
     end
   else
@@ -1158,8 +1670,14 @@ while state.running do
   if ev == "mouse_click" then
     handleClick(p2, p3, "term")
     render()
-  elseif ev == "monitor_touch" and p1 == state.selected.monitor then
-    handleClick(p2, p3, "monitor")
+  elseif (ev == "monitor_touch" or ev == "tm_monitor_touch") and p1 == state.selected.monitor then
+    local mx, my = p2, p3
+    if type(state.monitorTouchMapper) == "function" and ev == state.monitorTouchEvent then
+      local mappedX, mappedY = state.monitorTouchMapper(mx, my)
+      mx = tonumber(mappedX) or mx
+      my = tonumber(mappedY) or my
+    end
+    handleClick(mx, my, "monitor")
     render()
   elseif ev == "key" and p1 == keys.q then
     state.running = false

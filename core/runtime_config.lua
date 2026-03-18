@@ -11,6 +11,7 @@ function M.new()
 
     uiScale = 1.0,
     displayOutput = "monitor",
+    displayBackend = "auto",
     monitorScale = 0.5,
     energyUnit = "j",
     laserCount = 1,
