@@ -458,7 +458,7 @@ function M.build(api)
     local moduleX = clamp(beamX - math.floor(moduleW / 2), x + 2, x + w - moduleW - 1)
     -- Hierarchie visuelle LAS forcee:
     -- niveau 1 (info) en haut, niveau 2 (bloc laser) juste dessous.
-    local infoY = clamp(ry - 10, y + 1, ry - 6)
+    local infoY = clamp(ry - 11, y + 1, ry - 7)
     local moduleY = clamp(infoY + 2, y + 3, ry - 4)
     local gapTop = moduleY + 1
     local gapBottom = ry - 1
@@ -495,14 +495,8 @@ function M.build(api)
 
     -- Representation LAS: 1 petit module = 1 laser.
     -- Les modules sont empiles verticalement (plus d'alignement horizontal).
-    local stackX = beamX
-    local leftStackX = moduleX - 2
-    local rightStackX = moduleX + moduleW
-    if leftStackX >= x + 2 then
-      stackX = leftStackX
-    elseif rightStackX <= x + w - 3 then
-      stackX = rightStackX
-    end
+    -- Pile LAS centree sur l'axe du reacteur pour eviter l'effet "decale a gauche".
+    local stackX = clamp(beamX - 1, x + 2, x + w - 3)
 
     local stackCount = math.max(1, math.floor(tonumber(displayedLaserCount) or 1))
     -- La pile de modules appartient visuellement au bloc LAS et reste
@@ -513,11 +507,11 @@ function M.build(api)
     local stackCapacity = math.max(1, stackMaxY - stackMinY + 1)
     local visibleStackCount = math.min(stackCount, stackCapacity)
     local hiddenStackCount = math.max(0, stackCount - visibleStackCount)
-    local stackStartY = moduleY - math.floor((visibleStackCount - 1) / 2)
-    if stackStartY < stackMinY then stackStartY = stackMinY end
+    local stackStartY = math.max(stackMinY, moduleY + 1)
     if stackStartY + visibleStackCount - 1 > stackMaxY then
       stackStartY = stackMaxY - visibleStackCount + 1
     end
+    if stackStartY < stackMinY then stackStartY = stackMinY end
 
     for i = 0, visibleStackCount - 1 do
       local active = laserBeamActive
