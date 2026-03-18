@@ -37,18 +37,8 @@ function M.run()
 
   local runtime = RuntimeConfig.new()
   local CFG = runtime.cfg
-  local CONFIG_FILE = runtime.files.configFile
-  local MONITOR_CACHE_FILE = runtime.files.monitorCacheFile
-  local VERSION_FILE = runtime.files.versionFile
-
   local LOCAL_VERSION = runtime.update.localVersion
   local UPDATE_ENABLED = runtime.update.enabled
-  local UPDATE_REPO_RAW_BASE = runtime.update.repoRawBase
-  local UPDATE_MANIFEST_FILE = runtime.update.manifestFile
-  local UPDATE_MANIFEST_URL = runtime.update.manifestUrl
-  local UPDATE_TEMP_DIR = runtime.update.tempDir
-  local UPDATE_MANIFEST_CACHE_FILE = runtime.update.manifestCacheFile
-  local UPDATE_MISSING_BACKUP_SUFFIX = runtime.update.missingBackupSuffix
 
   local nativeTerm = term.current()
   local buttons = {}
@@ -681,8 +671,8 @@ function M.run()
   end
 
   local function loadSavedMonitorName()
-    if not fs.exists(MONITOR_CACHE_FILE) then return nil end
-    local h = fs.open(MONITOR_CACHE_FILE, "r")
+    if not fs.exists(runtime.files.monitorCacheFile) then return nil end
+    local h = fs.open(runtime.files.monitorCacheFile, "r")
     if not h then return nil end
     local name = h.readLine()
     h.close()
@@ -690,7 +680,7 @@ function M.run()
   end
 
   local function saveSelectedMonitorName(name)
-    local h = fs.open(MONITOR_CACHE_FILE, "w")
+    local h = fs.open(runtime.files.monitorCacheFile, "w")
     if not h then return end
     h.writeLine(name or "")
     h.close()
@@ -701,11 +691,11 @@ function M.run()
   end
 
   local function readLocalVersionFile()
-    return CoreConfig.readLocalVersionFile(fs, VERSION_FILE, LOCAL_VERSION)
+    return CoreConfig.readLocalVersionFile(fs, runtime.files.versionFile, LOCAL_VERSION)
   end
 
   local function loadFusionConfig()
-    return CoreConfig.loadFusionConfig(fs, CONFIG_FILE, CFG, UPDATE_ENABLED)
+    return CoreConfig.loadFusionConfig(fs, runtime.files.configFile, CFG, UPDATE_ENABLED)
   end
 
   local function applyConfigToRuntime(config)
@@ -825,7 +815,7 @@ function M.run()
 
     applyConfigToRuntime(config)
     refreshSetupWorkingConfig(config)
-    logger.info("Configuration loaded", { file = CONFIG_FILE })
+    logger.info("Configuration loaded", { file = runtime.files.configFile })
     return true, config
   end
 
@@ -1115,7 +1105,7 @@ function M.run()
       return false
     end
 
-    local okWrite, errWrite = CoreConfig.writeFusionConfig(fs, CONFIG_FILE, normalized)
+    local okWrite, errWrite = CoreConfig.writeFusionConfig(fs, runtime.files.configFile, normalized)
     if not okWrite then
       setup.saveStatus = "SAVE FAILED"
       setup.lastMessage = tostring(errWrite or "Unable to write config")
@@ -1249,11 +1239,11 @@ function M.run()
   end
 
   local function buildRawFileUrl(path)
-    return UPDATE_REPO_RAW_BASE .. "/" .. normalizePath(path)
+    return runtime.update.repoRawBase .. "/" .. normalizePath(path)
   end
 
   local function getTempPathFor(filePath)
-    return UPDATE_TEMP_DIR .. "/" .. normalizePath(filePath) .. ".new"
+    return runtime.update.tempDir .. "/" .. normalizePath(filePath) .. ".new"
   end
 
   local function getBackupPathFor(filePath)
@@ -1261,7 +1251,7 @@ function M.run()
   end
 
   local function getMissingBackupMarker(filePath)
-    return getBackupPathFor(filePath) .. UPDATE_MISSING_BACKUP_SUFFIX
+    return getBackupPathFor(filePath) .. runtime.update.missingBackupSuffix
   end
 
   local function ensureParentDir(path)
@@ -1280,7 +1270,7 @@ function M.run()
     for _, path in ipairs(manifest.preserve or {}) do
       preserveSet[normalizePath(path)] = true
     end
-    preserveSet[normalizePath(CONFIG_FILE)] = true
+    preserveSet[normalizePath(runtime.files.configFile)] = true
     return preserveSet
   end
 
@@ -1382,7 +1372,7 @@ function M.run()
   end
 
   local function fetchRemoteManifest()
-    local ok, body, err = httpGetText(UPDATE_MANIFEST_URL)
+    local ok, body, err = httpGetText(runtime.update.manifestUrl)
     if not ok then
       return false, nil, err or "Manifest download failed"
     end
@@ -1405,15 +1395,15 @@ function M.run()
       return false, "Cannot encode manifest cache"
     end
 
-    return writeTextFile(UPDATE_MANIFEST_CACHE_FILE, encoded)
+    return writeTextFile(runtime.update.manifestCacheFile, encoded)
   end
 
   local function readManifestCache()
-    if not fs.exists(UPDATE_MANIFEST_CACHE_FILE) then
+    if not fs.exists(runtime.update.manifestCacheFile) then
       return false, nil, "Manifest cache missing"
     end
 
-    local ok, body, err = readTextFile(UPDATE_MANIFEST_CACHE_FILE)
+    local ok, body, err = readTextFile(runtime.update.manifestCacheFile)
     if not ok then return false, nil, err end
     return parseManifest(body)
   end
@@ -1686,7 +1676,7 @@ function M.run()
       end
     end
 
-    if fs.exists(UPDATE_TEMP_DIR) then pcall(fs.delete, UPDATE_TEMP_DIR) end
+    if fs.exists(runtime.update.tempDir) then pcall(fs.delete, runtime.update.tempDir) end
     state.update.downloaded = false
     state.update.restartRequired = true
     state.update.localVersion = manifest.version
@@ -1728,7 +1718,7 @@ function M.run()
         return false, "Unsafe rollback path: " .. tostring(normalized)
       end
 
-      if normalized ~= normalizePath(CONFIG_FILE) then
+      if normalized ~= normalizePath(runtime.files.configFile) then
         local backupPath = getBackupPathFor(normalized)
         local missingMarker = getMissingBackupMarker(normalized)
 
@@ -1755,8 +1745,8 @@ function M.run()
       end
     end
 
-    if fs.exists(VERSION_FILE) then
-      local okVersion, versionText = readTextFile(VERSION_FILE)
+    if fs.exists(runtime.files.versionFile) then
+      local okVersion, versionText = readTextFile(runtime.files.versionFile)
       if okVersion then state.update.localVersion = trimText(versionText) end
     end
 
@@ -1912,19 +1902,6 @@ function M.run()
     runtimeAlerts = runtimeAlerts,
     log = logger,
   })
-
-  local setLaserCharge = runtimeActions.setLaserCharge
-  local fireLaser = runtimeActions.fireLaser
-  local openDTFuel = runtimeActions.openDTFuel
-  local openDeuterium = runtimeActions.openDeuterium
-  local openTritium = runtimeActions.openTritium
-  local openSeparatedGases = runtimeActions.openSeparatedGases
-  local hardStop = runtimeActions.hardStop
-  local canIgnite = runtimeAlerts.canIgnite
-  local startReactorSequence = runtimeActions.startReactorSequence
-  local stopReactorSequence = runtimeActions.stopReactorSequence
-  local triggerAutomaticIgnitionSequence = runtimeActions.triggerAutomaticIgnitionSequence
-  local fullAuto = runtimeActions.fullAuto
 
   function getHitboxBucket(source)
     return source == "monitor" and touchHitboxes.monitor or touchHitboxes.terminal
@@ -2400,18 +2377,18 @@ function M.run()
         state.currentView = view
         pushEvent("View " .. view)
       end,
-      canIgnite = canIgnite,
-      startReactorSequence = startReactorSequence,
-      stopManualReactor = function() stopReactorSequence("ARRET DEMANDE") end,
-      stopRequested = function() stopReactorSequence("ARRET DEMANDE") end,
-      toggleTritium = function() openTritium(not state.tOpen) end,
-      toggleDeuterium = function() openDeuterium(not state.dOpen) end,
+      canIgnite = runtimeAlerts.canIgnite,
+      startReactorSequence = runtimeActions.startReactorSequence,
+      stopManualReactor = function() runtimeActions.stopReactorSequence("ARRET DEMANDE") end,
+      stopRequested = function() runtimeActions.stopReactorSequence("ARRET DEMANDE") end,
+      toggleTritium = function() runtimeActions.openTritium(not state.tOpen) end,
+      toggleDeuterium = function() runtimeActions.openDeuterium(not state.dOpen) end,
       toggleDTFuel = function()
         local nextState = not state.dtOpen
-        openDTFuel(nextState)
-        if nextState then openSeparatedGases(false) end
+        runtimeActions.openDTFuel(nextState)
+        if nextState then runtimeActions.openSeparatedGases(false) end
       end,
-      fireLaser = fireLaser,
+      fireLaser = runtimeActions.fireLaser,
       checkForUpdate = function()
         local ok, err = pcall(checkForUpdate)
         if not ok then
@@ -2468,9 +2445,9 @@ function M.run()
       toggleMaster = function()
         state.autoMaster = not state.autoMaster
         if not state.autoMaster then
-          openDTFuel(false)
-          openSeparatedGases(false)
-          setLaserCharge(false)
+          runtimeActions.openDTFuel(false)
+          runtimeActions.openSeparatedGases(false)
+          runtimeActions.setLaserCharge(false)
           state.ignitionSequencePending = false
           state.status = "MASTER OFF"
         else
@@ -2581,8 +2558,8 @@ function M.run()
       CFG = CFG,
       fs = fs,
       UPDATE_ENABLED = UPDATE_ENABLED,
-      UPDATE_TEMP_DIR = UPDATE_TEMP_DIR,
-      UPDATE_MISSING_BACKUP_SUFFIX = UPDATE_MISSING_BACKUP_SUFFIX,
+      UPDATE_TEMP_DIR = runtime.update.tempDir,
+      UPDATE_MISSING_BACKUP_SUFFIX = runtime.update.missingBackupSuffix,
       drawBox = drawBox,
       writeAt = writeAt,
       drawKeyValue = drawKeyValue,
@@ -2786,7 +2763,7 @@ function M.run()
     hw = hw,
     CFG = CFG,
     refreshAll = refreshAll,
-    fullAuto = fullAuto,
+    fullAuto = runtimeActions.fullAuto,
     drawUI = drawUI,
     handleClick = handleClick,
     setupMonitor = setupMonitor,
@@ -2794,11 +2771,11 @@ function M.run()
     selectMonitorByIndex = selectMonitorByIndex,
     stopMonitorSelection = stopMonitorSelection,
     startMonitorSelection = startMonitorSelection,
-    openDTFuel = openDTFuel,
-    openSeparatedGases = openSeparatedGases,
-    setLaserCharge = setLaserCharge,
-    triggerAutomaticIgnitionSequence = triggerAutomaticIgnitionSequence,
-    fireLaser = fireLaser,
+    openDTFuel = runtimeActions.openDTFuel,
+    openSeparatedGases = runtimeActions.openSeparatedGases,
+    setLaserCharge = runtimeActions.setLaserCharge,
+    triggerAutomaticIgnitionSequence = runtimeActions.triggerAutomaticIgnitionSequence,
+    fireLaser = runtimeActions.fireLaser,
     pushEvent = pushEvent,
     log = logger,
   })
