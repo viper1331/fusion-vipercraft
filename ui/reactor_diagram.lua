@@ -455,7 +455,7 @@ function M.build(api)
     local moduleW = clamp(math.min(gw * cellW - 2, 14), 10, 14)
     if moduleW % 2 ~= 0 then moduleW = moduleW - 1 end
     local beamX = rx + (gcx - 1) * cellW
-    local moduleX = clamp(beamX - math.floor(moduleW / 2), x + 2, x + w - moduleW - 1)
+    local moduleX = clamp(beamX - math.floor(moduleW / 2) + 1, x + 2, x + w - moduleW - 1)
     -- Hierarchie visuelle LAS forcee:
     -- niveau 1 (info) en haut, niveau 2 (bloc laser) juste dessous.
     local infoY = clamp(ry - 11, y + 1, ry - 7)
@@ -496,7 +496,7 @@ function M.build(api)
     -- Representation LAS: 1 petit module = 1 laser.
     -- Les modules sont empiles verticalement (plus d'alignement horizontal).
     -- Pile LAS centree sur l'axe du reacteur pour eviter l'effet "decale a gauche".
-    local stackX = clamp(beamX - 1, x + 2, x + w - 3)
+    local stackX = clamp(beamX, x + 2, x + w - 3)
 
     local stackCount = math.max(1, math.floor(tonumber(displayedLaserCount) or 1))
     -- La pile de modules appartient visuellement au bloc LAS et reste
@@ -614,11 +614,17 @@ function M.build(api)
     -- Libelles d'etat (haut/bas du diagramme).
     if infoY >= y + 1 then
       local laserTxt = shortText(string.format("LAS x%d (%d) %3.0f%% %s", displayedLaserCount, detectedLaserCount, state.laserPct, tostring(state.laserStatusText or laserState)), gw * cellW - 2)
-      local laserTxtX = beamX - math.floor(#laserTxt / 2)
+      local laserTxtX = beamX - math.floor(#laserTxt / 2) + 1
       local laserTxtMinX = x + 2
       local laserTxtMaxX = x + w - #laserTxt - 1
       if laserTxtX < laserTxtMinX then laserTxtX = laserTxtMinX end
       if laserTxtX > laserTxtMaxX then laserTxtX = laserTxtMaxX end
+      local infoSepY = infoY - 1
+      if infoSepY >= y + 2 then
+        local sepW = clamp(moduleW + 6, 14, math.max(14, gw * cellW - 4))
+        local sepX = clamp(beamX - math.floor(sepW / 2) + 1, x + 2, x + w - sepW - 1)
+        writeAt(sepX, infoSepY, string.rep("-", sepW), C.borderDim, C.panelDark)
+      end
       writeAt(laserTxtX, infoY, laserTxt, laserTone, C.panelDark)
     elseif moduleX + moduleW + 1 <= x + w - 2 then
       local laserTxt = string.format("%3.0f%%", state.laserPct)
