@@ -2,11 +2,12 @@ local M = {}
 
 function M.new()
   local cfg = {
-    preferredMonitor = "monitor_2",
-    preferredReactor = "mekanismgenerators:fusion_reactor_controller_3",
-    preferredLogicAdapter = "fusionReactorLogicAdapter_0",
-    preferredLaser = "laserAmplifier_1",
-    preferredInduction = "inductionPort_1",
+    -- Mode dynamique: aucune liaison n'est imposee par defaut.
+    preferredMonitor = nil,
+    preferredReactor = nil,
+    preferredLogicAdapter = nil,
+    preferredLaser = nil,
+    preferredInduction = nil,
 
     uiScale = 1.0,
     displayOutput = "monitor",
@@ -25,22 +26,23 @@ function M.new()
     ignitionRetryDelay = 3.0,
 
     knownReaders = {
-      deuterium = "block_reader_1",
-      tritium = "block_reader_2",
-      inventory = "block_reader_6",
+      deuterium = nil,
+      tritium = nil,
+      inventory = nil,
     },
 
     knownRelays = {
-      laser_charge = { relay = "redstone_relay_0", side = "top", label = "LAS" },
-      deuterium = { relay = "redstone_relay_1", side = "front", label = "Tank Deuterium" },
-      tritium = { relay = "redstone_relay_2", side = "front", label = "Tank Tritium" },
+      laser_charge = { relay = nil, side = "top", label = "LAS" },
+      deuterium = { relay = nil, side = "front", label = "Tank Deuterium" },
+      tritium = { relay = nil, side = "front", label = "Tank Tritium" },
     },
 
     actions = {
-      laser_charge = { relay = "redstone_relay_0", side = "top", analog = 15, pulse = false },
-      deuterium = { relay = "redstone_relay_1", side = "front", analog = 15, pulse = false },
-      tritium = { relay = "redstone_relay_2", side = "front", analog = 15, pulse = false },
-      laser_fire = { relay = "redstone_relay_0", side = "top", analog = 15, pulse = true, pulseTime = 0.15 },
+      -- La ligne LAS doit rester a 0 hors pulse d'ignition.
+      laser_charge = { relay = nil, side = "top", analog = 0, pulse = false, forceZero = true },
+      deuterium = { relay = nil, side = "front", analog = 15, pulse = false },
+      tritium = { relay = nil, side = "front", analog = 15, pulse = false },
+      laser_fire = { relay = nil, side = "top", analog = 15, pulse = true, pulseTime = 0.15 },
       dt_fuel = nil,
     },
   }

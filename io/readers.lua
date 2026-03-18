@@ -36,24 +36,42 @@ function M.classifyBlockReaderData(data)
 end
 
 function M.resolveKnownReaders(hw, knownReaders)
+  knownReaders = type(knownReaders) == "table" and knownReaders or {}
   local byName = {}
   for _, entry in ipairs(hw.blockReaders) do
     byName[entry.name] = entry
   end
 
-  if byName[knownReaders.deuterium] then
+  if type(knownReaders.deuterium) == "string" and byName[knownReaders.deuterium] then
     hw.readerRoles.deuterium = byName[knownReaders.deuterium]
     hw.readerRoles.deuterium.role = "deuterium"
   end
 
-  if byName[knownReaders.tritium] then
+  if type(knownReaders.tritium) == "string" and byName[knownReaders.tritium] then
     hw.readerRoles.tritium = byName[knownReaders.tritium]
     hw.readerRoles.tritium.role = "tritium"
   end
 
-  if byName[knownReaders.inventory] then
+  if type(knownReaders.inventory) == "string" and byName[knownReaders.inventory] then
     hw.readerRoles.inventory = byName[knownReaders.inventory]
     hw.readerRoles.inventory.role = "inventory"
+  end
+end
+
+function M.reconcileKnownReaders(hw, knownReaders)
+  if type(knownReaders) ~= "table" then return end
+
+  if hw.readerRoles.deuterium and type(hw.readerRoles.deuterium.name) == "string" then
+    knownReaders.deuterium = hw.readerRoles.deuterium.name
+  end
+
+  if hw.readerRoles.tritium and type(hw.readerRoles.tritium.name) == "string" then
+    knownReaders.tritium = hw.readerRoles.tritium.name
+  end
+
+  local aux = hw.readerRoles.inventory or hw.readerRoles.active[1]
+  if aux and type(aux.name) == "string" then
+    knownReaders.inventory = aux.name
   end
 end
 
@@ -96,6 +114,10 @@ function M.scanBlockReaders(hw, knownReaders)
       table.insert(hw.readerRoles.unknown, entry)
     end
   end
+
+  -- Synchronise les noms connus sur les roles effectivement detectes
+  -- pour absorber automatiquement les changements du terrain.
+  M.reconcileKnownReaders(hw, knownReaders)
 end
 
 function M.extractChemicalData(raw, toNumber)

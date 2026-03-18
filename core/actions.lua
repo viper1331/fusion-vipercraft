@@ -23,6 +23,12 @@ function M.build(api)
   end
 
   function actions.fireLaser()
+    if not state.ignitionSequencePending then
+      state.lastAction = "Pulse LAS bloque (hors ignition)"
+      pushEvent("Pulse LAS blocked")
+      return false
+    end
+
     -- Une fois la fusion engagee, on bloque les pulses manuels
     -- pour eviter de consommer un nouveau hohlraum.
     if state.ignition then
@@ -120,7 +126,13 @@ function M.build(api)
     state.lastIgnitionAttempt = os.clock()
     actions.openDTFuel(false)
     sleep(0.15)
-    actions.fireLaser()
+    if not actions.fireLaser() then
+      state.ignitionSequencePending = false
+      state.status = "BLOCKED"
+      state.lastAction = "Ignition refusee: pulse LAS"
+      pushEvent("Ignition failed")
+      return false
+    end
     state.status = "FIRING"
     state.lastAction = "Start sequence"
     pushEvent("Ignition start sequence")

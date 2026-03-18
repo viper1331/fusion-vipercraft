@@ -127,26 +127,26 @@ end
 function M.applyConfigToRuntime(config, CFG)
   if type(config) ~= "table" then return end
 
-  CFG.preferredMonitor = config.monitor and config.monitor.name or CFG.preferredMonitor
+  CFG.preferredMonitor = M.sanitizeDeviceName(config.monitor and config.monitor.name, CFG.preferredMonitor)
   CFG.monitorScale = M.sanitizeMonitorScale(config.monitor and config.monitor.scale, CFG.monitorScale)
   CFG.uiScale = M.sanitizeUiScale(config.ui and config.ui.scale, CFG.uiScale or 1.0)
   CFG.displayOutput = M.sanitizeDisplayOutput(config.ui and config.ui.output, CFG.displayOutput or "monitor")
   CFG.refreshDelay = M.sanitizeRefreshDelay(config.ui and config.ui.refreshDelay, CFG.refreshDelay)
 
-  CFG.preferredReactor = config.devices and config.devices.reactorController or CFG.preferredReactor
-  CFG.preferredLogicAdapter = config.devices and config.devices.logicAdapter or CFG.preferredLogicAdapter
-  CFG.preferredLaser = config.devices and config.devices.laser or CFG.preferredLaser
-  CFG.preferredInduction = config.devices and config.devices.induction or CFG.preferredInduction
+  CFG.preferredReactor = M.sanitizeDeviceName(config.devices and config.devices.reactorController, CFG.preferredReactor)
+  CFG.preferredLogicAdapter = M.sanitizeDeviceName(config.devices and config.devices.logicAdapter, CFG.preferredLogicAdapter)
+  CFG.preferredLaser = M.sanitizeDeviceName(config.devices and config.devices.laser, CFG.preferredLaser)
+  CFG.preferredInduction = M.sanitizeDeviceName(config.devices and config.devices.induction, CFG.preferredInduction)
 
-  CFG.knownReaders.deuterium = config.readers and config.readers.deuterium or CFG.knownReaders.deuterium
-  CFG.knownReaders.tritium = config.readers and config.readers.tritium or CFG.knownReaders.tritium
-  CFG.knownReaders.inventory = config.readers and config.readers.aux or CFG.knownReaders.inventory
+  CFG.knownReaders.deuterium = M.sanitizeDeviceName(config.readers and config.readers.deuterium, CFG.knownReaders.deuterium)
+  CFG.knownReaders.tritium = M.sanitizeDeviceName(config.readers and config.readers.tritium, CFG.knownReaders.tritium)
+  CFG.knownReaders.inventory = M.sanitizeDeviceName(config.readers and config.readers.aux, CFG.knownReaders.inventory)
 
-  CFG.knownRelays.laser_charge.relay = config.relays and config.relays.laser and config.relays.laser.name or CFG.knownRelays.laser_charge.relay
+  CFG.knownRelays.laser_charge.relay = M.sanitizeDeviceName(config.relays and config.relays.laser and config.relays.laser.name, CFG.knownRelays.laser_charge.relay)
   CFG.knownRelays.laser_charge.side = M.sanitizeRelaySide(config.relays and config.relays.laser and config.relays.laser.side, CFG.knownRelays.laser_charge.side)
-  CFG.knownRelays.tritium.relay = config.relays and config.relays.tritium and config.relays.tritium.name or CFG.knownRelays.tritium.relay
+  CFG.knownRelays.tritium.relay = M.sanitizeDeviceName(config.relays and config.relays.tritium and config.relays.tritium.name, CFG.knownRelays.tritium.relay)
   CFG.knownRelays.tritium.side = M.sanitizeRelaySide(config.relays and config.relays.tritium and config.relays.tritium.side, CFG.knownRelays.tritium.side)
-  CFG.knownRelays.deuterium.relay = config.relays and config.relays.deuterium and config.relays.deuterium.name or CFG.knownRelays.deuterium.relay
+  CFG.knownRelays.deuterium.relay = M.sanitizeDeviceName(config.relays and config.relays.deuterium and config.relays.deuterium.name, CFG.knownRelays.deuterium.relay)
   CFG.knownRelays.deuterium.side = M.sanitizeRelaySide(config.relays and config.relays.deuterium and config.relays.deuterium.side, CFG.knownRelays.deuterium.side)
 end
 
@@ -180,6 +180,14 @@ function M.sanitizeRefreshDelay(value, fallback)
   return numeric
 end
 
+function M.sanitizeDeviceName(value, fallback)
+  if value == nil then return fallback end
+  if type(value) ~= "string" then return fallback end
+  local trimmed = M.trimText(value)
+  if trimmed == "" then return nil end
+  return trimmed
+end
+
 function M.sanitizeRelaySide(value, fallback)
   local side = tostring(value or "")
   if VALID_SIDES[side] then return side end
@@ -193,22 +201,26 @@ function M.validateConfig(config)
     return false, errors
   end
 
-  local function requireNonEmptyString(value, path)
-    if type(value) ~= "string" or M.trimText(value) == "" then
-      table.insert(errors, path .. " is missing")
+  local function optionalBindingName(value, path)
+    if value == nil then return end
+    if type(value) ~= "string" then
+      table.insert(errors, path .. " is invalid")
+      return
     end
+    if M.trimText(value) == "" then return end
   end
 
-  requireNonEmptyString(config.monitor and config.monitor.name, "monitor.name")
-  requireNonEmptyString(config.devices and config.devices.reactorController, "devices.reactorController")
-  requireNonEmptyString(config.devices and config.devices.logicAdapter, "devices.logicAdapter")
-  requireNonEmptyString(config.devices and config.devices.laser, "devices.laser")
-  requireNonEmptyString(config.devices and config.devices.induction, "devices.induction")
-  requireNonEmptyString(config.readers and config.readers.tritium, "readers.tritium")
-  requireNonEmptyString(config.readers and config.readers.deuterium, "readers.deuterium")
-  requireNonEmptyString(config.relays and config.relays.laser and config.relays.laser.name, "relays.laser.name")
-  requireNonEmptyString(config.relays and config.relays.tritium and config.relays.tritium.name, "relays.tritium.name")
-  requireNonEmptyString(config.relays and config.relays.deuterium and config.relays.deuterium.name, "relays.deuterium.name")
+  optionalBindingName(config.monitor and config.monitor.name, "monitor.name")
+  optionalBindingName(config.devices and config.devices.reactorController, "devices.reactorController")
+  optionalBindingName(config.devices and config.devices.logicAdapter, "devices.logicAdapter")
+  optionalBindingName(config.devices and config.devices.laser, "devices.laser")
+  optionalBindingName(config.devices and config.devices.induction, "devices.induction")
+  optionalBindingName(config.readers and config.readers.tritium, "readers.tritium")
+  optionalBindingName(config.readers and config.readers.deuterium, "readers.deuterium")
+  optionalBindingName(config.readers and config.readers.aux, "readers.aux")
+  optionalBindingName(config.relays and config.relays.laser and config.relays.laser.name, "relays.laser.name")
+  optionalBindingName(config.relays and config.relays.tritium and config.relays.tritium.name, "relays.tritium.name")
+  optionalBindingName(config.relays and config.relays.deuterium and config.relays.deuterium.name, "relays.deuterium.name")
 
   local preferredView = config.ui and config.ui.preferredView
   if type(preferredView) ~= "string" or not VALID_VIEWS[preferredView] then

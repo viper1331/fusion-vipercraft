@@ -123,14 +123,29 @@ function M.drawDiagnosticView(ctx, layout)
   local maxY = center.y + center.h - 2
   ctx.writeAt(x, y, "RESOLVED DEVICES", C.info, C.panelDark)
 
+  local function relayRef(actionName)
+    local action = CFG.actions and CFG.actions[actionName] or nil
+    local relayName = type(action) == "table" and action.relay or nil
+    local relaySide = type(action) == "table" and action.side or nil
+    if type(relayName) ~= "string" or relayName == "" then
+      return "UNBOUND", false
+    end
+    local side = (type(relaySide) == "string" and relaySide ~= "") and relaySide or "top"
+    return relayName .. "." .. side, hw.relays[relayName] ~= nil
+  end
+
+  local lasRef, lasOk = relayRef("laser_charge")
+  local tRef, tOk = relayRef("tritium")
+  local dRef, dOk = relayRef("deuterium")
+
   local rows = {
     {"Reactor", hw.reactorName or "FAIL", hw.reactor ~= nil, "Fusion core control"},
     {"Logic Adapter", hw.logicName or "FAIL", hw.logic ~= nil, "Ignition and injection status"},
     {"Laser", hw.laserName or "FAIL", hw.laser ~= nil, "Ignition beam source"},
     {"Induction Matrix", hw.inductionName or "FAIL", hw.induction ~= nil, "Battery / power buffer"},
-    {"Relay LAS", CFG.actions.laser_charge.relay .. "." .. CFG.actions.laser_charge.side, hw.relays[CFG.actions.laser_charge.relay] ~= nil, "Laser charge and fire line"},
-    {"Relay T", CFG.actions.tritium.relay .. "." .. CFG.actions.tritium.side, hw.relays[CFG.actions.tritium.relay] ~= nil, "Tritium valve line"},
-    {"Relay D", CFG.actions.deuterium.relay .. "." .. CFG.actions.deuterium.side, hw.relays[CFG.actions.deuterium.relay] ~= nil, "Deuterium valve line"},
+    {"Relay LAS", lasRef, lasOk, "Laser charge and fire line"},
+    {"Relay T", tRef, tOk, "Tritium valve line"},
+    {"Relay D", dRef, dOk, "Deuterium valve line"},
     {"Reader T", hw.readerRoles.tritium and hw.readerRoles.tritium.name or "FAIL", hw.readerRoles.tritium ~= nil, "Tritium tank read"},
     {"Reader D", hw.readerRoles.deuterium and hw.readerRoles.deuterium.name or "FAIL", hw.readerRoles.deuterium ~= nil, "Deuterium tank read"},
     {"Reader Aux", hw.readerRoles.inventory and hw.readerRoles.inventory.name or "FAIL", hw.readerRoles.inventory ~= nil, "Auxiliary inventory / feed"},

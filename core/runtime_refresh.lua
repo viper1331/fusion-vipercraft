@@ -19,6 +19,7 @@ function M.build(api)
   local readChemicalFromReader = api.readChemicalFromReader
   local readActiveFromReader = api.readActiveFromReader
   local readRelayOutputState = api.readRelayOutputState
+  local ensureRelayLow = api.ensureRelayLow
   local refreshSetupDeviceStatus = api.refreshSetupDeviceStatus
   local pushEvent = api.pushEvent
 
@@ -315,7 +316,7 @@ function M.build(api)
       state.auxRedstone = 0
     end
 
-    state.laserLineOn = readRelayOutputState("laser_charge", state.laserChargeOn)
+    state.laserLineOn = readRelayOutputState("laser_charge", false)
     state.dOpen = readRelayOutputState("deuterium", state.dOpen)
     state.tOpen = readRelayOutputState("tritium", state.tOpen)
   end
@@ -324,6 +325,10 @@ function M.build(api)
     local wasIgnited = state.ignition
     scanPeripherals()
     scanBlockReaders()
+    if type(ensureRelayLow) == "function" then
+      -- Securite: la ligne LAS reste forcee a 0 hors pulse d'ignition.
+      ensureRelayLow("laser_charge")
+    end
     readLaser()
     readReactor()
     readInductionStatus()

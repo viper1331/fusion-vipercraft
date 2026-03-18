@@ -1,8 +1,14 @@
 local M = {}
 
+local function getSortedPeripheralNames(peripheralApi)
+  local names = peripheralApi.getNames() or {}
+  table.sort(names)
+  return names
+end
+
 function M.getMonitorCandidates(peripheralApi, getTypeOf, safePeripheral)
   local monitors = {}
-  for _, name in ipairs(peripheralApi.getNames()) do
+  for _, name in ipairs(getSortedPeripheralNames(peripheralApi)) do
     if getTypeOf(name) == "monitor" then
       local obj = safePeripheral(name)
       local w, h = 0, 0
@@ -31,12 +37,14 @@ function M.hasMethods(obj, methods, minCount)
 end
 
 function M.detectBestPeripheral(peripheralApi, preferredName, safePeripheral, validator)
-  local p = safePeripheral(preferredName)
-  if p and validator(p, preferredName) then
-    return p, preferredName
+  if type(preferredName) == "string" and preferredName ~= "" then
+    local p = safePeripheral(preferredName)
+    if p and validator(p, preferredName) then
+      return p, preferredName
+    end
   end
 
-  for _, name in ipairs(peripheralApi.getNames()) do
+  for _, name in ipairs(getSortedPeripheralNames(peripheralApi)) do
     local obj = safePeripheral(name)
     if obj and validator(obj, name) then
       return obj, name
@@ -50,22 +58,26 @@ function M.scanPeripherals(peripheralApi, hw, cfg, safePeripheral, getTypeOf, co
   hw.reactor, hw.reactorName = M.detectBestPeripheral(peripheralApi, cfg.preferredReactor, safePeripheral, function(obj)
     return M.hasMethods(obj, { "isIgnited", "getPlasmaTemperature", "getPlasmaTemp", "getPlasmaHeat", "getCaseTemperature", "getCasingTemperature" }, 2)
   end)
+  if hw.reactorName then cfg.preferredReactor = hw.reactorName end
 
   hw.logic, hw.logicName = M.detectBestPeripheral(peripheralApi, cfg.preferredLogicAdapter, safePeripheral, function(obj)
     return M.hasMethods(obj, { "isFormed", "isIgnited", "getPlasmaTemperature", "getPlasmaTemp", "getPlasmaHeat", "getIgnitionTemperature", "getIgnitionTemp", "getCaseTemperature", "getCasingTemperature" }, 3)
   end)
+  if hw.logicName then cfg.preferredLogicAdapter = hw.logicName end
 
   hw.laser, hw.laserName = M.detectBestPeripheral(peripheralApi, cfg.preferredLaser, safePeripheral, function(obj)
     return M.hasMethods(obj, { "getEnergy", "getEnergyStored", "getStored", "getMaxEnergy", "getMaxEnergyStored", "getCapacity" }, 2)
   end)
+  if hw.laserName then cfg.preferredLaser = hw.laserName end
 
   hw.induction, hw.inductionName = M.detectBestPeripheral(peripheralApi, cfg.preferredInduction, safePeripheral, function(obj)
     return M.hasMethods(obj, { "isFormed", "getEnergy", "getMaxEnergy", "getEnergyFilledPercentage", "getEnergyNeeded", "getLastInput", "getLastOutput", "getTransferCap" }, 2)
   end)
+  if hw.inductionName then cfg.preferredInduction = hw.inductionName end
 
   hw.relays = {}
   hw.blockReaders = {}
-  for _, name in ipairs(peripheralApi.getNames()) do
+  for _, name in ipairs(getSortedPeripheralNames(peripheralApi)) do
     local ptype = getTypeOf(name)
     if ptype == "redstone_relay" then
       hw.relays[name] = safePeripheral(name)

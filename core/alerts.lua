@@ -15,6 +15,13 @@ function M.build(api)
 
   local runtime = {}
 
+  local function isRelayMappedAndPresent(actionName)
+    local action = type(CFG.actions) == "table" and CFG.actions[actionName] or nil
+    if type(action) ~= "table" then return false end
+    if type(action.relay) ~= "string" or action.relay == "" then return false end
+    return hw.relays[action.relay] ~= nil
+  end
+
   function runtime.getRuntimeFuelMode()
     local dt = state.dtOpen == true
     local d = state.dOpen == true
@@ -116,13 +123,13 @@ function M.build(api)
     if not hw.readerRoles.deuterium or not hw.readerRoles.tritium then
       table.insert(warnings, "FUEL SENSOR FAIL")
     end
-    if not hw.readerRoles.inventory then
+    if (not hw.readerRoles.inventory) and (#(hw.readerRoles.active or {}) == 0) then
       table.insert(warnings, "READER AUX FAIL")
     end
 
-    if not hw.relays[CFG.actions.laser_charge.relay]
-      or not hw.relays[CFG.actions.deuterium.relay]
-      or not hw.relays[CFG.actions.tritium.relay] then
+    if not isRelayMappedAndPresent("laser_charge")
+      or not isRelayMappedAndPresent("deuterium")
+      or not isRelayMappedAndPresent("tritium") then
       table.insert(warnings, "CONTROL LINE FAIL")
       critical = true
     end

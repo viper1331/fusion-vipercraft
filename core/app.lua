@@ -999,7 +999,7 @@ function M.run()
   end
 
   local function setupDeviceExists(name, expectedType)
-    if type(name) ~= "string" or trimText(name) == "" then return false, "INVALID" end
+    if type(name) ~= "string" or trimText(name) == "" then return false, "UNBOUND" end
     if not peripheral.isPresent(name) then return false, "MISSING" end
     if not expectedType then return true, "OK" end
     local ptype = getTypeOf(name)
@@ -1962,7 +1962,7 @@ function M.run()
   end
 
   local function resolveKnownRelays()
-    IoRelays.resolveKnownRelays(CFG)
+    IoRelays.resolveKnownRelays(CFG, hw.relays)
   end
 
   local function scanBlockReaders()
@@ -1986,6 +1986,10 @@ function M.run()
     return IoRelays.readRelayOutputState(CFG.actions, hw.relays, actionName, fallback, toNumber)
   end
 
+  local function ensureRelayLow(actionName)
+    return IoRelays.ensureRelayLow(CFG.actions, hw.relays, actionName)
+  end
+
   local runtimeRefresh = CoreRuntimeRefresh.build({
     state = state,
     hw = hw,
@@ -2000,6 +2004,7 @@ function M.run()
     readChemicalFromReader = readChemicalFromReader,
     readActiveFromReader = readActiveFromReader,
     readRelayOutputState = readRelayOutputState,
+    ensureRelayLow = ensureRelayLow,
     refreshSetupDeviceStatus = refreshSetupDeviceStatus,
     pushEvent = pushEvent,
   })
