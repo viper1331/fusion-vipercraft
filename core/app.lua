@@ -18,6 +18,7 @@ function M.run()
   local UIInductionDiagram = require("ui.induction_diagram")
   local CoreConfig = require("core.config")
   local CoreEnergy = require("core.energy")
+  local CoreTemperature = require("core.temperature")
   local CoreUpdate = require("core.update")
   local CoreState = require("core.state")
   local CoreReactor = require("core.reactor")
@@ -282,6 +283,12 @@ function M.run()
     return CoreEnergy.formatEnergyPerTickFromJ(n, CFG.energyUnit, { compact = true, decimals = 2 })
   end
 
+  local function formatTemperature(n, opts)
+    if type(n) ~= "number" then return tostring(n) end
+    local sourceUnit = CoreTemperature.sanitizeUnit(state.reactorTempSourceUnit, "k")
+    return CoreTemperature.formatTemperature(n, sourceUnit, opts)
+  end
+
   local function formatMJ(n)
     -- Alias historique garde pour compatibilite des appels existants.
     return formatEnergy(n)
@@ -503,6 +510,7 @@ function M.run()
     writeAt = writeAt,
     shortText = shortText,
     clamp = clamp,
+    formatTemperature = formatTemperature,
   })
 
   local drawInductionDiagram = UIInductionDiagram.build({
@@ -2335,6 +2343,7 @@ function M.run()
       shortText = shortText,
       clamp = clamp,
       fmt = fmt,
+      formatTemperature = formatTemperature,
       formatEnergy = formatEnergy,
       formatEnergyPerTick = formatEnergyPerTick,
       formatMJ = formatMJ,

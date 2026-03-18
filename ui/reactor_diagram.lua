@@ -12,6 +12,14 @@ function M.build(api)
   local writeAt = api.writeAt
   local shortText = api.shortText
   local clamp = api.clamp
+  local formatTemperature = type(api.formatTemperature) == "function"
+    and api.formatTemperature
+    or function(value, opts)
+      opts = type(opts) == "table" and opts or {}
+      local decimals = tonumber(opts.decimals)
+      if decimals == nil then decimals = 2 end
+      return string.format("%." .. tostring(math.max(0, decimals)) .. "f C", tonumber(value) or 0)
+    end
 
   -- Etat d'animation local au renderer:
   -- chaque lock (T/DT/D) declenche une animation courte lors d'un changement.
@@ -64,41 +72,36 @@ function M.build(api)
       return base
     end
 
-    local function drawGuideLine(x1, y1, x2, y2, tone)
-      local cx, cy = math.floor(x1), math.floor(y1)
-      local tx, ty = math.floor(x2), math.floor(y2)
-      local dx = math.abs(tx - cx)
-      local dy = math.abs(ty - cy)
-      local sx = (cx < tx) and 1 or -1
-      local sy = (cy < ty) and 1 or -1
-      local err = dx - dy
-
-      while true do
-        if cx >= x + 2 and cx <= x + w - 2 and cy >= y + 1 and cy <= y + h - 2 then
-          writeAt(cx, cy, ".", tone, C.panelDark)
-        end
-        if cx == tx and cy == ty then break end
-        local e2 = err * 2
-        if e2 > -dy then
-          err = err - dy
-          cx = cx + sx
-        end
-        if e2 < dx then
-          err = err + dx
-          cy = cy + sy
+    local function drawGuideH(x1, x2, yy, tone)
+      local ya = math.floor(yy)
+      if ya < y + 1 or ya > y + h - 2 then return end
+      local xa = math.floor(math.min(x1, x2))
+      local xb = math.floor(math.max(x1, x2))
+      for xx = xa, xb do
+        if xx >= x + 2 and xx <= x + w - 2 then
+          writeAt(xx, ya, "-", tone, C.panelDark)
         end
       end
     end
 
-    local function formatTemp(value)
-      local n = tonumber(value) or 0
-      if n >= 1000000 then
-        return string.format("%.2f MC", n / 1000000)
+    local function drawGuideV(xx, y1, y2, tone)
+      local xa = math.floor(xx)
+      if xa < x + 2 or xa > x + w - 2 then return end
+      local ya = math.floor(math.min(y1, y2))
+      local yb = math.floor(math.max(y1, y2))
+      for yy = ya, yb do
+        if yy >= y + 1 and yy <= y + h - 2 then
+          writeAt(xa, yy, "|", tone, C.panelDark)
+        end
       end
-      if n >= 1000 then
-        return string.format("%.1f kC", n / 1000)
+    end
+
+    local function drawGuideEnd(xx, yy, tone)
+      local xa = math.floor(xx)
+      local ya = math.floor(yy)
+      if xa >= x + 2 and xa <= x + w - 2 and ya >= y + 1 and ya <= y + h - 2 then
+        writeAt(xa, ya, "v", tone, C.panelDark)
       end
-      return string.format("%.0f C", n)
     end
 
     -- Teintes principales du reacteur (coque / coeur).
@@ -210,17 +213,48 @@ function M.build(api)
       return layers[gy][gx] or 0
     end
 
+    local function isContourCell(gx, gy)
+      local layer = getLayer(gx, gy)
+      if layer <= 0 then return false end
+      return getLayer(gx - 1, gy) == 0
+        or getLayer(gx + 1, gy) == 0
+        or getLayer(gx, gy - 1) == 0
+        or getLayer(gx, gy + 1) == 0
+    end
+
     -- Contour du reacteur impose en noir (demande explicite UX).
     local contourColor = colors.black
     for gy = 1, gh do
       for gx = 1, gw do
-        local layer = getLayer(gx, gy)
-        if layer > 0 then
-          if getLayer(gx - 1, gy) == 0 or getLayer(gx + 1, gy) == 0 or getLayer(gx, gy - 1) == 0 or getLayer(gx, gy + 1) == 0 then
-            drawCell(gx, gy, contourColor, "[]", C.text)
+        if isContourCell(gx, gy) then
+          drawCell(gx, gy, contourColor, "[]", C.text)
+        end
+      end
+    end
+
+    local function findContourAnchor(side)
+      local centerX = rx + (gcx - 1) * cellW + 1
+      local bestX, bestY = nil, nil
+      for gy = 1, gh do
+        for gx = 1, gw do
+          if isContourCell(gx, gy) then
+            local sx = rx + (gx - 1) * cellW + 1
+            local sy = ry + gy - 1
+            local candidate = (side == "left" and sx < centerX) or (side == "right" and sx > centerX)
+            if candidate then
+              local betterY = (bestY == nil) or (sy < bestY)
+              local betterX = (sy == bestY) and (
+                (side == "left" and (bestX == nil or sx < bestX))
+                or (side == "right" and (bestX == nil or sx > bestX))
+              )
+              if betterY or betterX then
+                bestX, bestY = sx, sy
+              end
+            end
           end
         end
       end
+      return bestX, bestY
     end
 
     -- Spine horizontal structurel.
@@ -365,8 +399,8 @@ function M.build(api)
     -- Telemetries temperature proches du schema reacteur.
     local tempY = ry + 2
     if tempY >= y + 2 and tempY <= y + h - 3 and w >= 50 then
-      local plasText = "T PLAS " .. (state.reactorPresent and formatTemp(state.plasmaTemp) or "N/A")
-      local structText = "T STRUCT " .. (state.reactorPresent and formatTemp(state.caseTemp) or "N/A")
+      local plasText = "T PLAS " .. (state.reactorPresent and formatTemperature(state.plasmaTemp, { compact = true, decimals = 2 }) or "N/A")
+      local structText = "T STRUCT " .. (state.reactorPresent and formatTemperature(state.caseTemp, { compact = true, decimals = 2 }) or "N/A")
       local leftTextX = x + 3
       local rightTextX = x + w - #structText - 3
       if leftTextX + #plasText < rightTextX - 3 then
@@ -375,14 +409,24 @@ function M.build(api)
         writeAt(leftTextX, tempY, plasText, plasTone, C.panelDark)
         writeAt(rightTextX, tempY, structText, structTone, C.panelDark)
 
+        local leftContourX, leftContourY = findContourAnchor("left")
+        local rightContourX, rightContourY = findContourAnchor("right")
         local guideStartLeftX = leftTextX + #plasText + 1
         local guideStartRightX = rightTextX - 1
         local guideY = tempY + 1
-        local guideTargetY = math.max(ry + 2, gcy + ry - 3)
-        local guideLeftTargetX = rx + (gcx - 2) * cellW
-        local guideRightTargetX = rx + (gcx + 1) * cellW
-        drawGuideLine(guideStartLeftX, guideY, guideLeftTargetX, guideTargetY, C.warn)
-        drawGuideLine(guideStartRightX, guideY, guideRightTargetX, guideTargetY, C.bad)
+
+        local guideLeftTargetX = leftContourX or (rx + (gcx - outerR) * cellW)
+        local guideRightTargetX = rightContourX or (rx + (gcx + outerR - 1) * cellW + 1)
+        local guideLeftTargetY = math.max(guideY, (leftContourY or (ry + 2)) - 1)
+        local guideRightTargetY = math.max(guideY, (rightContourY or (ry + 2)) - 1)
+
+        drawGuideH(guideStartLeftX, guideLeftTargetX, guideY, plasTone)
+        drawGuideV(guideLeftTargetX, guideY, guideLeftTargetY, plasTone)
+        drawGuideEnd(guideLeftTargetX, guideLeftTargetY, plasTone)
+
+        drawGuideH(guideStartRightX, guideRightTargetX, guideY, structTone)
+        drawGuideV(guideRightTargetX, guideY, guideRightTargetY, structTone)
+        drawGuideEnd(guideRightTargetX, guideRightTargetY, structTone)
       end
     end
 

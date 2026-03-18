@@ -20,6 +20,7 @@ function M.buildContext(base)
     shortText = base.shortText,
     clamp = base.clamp,
     fmt = base.fmt,
+    formatTemperature = base.formatTemperature,
     formatEnergy = base.formatEnergy or base.formatMJ,
     formatEnergyPerTick = base.formatEnergyPerTick or base.formatMJ,
     formatMJ = base.formatMJ or base.formatEnergy,

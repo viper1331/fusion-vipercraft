@@ -3,6 +3,7 @@
 
 local M = {}
 local CoreEnergy = require("core.energy")
+local CoreTemperature = require("core.temperature")
 
 function M.build(api)
   local state = api.state
@@ -25,6 +26,25 @@ function M.build(api)
   local pushEvent = api.pushEvent
 
   local runtime = {}
+
+  local function detectTemperatureSourceUnit(obj, fallback)
+    if not obj then
+      return CoreTemperature.sanitizeUnit(fallback, "k")
+    end
+
+    local ok, unit = tryMethods(obj, {
+      "getTemperatureUnit",
+      "getTempUnit",
+      "getPlasmaTemperatureUnit",
+      "getCaseTemperatureUnit",
+    })
+
+    if ok then
+      return CoreTemperature.sourceUnitFromString(unit, fallback)
+    end
+
+    return CoreTemperature.sanitizeUnit(fallback, "k")
+  end
 
   local function readLaser()
     state.laserPresent = hw.laser ~= nil
@@ -174,6 +194,7 @@ function M.build(api)
     state.plasmaTemp = 0
     state.ignitionTemp = 0
     state.caseTemp = 0
+    state.reactorTempSourceUnit = CoreTemperature.sanitizeUnit(state.reactorTempSourceUnit, "k")
     state.hohlraumPresent = false
     state.hohlraumCount = 0
     state.hohlraumName = "N/A"
@@ -191,6 +212,8 @@ function M.build(api)
     local formedFromLogic = false
 
     if hw.logic then
+      state.reactorTempSourceUnit = detectTemperatureSourceUnit(hw.logic, state.reactorTempSourceUnit)
+
       local okFormed, logicFormed = tryMethods(hw.logic, { "isFormed", "getFormed" })
       if okFormed then
         formed = logicFormed == true
@@ -229,6 +252,8 @@ function M.build(api)
         formed = state.ignition or state.plasmaTemp > 0
       end
     elseif hw.reactor then
+      state.reactorTempSourceUnit = detectTemperatureSourceUnit(hw.reactor, state.reactorTempSourceUnit)
+
       local okIgn, ign = tryMethods(hw.reactor, { "isIgnited", "getIgnitionStatus" })
       state.ignition = okIgn and (ign == true or ign == "true") or false
 

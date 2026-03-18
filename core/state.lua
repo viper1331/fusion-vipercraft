@@ -27,6 +27,7 @@ function M.defaultRuntimeState(localVersion, updateEnabled)
     plasmaTemp = 0,
     ignitionTemp = 0,
     caseTemp = 0,
+    reactorTempSourceUnit = "k",
     hohlraumPresent = false,
     hohlraumCount = 0,
     hohlraumName = "N/A",

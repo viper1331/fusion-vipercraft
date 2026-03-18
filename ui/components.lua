@@ -79,7 +79,13 @@ function M.drawStatusPanel(ctx, panel)
   local phase = ctx.reactorPhase()
   ctx.drawBadge(x + 2, y + 1, "STATE", phase, ctx.phaseColor(phase))
   ctx.drawBadge(x + 2, y + 2, "CORE", state.reactorPresent and (state.reactorFormed and "FORMED" or "UNFORMED") or "OFFLINE")
-  if b1h > 5 then ctx.drawKeyValue(x + 2, y + 3, "Temp P", ctx.fmt(state.plasmaTemp), C.dim, C.info, w - 6) end
+  if b1h > 5 then
+    local tempDisplay = ctx.fmt(state.plasmaTemp)
+    if type(ctx.formatTemperature) == "function" then
+      tempDisplay = ctx.formatTemperature(state.plasmaTemp, { compact = true, decimals = 2 })
+    end
+    ctx.drawKeyValue(x + 2, y + 3, "Temp P", tempDisplay, C.dim, C.info, w - 6)
+  end
 
   local y2 = y + b1h + sectionGap
   if state.ignition then
