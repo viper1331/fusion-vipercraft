@@ -230,7 +230,6 @@ local function listCandidates(devices)
 
   local displayCandidate = devices.displayCandidates[1]
   local monitorName = displayCandidate and displayCandidate.name or nil
-  local monitorBackend = displayCandidate and displayCandidate.backend or "auto"
 
   local reactorController = pickBestByRule(devices, function(name, obj, ptype)
     local valid = hasMethods(obj, {
@@ -332,7 +331,8 @@ local function listCandidates(devices)
 
   return {
     monitor = monitorName,
-    displayBackend = monitorBackend,
+    -- La preference backend reste sur "auto" tant que l'utilisateur n'a pas choisi.
+    displayBackend = nil,
     reactorController = reactorController,
     logicAdapter = logicAdapter,
     laser = laser,
@@ -475,6 +475,116 @@ local function ensureVersionFile()
   end
 end
 
+local function sanitizeConfigString(value, fallback)
+  if CoreConfig and type(CoreConfig.sanitizeDeviceName) == "function" then
+    return CoreConfig.sanitizeDeviceName(value, fallback)
+  end
+  if value == nil then return fallback end
+  if type(value) ~= "string" then return fallback end
+  local trimmed = value:gsub("^%s+", ""):gsub("%s+$", "")
+  if trimmed == "" then return nil end
+  return trimmed
+end
+
+local function sanitizeConfigSide(value, fallback)
+  if CoreConfig and type(CoreConfig.sanitizeRelaySide) == "function" then
+    return CoreConfig.sanitizeRelaySide(value, fallback)
+  end
+  local side = tostring(value or "")
+  for _, known in ipairs(SIDES) do
+    if side == known then return side end
+  end
+  return fallback
+end
+
+local function sanitizeConfigOutput(value, fallback)
+  if CoreConfig and type(CoreConfig.sanitizeDisplayOutput) == "function" then
+    return CoreConfig.sanitizeDisplayOutput(value, fallback)
+  end
+  local raw = string.lower(tostring(value or ""))
+  if raw == "terminal" or raw == "monitor" or raw == "both" then
+    return raw
+  end
+  return fallback
+end
+
+local function sanitizeConfigBackend(value, fallback)
+  if CoreConfig and type(CoreConfig.sanitizeDisplayBackend) == "function" then
+    return CoreConfig.sanitizeDisplayBackend(value, fallback)
+  end
+  local raw = string.lower(tostring(value or ""))
+  if raw == "auto" or raw == "cc_monitor" or raw == "toms_gpu" then
+    return raw
+  end
+  return fallback
+end
+
+local function sanitizeMonitorScaleLocal(value, fallback)
+  local numeric = tonumber(value)
+  if numeric == nil then
+    numeric = tonumber(fallback) or 0.5
+  end
+  if numeric < 0.5 then return 0.5 end
+  if numeric > 5 then return 5 end
+  return numeric
+end
+
+local function loadExistingConfig()
+  if not fs.exists(CONFIG_FILE) or fs.isDir(CONFIG_FILE) then
+    return nil, "missing"
+  end
+  local ok, cfg = pcall(dofile, CONFIG_FILE)
+  if not ok or type(cfg) ~= "table" then
+    return nil, "invalid"
+  end
+  return cfg, nil
+end
+
+local function applyExistingConfig(cfg)
+  if type(cfg) ~= "table" then return false end
+
+  state.setupName = tostring(cfg.setupName or state.setupName)
+  state.monitorScale = sanitizeMonitorScaleLocal((cfg.monitor and cfg.monitor.scale), state.monitorScale)
+  state.outputMode = sanitizeConfigOutput(cfg.ui and cfg.ui.output, state.outputMode)
+  state.selected.displayBackend = sanitizeConfigBackend(cfg.ui and cfg.ui.displayBackend, state.selected.displayBackend)
+  if CoreConfig and type(CoreConfig.sanitizeLaserCount) == "function" then
+    state.laserCount = CoreConfig.sanitizeLaserCount(cfg.ui and cfg.ui.laserCount, state.laserCount)
+  end
+  state.preferredView = tostring((cfg.ui and cfg.ui.preferredView) or state.preferredView)
+
+  state.selected.monitor = sanitizeConfigString(cfg.monitor and cfg.monitor.name, state.selected.monitor)
+  state.selected.reactorController = sanitizeConfigString(cfg.devices and cfg.devices.reactorController, state.selected.reactorController)
+  state.selected.logicAdapter = sanitizeConfigString(cfg.devices and cfg.devices.logicAdapter, state.selected.logicAdapter)
+  state.selected.laser = sanitizeConfigString(cfg.devices and cfg.devices.laser, state.selected.laser)
+  state.selected.induction = sanitizeConfigString(cfg.devices and cfg.devices.induction, state.selected.induction)
+
+  state.selected.relayLaser = sanitizeConfigString(cfg.relays and cfg.relays.laser and cfg.relays.laser.name, state.selected.relayLaser)
+  state.selected.relayLaserSide = sanitizeConfigSide(cfg.relays and cfg.relays.laser and cfg.relays.laser.side, state.selected.relayLaserSide)
+  state.selected.relayTritium = sanitizeConfigString(cfg.relays and cfg.relays.tritium and cfg.relays.tritium.name, state.selected.relayTritium)
+  state.selected.relayTritiumSide = sanitizeConfigSide(cfg.relays and cfg.relays.tritium and cfg.relays.tritium.side, state.selected.relayTritiumSide)
+  state.selected.relayDeuterium = sanitizeConfigString(cfg.relays and cfg.relays.deuterium and cfg.relays.deuterium.name, state.selected.relayDeuterium)
+  state.selected.relayDeuteriumSide = sanitizeConfigSide(cfg.relays and cfg.relays.deuterium and cfg.relays.deuterium.side, state.selected.relayDeuteriumSide)
+
+  local dtRelayName = sanitizeConfigString(
+    (cfg.actions and cfg.actions.dt_fuel and cfg.actions.dt_fuel.relay)
+      or (cfg.relays and cfg.relays.dtFuel and cfg.relays.dtFuel.name),
+    state.selected.relayDTFuel
+  )
+  local dtRelaySide = sanitizeConfigSide(
+    (cfg.actions and cfg.actions.dt_fuel and cfg.actions.dt_fuel.side)
+      or (cfg.relays and cfg.relays.dtFuel and cfg.relays.dtFuel.side),
+    state.selected.relayDTFuelSide
+  )
+  state.selected.relayDTFuel = dtRelayName
+  state.selected.relayDTFuelSide = dtRelaySide
+
+  state.selected.readerTritium = sanitizeConfigString(cfg.readers and cfg.readers.tritium, state.selected.readerTritium)
+  state.selected.readerDeuterium = sanitizeConfigString(cfg.readers and cfg.readers.deuterium, state.selected.readerDeuterium)
+  state.selected.readerAux = sanitizeConfigString(cfg.readers and cfg.readers.aux, state.selected.readerAux)
+
+  return true
+end
+
 state = {
   step = 1,
   running = true,
@@ -520,6 +630,10 @@ state = {
     readerAux = nil,
   },
 }
+local existingConfig = loadExistingConfig()
+if existingConfig then
+  applyExistingConfig(existingConfig)
+end
 state.suggested = listCandidates(state.devices)
 for k, v in pairs(state.suggested) do
   if state.selected[k] == nil and v ~= nil then
@@ -865,6 +979,35 @@ local function resolveSelectedDisplayCandidate()
   local fallback = preferred[1]
   state.selected.monitor = fallback.name
   return fallback
+end
+
+local function hasDisplayCandidateForBackend(backend)
+  local pref = tostring(backend or "auto")
+  if pref == "auto" then return true end
+  for _, candidate in ipairs(state.devices.displayCandidates) do
+    if tostring(candidate.backend or "") == pref then
+      return true
+    end
+  end
+  return false
+end
+
+local function previewDisplayCandidate()
+  local preferred = getDisplayCandidatesByPreference()
+  if #preferred == 0 then
+    return nil
+  end
+
+  local selectedName = state.selected.monitor
+  if selectedName then
+    for _, candidate in ipairs(preferred) do
+      if candidate.name == selectedName then
+        return candidate
+      end
+    end
+  end
+
+  return preferred[1]
 end
 
 local function createListRows(items, selected, startY, rows, scroll, source, onSelect, x1, x2)
@@ -1413,9 +1556,13 @@ local function runNamedTest(id)
   if id == "monitor" then
     ok, msg = runMonitorTest(state.selected.monitor)
   elseif id == "display" then
+    local preferredBackend = tostring(state.selected.displayBackend or "auto")
+    local preferredAvailable = hasDisplayCandidateForBackend(preferredBackend)
     local candidate = resolveSelectedDisplayCandidate()
     if not candidate then
       ok, msg = false, "Aucun display compatible"
+    elseif preferredBackend ~= "auto" and not preferredAvailable then
+      ok, msg = true, "Backend " .. backendLabel(preferredBackend) .. " indisponible, fallback " .. candidate.name
     else
       ok, msg = true, "Display valide: " .. candidate.name .. " (" .. backendLabel(candidate.backend) .. ")"
     end
@@ -1470,6 +1617,15 @@ local function drawTests(source, w, h, layout)
   end
 end
 local function buildConfig()
+  local displayBackend = sanitizeConfigBackend(state.selected.displayBackend, "auto")
+  local dtFuelAction = nil
+  if sanitizeConfigString(state.selected.relayDTFuel, nil) then
+    dtFuelAction = {
+      relay = state.selected.relayDTFuel,
+      side = sanitizeConfigSide(state.selected.relayDTFuelSide, "front"),
+    }
+  end
+
   return {
     configVersion = 1,
     setupName = state.setupName,
@@ -1490,10 +1646,7 @@ local function buildConfig()
       dtFuel = { name = state.selected.relayDTFuel, side = state.selected.relayDTFuelSide },
     },
     actions = {
-      dt_fuel = {
-        relay = state.selected.relayDTFuel,
-        side = state.selected.relayDTFuelSide,
-      },
+      dt_fuel = dtFuelAction,
     },
     readers = {
       tritium = state.selected.readerTritium,
@@ -1504,7 +1657,7 @@ local function buildConfig()
       preferredView = state.preferredView,
       scale = state.uiScale,
       output = state.outputMode,
-      displayBackend = state.selected.displayBackend,
+      displayBackend = displayBackend,
       energyUnit = state.energyUnit,
       laserCount = state.laserCount,
       touchEnabled = state.touchEnabled,
@@ -1525,9 +1678,14 @@ end
 local function drawSummary(source, w, h, layout)
   local left = layout.marginX
   local right = w - layout.marginX
+  local previewDisplay = previewDisplayCandidate()
+  local displayTarget = previewDisplay
+    and (previewDisplay.name .. " (" .. backendLabel(previewDisplay.backend) .. ")")
+    or "terminal fallback"
   local lines = {
     "Monitor: " .. tostring(state.selected.monitor),
     "Display backend: " .. tostring(state.selected.displayBackend or "auto"),
+    "Display target: " .. tostring(displayTarget),
     "Display output: " .. tostring(state.outputMode),
     "Laser count: " .. tostring(state.laserCount),
     "Reactor controller: " .. tostring(state.selected.reactorController),
@@ -1538,6 +1696,7 @@ local function drawSummary(source, w, h, layout)
     "Relay T: " .. tostring(state.selected.relayTritium) .. " / " .. tostring(state.selected.relayTritiumSide),
     "Relay D: " .. tostring(state.selected.relayDeuterium) .. " / " .. tostring(state.selected.relayDeuteriumSide),
     "Relay DT-FUEL: " .. tostring(state.selected.relayDTFuel) .. " / " .. tostring(state.selected.relayDTFuelSide),
+    "Action DT-FUEL: " .. tostring(state.selected.relayDTFuel) .. " / " .. tostring(state.selected.relayDTFuelSide),
     "Reader T: " .. tostring(state.selected.readerTritium),
     "Reader D: " .. tostring(state.selected.readerDeuterium),
     "Reader Aux: " .. tostring(state.selected.readerAux),
