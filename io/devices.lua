@@ -1,3 +1,47 @@
+local function loadDisplayBackend()
+  if type(require) == "function" then
+    local ok, mod = pcall(require, "io.display_backend")
+    if ok and type(mod) == "table" then
+      return mod
+    end
+  end
+
+  if type(dofile) == "function" and fs and type(fs.exists) == "function" and fs.exists("io/display_backend.lua") then
+    local ok, mod = pcall(dofile, "io/display_backend.lua")
+    if ok and type(mod) == "table" then
+      return mod
+    end
+  end
+
+  return {
+    detectCandidate = function(name, obj, getTypeOf)
+      if not obj then return nil end
+      local ptype = type(getTypeOf) == "function" and tostring(getTypeOf(name) or "") or ""
+      if ptype == "monitor" then
+        local w, h = 0, 0
+        if type(obj.getSize) == "function" then
+          local ok, mw, mh = pcall(obj.getSize)
+          if ok then
+            w = tonumber(mw) or 0
+            h = tonumber(mh) or 0
+          end
+        end
+        return {
+          name = name,
+          obj = obj,
+          kind = "cc_monitor",
+          touchEvent = "monitor_touch",
+          w = w,
+          h = h,
+        }
+      end
+      return nil
+    end,
+  }
+end
+
+local DisplayBackend = loadDisplayBackend()
+
 local M = {}
 
 local function getSortedPeripheralNames(peripheralApi)
@@ -20,19 +64,33 @@ end
 function M.getMonitorCandidates(peripheralApi, getTypeOf, safePeripheral)
   local monitors = {}
   for _, name in ipairs(getSortedPeripheralNames(peripheralApi)) do
-    if getTypeOf(name) == "monitor" then
-      local obj = safePeripheral(name)
-      local w, h = 0, 0
-      if obj and type(obj.getSize) == "function" then
-        local ok, mw, mh = pcall(obj.getSize)
-        if ok then
-          w, h = mw, mh
-        end
+    local obj = safePeripheral(name)
+    if obj then
+      local candidate = DisplayBackend.detectCandidate(name, obj, getTypeOf)
+      if candidate then
+        table.insert(monitors, {
+          name = name,
+          obj = obj,
+          w = candidate.w or 0,
+          h = candidate.h or 0,
+          backend = candidate.kind or "cc_monitor",
+          touchEvent = candidate.touchEvent or "monitor_touch",
+        })
       end
-      table.insert(monitors, { name = name, obj = obj, w = w, h = h })
     end
   end
-  table.sort(monitors, function(a, b) return a.name < b.name end)
+  local backendPriority = {
+    toms_gpu = 1,
+    cc_monitor = 2,
+  }
+  table.sort(monitors, function(a, b)
+    local pa = backendPriority[a.backend] or 99
+    local pb = backendPriority[b.backend] or 99
+    if pa ~= pb then
+      return pa < pb
+    end
+    return a.name < b.name
+  end)
   return monitors
 end
 

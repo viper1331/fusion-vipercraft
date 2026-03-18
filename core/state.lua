@@ -152,6 +152,10 @@ function M.defaultHardwareState()
   return {
     monitor = nil,
     monitorName = nil,
+    displaySurface = nil,
+    monitorBackend = "terminal",
+    monitorTouchEvent = "monitor_touch",
+    monitorTouchMapper = nil,
     reactor = nil,
     reactorName = nil,
     logic = nil,

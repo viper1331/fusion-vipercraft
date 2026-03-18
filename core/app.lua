@@ -1704,7 +1704,7 @@ function M.run()
     if type(IoMonitor.setupMonitor) ~= "function" then
       return false
     end
-    IoMonitor.setupMonitor(nativeTerm, hw, CFG, C)
+    IoMonitor.setupMonitor(nativeTerm, hw, CFG, C, chosen, getTypeOf)
     return true
   end
 
@@ -2127,7 +2127,7 @@ function M.run()
     working.ui.laserCount = CFG.laserCount
     working.monitor.scale = CFG.monitorScale
 
-    IoMonitor.setupMonitor(nativeTerm, hw, CFG, C)
+    invokeSetupMonitor("setup scale")
     state.uiDrawn = false
   end
 
@@ -2618,15 +2618,22 @@ function M.run()
       end
 
       drawFooter(layout)
+
+      if type(surface.flush) == "function" then
+        pcall(surface.flush)
+      elseif type(surface.sync) == "function" then
+        pcall(surface.sync)
+      end
     end
 
     local mode = resolveDisplayOutputMode()
-    if mode == "monitor" and hw.monitor then
-      drawSurface("monitor", hw.monitor)
+    local monitorSurface = hw.displaySurface or hw.monitor
+    if mode == "monitor" and monitorSurface then
+      drawSurface("monitor", monitorSurface)
       clearHitboxes("terminal")
-    elseif mode == "both" and hw.monitor then
+    elseif mode == "both" and monitorSurface then
       drawSurface("terminal", nativeTerm)
-      drawSurface("monitor", hw.monitor)
+      drawSurface("monitor", monitorSurface)
     else
       drawSurface("terminal", nativeTerm)
       clearHitboxes("monitor")

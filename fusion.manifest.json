@@ -1,5 +1,5 @@
 {
-    "version":  "2.4.31",
+    "version":  "2.4.32",
     "files":  [
                   "fusion.lua",
                   "fusion.version",
@@ -20,6 +20,7 @@
                   "core/state.lua",
                   "core/temperature.lua",
                   "core/update.lua",
+                  "io/display_backend.lua",
                   "io/devices.lua",
                   "io/monitor.lua",
                   "io/readers.lua",

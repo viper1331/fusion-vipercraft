@@ -3,6 +3,42 @@
 
 local M = {}
 
+local function unpackMonitorCoords(hw, p1, p2, p3)
+  if type(p1) == "string" then
+    if hw.monitorName and p1 ~= hw.monitorName then
+      return nil, nil
+    end
+    return tonumber(p2), tonumber(p3)
+  end
+  return tonumber(p1), tonumber(p2)
+end
+
+local function normalizeMonitorCoords(hw, x, y)
+  if type(x) ~= "number" or type(y) ~= "number" then
+    return nil, nil
+  end
+
+  local surface = hw.displaySurface or hw.monitor
+  local sw, sh = nil, nil
+  if surface and type(surface.getSize) == "function" then
+    local ok, w, h = pcall(surface.getSize)
+    if ok then
+      sw = tonumber(w)
+      sh = tonumber(h)
+    end
+  end
+
+  if type(hw.monitorTouchMapper) == "function" and sw and sh and (x > sw or y > sh) then
+    local okMap, mappedX, mappedY = pcall(hw.monitorTouchMapper, x, y)
+    if okMap then
+      x = tonumber(mappedX) or x
+      y = tonumber(mappedY) or y
+    end
+  end
+
+  return math.floor(x), math.floor(y)
+end
+
 local function handleMonitorSelectionChar(ch, api)
   if ch == "1" then api.selectMonitorByIndex(1)
   elseif ch == "2" then api.selectMonitorByIndex(2)
@@ -86,13 +122,28 @@ function M.route(ev, p1, p2, p3, api)
   end
 
   if ev == "monitor_touch" then
-    if p1 == hw.monitorName then
-      api.handleClick(p2, p3, "monitor")
+    if (hw.monitorTouchEvent or "monitor_touch") == "monitor_touch" then
+      local x, y = unpackMonitorCoords(hw, p1, p2, p3)
+      x, y = normalizeMonitorCoords(hw, x, y)
+      if x and y then
+        api.handleClick(x, y, "monitor")
+      end
     end
     return
   end
 
-  if ev == "monitor_resize" or ev == "term_resize" then
+  if ev == "tm_monitor_touch" then
+    if (hw.monitorTouchEvent or "monitor_touch") == "tm_monitor_touch" then
+      local x, y = unpackMonitorCoords(hw, p1, p2, p3)
+      x, y = normalizeMonitorCoords(hw, x, y)
+      if x and y then
+        api.handleClick(x, y, "monitor")
+      end
+    end
+    return
+  end
+
+  if ev == "monitor_resize" or ev == "term_resize" or ev == "tm_monitor_resize" then
     api.setupMonitor()
     state.uiDrawn = false
     return
