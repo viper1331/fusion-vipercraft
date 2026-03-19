@@ -1,165 +1,158 @@
 # AGENTS.md
 
-## Mission générale
+## Workflow obligatoire pour toute itération Codex sur fusion-vipercraft
 
-Ce dépôt contient la logique d’un système de supervision fusion en Lua.
-Toute intervention doit préserver la stabilité du runtime, la compatibilité avec l’installateur et le système d’update par manifeste.
+Tu travailles sur le dépôt GitHub suivant :
+https://github.com/viper1331/fusion-vipercraft.git
 
-## Règles globales
+### Règles générales
 
-- Toujours respecter l’architecture existante du dépôt.
-- Ne pas remplacer un système fonctionnel par une réécriture totale sans nécessité.
-- Préférer l’extraction, la modularisation et la réutilisation à la duplication.
-- Ne pas hardcoder un unique setup terrain.
-- Conserver une logique permissive et tolérante aux périphériques différents.
-- Ne jamais dégrader la robustesse actuelle pour améliorer uniquement l’esthétique.
-- Toute modification runtime doit rester compatible avec l’update par manifeste.
-- Toujours incrémenter `fusion.version` avec une version strictement supérieure si des fichiers runtime changent.
-- Toujours synchroniser `fusion.manifest.json` avec les fichiers runtime réellement nécessaires.
-- Adapter `install.lua` si de nouveaux fichiers doivent être installés.
+- Toujours commencer par récupérer l’état le plus récent du dépôt distant avant toute modification.
+- Vérifier l’état Git local avant toute opération.
+- Ne jamais écraser silencieusement des changements locaux non commités.
+- Si des changements locaux existent, les signaler explicitement et proposer la stratégie la plus sûre :
+  - commit préalable,
+  - stash,
+  - ou arrêt avec explication claire.
+- Toujours travailler de façon compatible avec l’architecture actuelle du dépôt.
+- Toujours préserver les fonctionnalités déjà validées, sauf demande explicite de remplacement.
 
-## Langue et style
+### Synchronisation dépôt
 
-- Réponses et résumés en français.
-- Code, commentaires de code, identifiants techniques, noms de fonctions et noms de fichiers en anglais.
-- Garder un style de code cohérent avec le dépôt.
+Au début de chaque itération :
+1. vérifier la branche courante ;
+2. récupérer la dernière version du dépôt distant ;
+3. mettre à jour proprement la branche de travail ;
+4. confirmer dans le compte rendu quelle révision ou quel état distant a été utilisé.
 
-## Règles spécifiques Tom's Peripherals
+Si un pull ou rebase échoue :
+- ne pas forcer ;
+- expliquer précisément le blocage ;
+- proposer la correction la plus sûre.
 
-Pour tout travail touchant l’interface Tom’s Peripherals fusion :
+### Versionning obligatoire à chaque itération utile
 
-- Considérer la base runtime actuellement validée comme stable et réutilisable.
-- Ne pas réinventer une nouvelle logique GPU/runtime si l’existante fonctionne déjà.
-- La refonte doit partir de la base fonctionnelle validée, pas la jeter.
-- La couche UI doit être séparée de la couche runtime.
-- Ne pas continuer à empiler des coordonnées fixes dispersées dans le rendu.
-- Construire l’UI avec :
-  - un design system,
-  - un layout engine,
-  - des composants UI réutilisables,
-  - un écran final composé proprement.
-- L’interface doit rester belle, lisible et cohérente quelle que soit la taille réelle du GPU.
-- Le style visuel recherché est :
-  - industriel,
-  - SCADA,
-  - supervision technique,
-  - futuriste sobre,
-  - propre et lisible.
-- Éviter les rectangles placeholders sans signification.
-- Chaque zone affichée doit avoir un rôle clair.
-- Les couleurs doivent avoir un sens :
-  - bleu = information,
-  - vert = ok / prêt,
-  - orange = attention,
-  - rouge = critique / arrêt.
-- Le cœur visuel du panneau doit être le réacteur, pas une accumulation de blocs décoratifs.
+À chaque itération qui modifie le runtime, l’installateur, le manifeste, l’UI, le backend, ou tout comportement fonctionnel du programme :
+- incrémenter `fusion.version` avec une version strictement supérieure ;
+- mettre à jour `fusion.manifest.json` pour inclure tous les fichiers nécessaires réellement utilisés au runtime ;
+- revoir `install.lua` et le modifier si nécessaire pour prendre en charge les nouveaux fichiers, modules, dépendances, assets, logs, scripts ou comportements installables.
 
-## Base technique à préserver
+Ne jamais oublier ces trois fichiers :
+- `fusion.version`
+- `fusion.manifest.json`
+- `install.lua`
 
-La base technique validée doit être conservée ou réutilisée autant que possible, notamment :
+Même si `install.lua` ne change pas, le vérifier explicitement à chaque itération importante et l’indiquer dans le compte rendu.
 
-### Détection et sélection périphériques
+### Règle spécifique sur install.lua
 
-- `getNames()`
-- `getMethods()`
-- `methodSet()`
-- `hasAll()`
-- `wrapIf()`
-- `exists()`
-- `filterAliases()`
-- `pickPreferred()`
-- `chooseOne()`
-- `findGpus()`
-- `findKeyboards()`
-- `findRsports()`
-- `findByExistingNames()`
+À chaque demande de nouvelle fonction, nouvelle UI, nouveau module, nouveau fichier de configuration, nouveau fichier de log, nouveau backend ou nouveau composant technique :
+- évaluer si `install.lua` doit être adapté ;
+- si oui, le modifier dans la même itération ;
+- si non, l’indiquer explicitement dans le débrief avec la raison.
 
-### Initialisation GPU
+### Git obligatoire en fin d’itération
 
-Après sélection du GPU :
+À la fin de chaque itération terminée et cohérente :
+- vérifier les fichiers modifiés ;
+- faire un commit avec un message clair et professionnel ;
+- pousser les changements sur le dépôt distant.
 
-1. `refreshSize()`
-2. tentative `pcall(gpu.setSize, 64)`
-3. `refreshSize()`
-4. `getSize()`
+Ne pas laisser une itération importante non commitée si elle est considérée comme terminée.
 
-Toujours utiliser la taille runtime réelle renvoyée par `getSize()`.
+Si le push échoue :
+- expliquer précisément pourquoi ;
+- ne pas prétendre que le travail est publié ;
+- indiquer l’état Git exact restant local.
 
-### Lecture runtime / fallbacks
+### Qualité de commit attendue
 
-- `hasMethod()`
-- `tryCall()`
-- `fmt()`
-- `clamp()`
-- lecture permissive des données fusion / laser
+Les commits doivent :
+- être explicites ;
+- refléter le vrai contenu de l’itération ;
+- éviter les messages vagues comme "update", "fix stuff", "misc".
 
-### Sécurités runtime
+Préférer des messages du type :
+- `Refactor Tom's native UI backend selection`
+- `Add native Tom debug logging and manifest sync`
+- `Update installer for new Tom UI modules`
 
-- `allow_control = false` par défaut
-- aucun ordre critique si `allow_control` est désactivé
-- aucun crash si une méthode manque
-- conserver la logique de `pulseLaser()` et `changeInjection()` ou un équivalent mieux structuré
+### Compte rendu obligatoire en français
 
-### Sécurités graphiques
+Après chaque itération, fournir un débrief détaillé en français, clair et structuré, avec au minimum :
 
-- `clipText()`
-- `safeFilledRect()`
-- `safeRect()`
-- `safeText()`
+1. objectif de l’itération ;
+2. fichiers modifiés ;
+3. fichiers créés ;
+4. fichiers supprimés ;
+5. logique fonctionnelle modifiée ;
+6. impacts techniques ;
+7. backend ou UI concernés ;
+8. adaptations éventuelles de `install.lua` ;
+9. mise à jour de `fusion.manifest.json` ;
+10. nouvelle version inscrite dans `fusion.version` ;
+11. état du commit ;
+12. état du push ;
+13. éventuels risques, limites ou points à tester ;
+14. tests manuels recommandés.
 
-Ne jamais revenir à un rendu susceptible de provoquer des erreurs hors bornes.
+### Règles de sécurité et robustesse
 
-### Interactions
+- Ne jamais annoncer qu’une fonctionnalité est opérationnelle sans avoir vérifié le minimum pertinent.
+- Ne jamais casser la compatibilité terrain si le projet supporte plusieurs backends ou plusieurs types de moniteurs.
+- Toujours préserver la coexistence entre l’interface classique et l’interface Tom si le dépôt les supporte.
+- Toujours privilégier la détection terrain réelle plutôt qu’un hardcode fragile.
+- Toujours conserver les garde-fous existants, notamment les sécurités runtime comme `allow_control = false` par défaut si elles existent déjà.
+- Ne pas faire de simplification destructrice juste pour réduire le code.
 
-- conserver la compatibilité avec :
-  - `tm_monitor_touch`
-  - `tm_monitor_mouse_click`
-  - boucle timer + redraw
-  - événements clavier utiles
-- le hit-testing doit rester fiable même après refonte
+### Règles d’analyse avant codage
 
-## Architecture UI attendue
+Avant toute modification significative :
+- relire les fichiers déjà impliqués ;
+- identifier les modules liés ;
+- éviter les duplications ;
+- réutiliser l’existant si la base est valide.
 
-Pour toute refonte UI Tom’s, viser une structure du type :
+Pour les tâches complexes ou multi-fichiers :
+- faire d’abord un mini plan ;
+- puis exécuter ;
+- puis résumer ce qui a réellement été fait.
 
-- thème / design tokens
-- layout engine
-- composants UI
-- écran fusion Tom’s
-- orchestration légère
+### Politique sur les régressions
 
-Les noms exacts peuvent varier selon l’architecture du dépôt, mais la séparation des responsabilités doit être claire.
+Toute itération doit chercher explicitement à éviter :
+- régression d’affichage ;
+- régression de backend ;
+- oubli de manifeste ;
+- oubli d’installateur ;
+- oubli de version ;
+- oubli de push ;
+- perte de compatibilité classique/Tom ;
+- écrasement involontaire de changements existants.
 
-## Windows Tom’s Peripherals
+### Définition de “travail terminé”
 
-L’usage de `createWindow(...)` est autorisé et recommandé si cela améliore réellement la structure.
+Une itération est considérée terminée seulement si :
+- les changements de code sont appliqués ;
+- `fusion.version` est incrémenté si nécessaire ;
+- `fusion.manifest.json` est synchronisé si nécessaire ;
+- `install.lua` a été vérifié et adapté si nécessaire ;
+- le débrief en français est fourni ;
+- le commit est fait ;
+- le push est tenté et son résultat est clairement indiqué.
 
-Règles :
-- ne pas multiplier inutilement les windows,
-- éviter le gaspillage VRAM,
-- garder un ordre de sync clair,
-- conserver un fond root GPU propre,
-- ne jamais dépendre d’une seule taille d’écran.
+### Priorité absolue
 
-## Refactor complexe
+En cas de doute :
+1. préserver le dépôt ;
+2. préserver la compatibilité terrain ;
+3. préserver la cohérence version/manifeste/install ;
+4. documenter clairement ;
+5. commit/push proprement.
 
-Pour toute refonte UI importante :
+## Plan obligatoire pour les tâches complexes
 
-- créer et suivre un plan d’exécution dans `PLANS.md`,
-- ne pas “bricoler” l’ancien rendu par petites retouches successives si cela empêche une architecture propre,
-- séparer clairement :
-  - ce qui fonctionne déjà et doit être conservé,
-  - ce qui est visuellement insuffisant et doit être refondu.
-
-## Critères de qualité
-
-Une refonte UI Tom’s est acceptable seulement si :
-
-- la base technique validée est préservée,
-- la nouvelle UI est réellement plus propre,
-- l’interface reste robuste sur différentes tailles,
-- aucune erreur graphique hors bornes n’est possible,
-- les données critiques restent toujours visibles,
-- les contrôles restent utilisables,
-- la structure est maintenable,
-- `fusion.version` et `fusion.manifest.json` sont cohérents.
+Si la tâche touche plusieurs modules, plusieurs backends, l’UI, le runtime, l’installateur ou le manifeste :
+- faire un plan court avant de coder ;
+- exécuter le plan ;
+- signaler les écarts entre le plan et le résultat final.
