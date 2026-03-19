@@ -54,6 +54,15 @@ function M.run(options)
   local state = CoreState.new(CoreState.defaultRuntimeState(LOCAL_VERSION, UPDATE_ENABLED))
   local hw = CoreState.defaultHardwareState()
   local setupMonitor
+  state.launchArgs = {}
+  if type(options.launchArgs) == "table" then
+    for i = 1, #options.launchArgs do
+      state.launchArgs[#state.launchArgs + 1] = tostring(options.launchArgs[i] or "")
+    end
+  end
+  state.launchTimestamp = (type(os) == "table" and type(os.date) == "function")
+    and tostring(os.date("%Y-%m-%d %H:%M:%S"))
+    or "N/A"
   if options.tomsDebug == true then
     state.tomUiDiagnosticMode = true
     state.lastAction = "Tom UI diag ON (--toms-debug)"
@@ -1855,6 +1864,31 @@ function M.run(options)
       monitorScale = CFG.monitorScale,
     })
     lastDisplayDiagnostics = diagnostics
+    local drawDiag = type(state.tomRenderDiag) == "table" and state.tomRenderDiag or {}
+    state.tomRenderDiag = drawDiag
+    drawDiag.detectedDisplays = {}
+    drawDiag.detectedTomGpus = {}
+    for _, candidate in ipairs(candidates or {}) do
+      local runtime = type(candidate.runtime) == "table" and candidate.runtime or {}
+      local entry = {
+        name = tostring(candidate.name or "unknown"),
+        backend = tostring(candidate.backend or "unknown"),
+        blocksW = tonumber(candidate.w) or 0,
+        blocksH = tonumber(candidate.h) or 0,
+        pixelsW = tonumber(candidate.pxW) or 0,
+        pixelsH = tonumber(candidate.pxH) or 0,
+        runtimeArea = tonumber(candidate.runtimeArea) or 0,
+        targetSize = tonumber(runtime.targetSize) or 0,
+        setSizeTried = runtime.setSizeTried == true,
+        setSizeApplied = runtime.setSizeApplied == true,
+        setSizeMode = tostring(runtime.setSizeMode or "none"),
+      }
+      drawDiag.detectedDisplays[#drawDiag.detectedDisplays + 1] = entry
+      if entry.backend == "toms_gpu" then
+        drawDiag.detectedTomGpus[#drawDiag.detectedTomGpus + 1] = entry
+      end
+    end
+    drawDiag.lastDisplayPreference = CoreConfig.sanitizeDisplayBackend(CFG.displayBackend, "auto")
     logger.debug("Display candidates scanned", {
       count = #candidates,
       tom = diagnostics and diagnostics.tomCandidates or 0,
@@ -2934,6 +2968,13 @@ function M.run(options)
       drawStats.lastSurface = tostring(hw.monitorName or source)
       drawStats.fallbackAfterTom = false
       drawStats.renderPath = "legacy"
+      drawStats.surfaceBackend = tostring(hw.monitorBackend or "terminal")
+      drawStats.surfaceVariant = tostring(variant)
+      drawStats.surfaceDisplayName = tostring(hw.monitorName or "terminal")
+      drawStats.lastSyncMethod = "none"
+      drawStats.lastRenderError = ""
+      drawStats.tomRenderAttempted = (variant == "tom")
+      drawStats.tomRenderSucceeded = false
 
       logger.debug("Display draw start", {
         frame = tostring(drawStats.frameId),
@@ -2951,9 +2992,11 @@ function M.run(options)
         if okTom then
           rendered = true
           drawStats.renderPath = state.tomUiDiagnosticMode and "tom_simple_diag" or "tom_full"
+          drawStats.tomRenderSucceeded = true
         else
           logger.error("Tom renderer failed", { err = tostring(errTom) })
           drawStats.renderPath = "tom_error"
+          drawStats.lastRenderError = tostring(errTom)
         end
       end
 
@@ -3004,10 +3047,12 @@ function M.run(options)
       if type(surface.flush) == "function" then
         pcall(surface.flush)
         drawStats.syncCount = drawStats.syncCount + 1
+        drawStats.lastSyncMethod = "flush"
         logger.debug("Display sync", { frame = tostring(drawStats.frameId), source = source, method = "flush" })
       elseif type(surface.sync) == "function" then
         pcall(surface.sync)
         drawStats.syncCount = drawStats.syncCount + 1
+        drawStats.lastSyncMethod = "sync"
         logger.debug("Display sync", { frame = tostring(drawStats.frameId), source = source, method = "sync" })
       end
 
@@ -3022,11 +3067,13 @@ function M.run(options)
 
     local mode = resolveDisplayOutputMode()
     local monitorSurface = hw.displaySurface or hw.monitor
+    drawStats.compositionMode = tostring(mode)
+    drawStats.compositionOrder = (mode == "both" and monitorSurface) and "terminal->monitor" or (mode == "monitor" and "monitor-only" or "terminal-only")
     logger.debug("Display composition", {
       mode = tostring(mode),
       monitor = tostring(monitorSurface ~= nil),
       backend = tostring(hw.monitorBackend or "terminal"),
-      order = (mode == "both" and monitorSurface) and "terminal->monitor" or (mode == "monitor" and "monitor-only" or "terminal-only"),
+      order = drawStats.compositionOrder,
     })
     if mode == "monitor" and monitorSurface then
       drawSurface("monitor", monitorSurface)

@@ -31,6 +31,24 @@ function M.build(api)
 
   local runtime = {}
   local previous = {}
+  local methodMatches = {}
+
+  local function trackMethod(key, methodName)
+    if type(key) ~= "string" or key == "" then
+      return
+    end
+    if type(methodName) == "string" and methodName ~= "" then
+      methodMatches[key] = methodName
+    elseif methodMatches[key] == nil then
+      methodMatches[key] = "N/A"
+    end
+  end
+
+  local function tryMethodsTracked(obj, key, methods)
+    local ok, value, methodName = tryMethods(obj, methods)
+    trackMethod(key, methodName)
+    return ok, value, methodName
+  end
 
   local function logTransition(key, value, message, level, meta)
     if previous[key] == nil then
@@ -95,7 +113,7 @@ function M.build(api)
     local laser = laserDevices[1]
 
     local function sourceUnit()
-      local okUnit, unit = tryMethods(laser, { "getEnergyUnit", "getUnit", "getEnergyDisplayUnit", "getTransferUnit" })
+      local okUnit, unit = tryMethodsTracked(laser, "laserUnit", { "getEnergyUnit", "getUnit", "getEnergyDisplayUnit", "getTransferUnit" })
       if okUnit then
         return CoreEnergy.sourceUnitFromString(unit, "j")
       end
@@ -105,9 +123,9 @@ function M.build(api)
     end
 
     local unit = sourceUnit()
-    local _, e = tryMethods(laser, { "getEnergy", "getEnergyStored", "getStored" })
-    local _, m = tryMethods(laser, { "getMaxEnergy", "getMaxEnergyStored", "getCapacity" })
-    local okPct, pct = tryMethods(laser, { "getEnergyFilledPercentage", "getFilledPercentage" })
+    local _, e = tryMethodsTracked(laser, "laserEnergy", { "getEnergy", "getEnergyStored", "getStored" })
+    local _, m = tryMethodsTracked(laser, "laserMax", { "getMaxEnergy", "getMaxEnergyStored", "getCapacity" })
+    local okPct, pct = tryMethodsTracked(laser, "laserPct", { "getEnergyFilledPercentage", "getFilledPercentage" })
 
     state.laserEnergySourceUnit = unit
     state.laserEnergy = toNumber(e, 0)
@@ -247,6 +265,8 @@ function M.build(api)
     state.fuelFlowDTMbT = 0
     state.fuelFlowDMbT = 0
     state.fuelFlowTMbT = 0
+    state.passiveGeneration = 0
+    state.steamProduction = 0
 
     local formed = false
     local formedFromLogic = false
@@ -254,34 +274,64 @@ function M.build(api)
     if hw.logic then
       state.reactorTempSourceUnit = detectTemperatureSourceUnit(hw.logic, state.reactorTempSourceUnit)
 
-      local okFormed, logicFormed = tryMethods(hw.logic, { "isFormed", "getFormed" })
+      local okFormed, logicFormed = tryMethodsTracked(hw.logic, "formed", { "isFormed", "getFormed" })
       if okFormed then
         formed = logicFormed == true
         formedFromLogic = true
       end
 
-      local okIgn, ign = tryMethods(hw.logic, { "isIgnited" })
+      local okIgn, ign = tryMethodsTracked(hw.logic, "active", { "isIgnited" })
       if okIgn then state.ignition = (ign == true) end
 
-      local okPlasma, plasma = tryMethods(hw.logic, { "getPlasmaTemperature", "getPlasmaTemp", "getPlasmaHeat" })
+      local okPlasma, plasma = tryMethodsTracked(hw.logic, "plasma", { "getPlasmaTemperature", "getPlasmaTemp", "getPlasmaHeat" })
       if okPlasma then state.plasmaTemp = toNumber(plasma, 0) end
 
-      local okIgnTemp, ignTemp = tryMethods(hw.logic, { "getIgnitionTemperature", "getIgnitionTemp" })
+      local okIgnTemp, ignTemp = tryMethodsTracked(hw.logic, "ignitionTemp", { "getIgnitionTemperature", "getIgnitionTemp" })
       if okIgnTemp then
         state.ignitionTemp = toNumber(ignTemp, 0)
         state.minTemp = state.ignitionTemp + 10000
       end
 
-      local okCase, caseTemp = tryMethods(hw.logic, { "getCaseTemperature", "getCasingTemperature" })
+      local okCase, caseTemp = tryMethodsTracked(hw.logic, "case", { "getCaseTemperature", "getCasingTemperature" })
       if okCase then state.caseTemp = toNumber(caseTemp, 0) end
 
-      local okInjRate, injRate = tryMethods(hw.logic, { "getInjectionRate" })
+      local okInjRate, injRate = tryMethodsTracked(hw.logic, "injection", { "getInjectionRate" })
       if okInjRate then
         state.injectionRate = math.floor(toNumber(injRate, 0) + 0.5)
       end
       state.injectionWritable = type(hw.logic.setInjectionRate) == "function"
 
-      local okHohlraum, hohlraum = tryMethods(hw.logic, { "getHohlraum" })
+      local okPassive, passive = tryMethodsTracked(hw.logic, "passive", {
+        "getPassiveGeneration",
+        "getPassiveGenerationRate",
+        "getPassiveGenerationLastTick",
+        "getProductionRate",
+      })
+      if okPassive then
+        state.passiveGeneration = toNumber(passive, 0)
+      end
+
+      local okSteam, steam = tryMethodsTracked(hw.logic, "steam", {
+        "getSteamProduction",
+        "getSteamProductionRate",
+        "getSteamPerTick",
+        "getLastSteamInputRate",
+      })
+      if okSteam then
+        state.steamProduction = toNumber(steam, 0)
+      end
+
+      local okFuel, fuel = tryMethodsTracked(hw.logic, "fuel", {
+        "getFuel",
+        "getDTFuel",
+        "getFuelInputRate",
+        "getFuelCapacity",
+      })
+      if okFuel and type(fuel) == "number" then
+        state.fuelFlowMbT = math.max(0, toNumber(fuel, 0))
+      end
+
+      local okHohlraum, hohlraum = tryMethodsTracked(hw.logic, "hohlraum", { "getHohlraum" })
       if okHohlraum then
         state.hohlraumPresent, state.hohlraumCount, state.hohlraumName = parseHohlraumPayload(hohlraum)
       elseif hw.reactor then
@@ -294,27 +344,57 @@ function M.build(api)
     elseif hw.reactor then
       state.reactorTempSourceUnit = detectTemperatureSourceUnit(hw.reactor, state.reactorTempSourceUnit)
 
-      local okIgn, ign = tryMethods(hw.reactor, { "isIgnited", "getIgnitionStatus" })
+      local okIgn, ign = tryMethodsTracked(hw.reactor, "active", { "isIgnited", "getIgnitionStatus" })
       state.ignition = okIgn and (ign == true or ign == "true") or false
 
-      local okPlasma, plasma = tryMethods(hw.reactor, { "getPlasmaTemperature", "getPlasmaTemp", "getPlasmaHeat" })
+      local okPlasma, plasma = tryMethodsTracked(hw.reactor, "plasma", { "getPlasmaTemperature", "getPlasmaTemp", "getPlasmaHeat" })
       state.plasmaTemp = okPlasma and toNumber(plasma, 0) or 0
 
-      local _, ignTemp = tryMethods(hw.reactor, { "getIgnitionTemperature", "getIgnitionTemp" })
+      local _, ignTemp = tryMethodsTracked(hw.reactor, "ignitionTemp", { "getIgnitionTemperature", "getIgnitionTemp" })
       state.ignitionTemp = toNumber(ignTemp, 0)
       state.minTemp = state.ignitionTemp + 10000
 
-      local _, caseTemp = tryMethods(hw.reactor, { "getCaseTemperature", "getCasingTemperature" })
+      local _, caseTemp = tryMethodsTracked(hw.reactor, "case", { "getCaseTemperature", "getCasingTemperature" })
       state.caseTemp = toNumber(caseTemp, 0)
       formed = state.ignition or state.plasmaTemp > 0
 
-      local okInjRate, injRate = tryMethods(hw.reactor, { "getInjectionRate" })
+      local okInjRate, injRate = tryMethodsTracked(hw.reactor, "injection", { "getInjectionRate" })
       if okInjRate then
         state.injectionRate = math.floor(toNumber(injRate, 0) + 0.5)
       end
       state.injectionWritable = type(hw.reactor.setInjectionRate) == "function"
 
-      local okHohlraum, hohlraum = tryMethods(hw.reactor, { "getHohlraum" })
+      local okPassive, passive = tryMethodsTracked(hw.reactor, "passive", {
+        "getPassiveGeneration",
+        "getPassiveGenerationRate",
+        "getPassiveGenerationLastTick",
+        "getProductionRate",
+      })
+      if okPassive then
+        state.passiveGeneration = toNumber(passive, 0)
+      end
+
+      local okSteam, steam = tryMethodsTracked(hw.reactor, "steam", {
+        "getSteamProduction",
+        "getSteamProductionRate",
+        "getSteamPerTick",
+        "getLastSteamInputRate",
+      })
+      if okSteam then
+        state.steamProduction = toNumber(steam, 0)
+      end
+
+      local okFuel, fuel = tryMethodsTracked(hw.reactor, "fuel", {
+        "getFuel",
+        "getDTFuel",
+        "getFuelInputRate",
+        "getFuelCapacity",
+      })
+      if okFuel and type(fuel) == "number" then
+        state.fuelFlowMbT = math.max(0, toNumber(fuel, 0))
+      end
+
+      local okHohlraum, hohlraum = tryMethodsTracked(hw.reactor, "hohlraum", { "getHohlraum" })
       if okHohlraum then
         state.hohlraumPresent, state.hohlraumCount, state.hohlraumName = parseHohlraumPayload(hohlraum)
       else
@@ -468,6 +548,18 @@ function M.build(api)
   end
 
   function runtime.refreshAll()
+    methodMatches = {
+      plasma = "N/A",
+      case = "N/A",
+      injection = "N/A",
+      active = "N/A",
+      passive = "N/A",
+      steam = "N/A",
+      fuel = "N/A",
+      laserEnergy = "N/A",
+      laserMax = "N/A",
+    }
+    state.runtimeMethodMatches = methodMatches
     local wasIgnited = state.ignition
     scanPeripherals()
     scanBlockReaders()

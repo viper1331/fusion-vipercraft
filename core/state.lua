@@ -40,6 +40,8 @@ function M.defaultRuntimeState(localVersion, updateEnabled)
     fuelFlowDTMbT = 0,
     fuelFlowDMbT = 0,
     fuelFlowTMbT = 0,
+    passiveGeneration = 0,
+    steamProduction = 0,
 
     laserPresent = false,
     laserEnergy = 0,
@@ -157,6 +159,17 @@ function M.defaultRuntimeState(localVersion, updateEnabled)
       lastH = 0,
       lastSurface = "none",
       fallbackAfterTom = false,
+    },
+    runtimeMethodMatches = {
+      plasma = "N/A",
+      case = "N/A",
+      injection = "N/A",
+      active = "N/A",
+      passive = "N/A",
+      steam = "N/A",
+      fuel = "N/A",
+      laserEnergy = "N/A",
+      laserMax = "N/A",
     },
   }
 end

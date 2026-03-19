@@ -85,6 +85,10 @@ function M.run(ctx)
   end
 
   local createWindowCalls = 0
+  local debugFilePath = toPath("logs/toms_debug.txt")
+  if fs.exists(debugFilePath) and not fs.isDir(debugFilePath) then
+    pcall(fs.delete, debugFilePath)
+  end
   local state = {
     tick = 1,
     currentView = "supervision",
@@ -173,6 +177,33 @@ function M.run(ctx)
   end
   if not string.find(dump, "GPU 120x36", 1, true) then
     fail(197, "Diagnostic GPU size line missing")
+    return
+  end
+  if not string.find(dump, "DEBUG FILE: logs/toms_debug.txt", 1, true) then
+    fail(198, "Diagnostic debug file path line missing")
+    return
+  end
+  if not fs.exists(debugFilePath) or fs.isDir(debugFilePath) then
+    fail(199, "Diagnostic mode did not create logs/toms_debug.txt")
+    return
+  end
+  local handle = fs.open(debugFilePath, "r")
+  if not handle then
+    fail(200, "Cannot read logs/toms_debug.txt")
+    return
+  end
+  local debugBody = handle.readAll() or ""
+  handle.close()
+  if not string.find(debugBody, "TOMS DEBUG RUNTIME REPORT", 1, true) then
+    fail(201, "Debug report header missing in logs/toms_debug.txt")
+    return
+  end
+  if not string.find(debugBody, "Selected GPU", 1, true) then
+    fail(202, "Debug report missing selected GPU section")
+    return
+  end
+  if not string.find(debugBody, "BYPASS CONFIRMATION", 1, true) then
+    fail(203, "Debug report missing bypass section")
     return
   end
 

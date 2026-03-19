@@ -11,9 +11,11 @@ local CoreApp = require("core.app")
 local args = { ... }
 local options = {
   tomsDebug = false,
+  launchArgs = {},
 }
 
 for _, raw in ipairs(args) do
+  options.launchArgs[#options.launchArgs + 1] = tostring(raw or "")
   local arg = string.lower(tostring(raw or ""))
   if arg == "--toms-debug" or arg == "--tom-debug" then
     options.tomsDebug = true

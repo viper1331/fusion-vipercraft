@@ -5,6 +5,8 @@ local TomComponents = require("ui.toms.components")
 local M = {}
 -- Manual force switch for local debugging from this module.
 local TOMS_DEBUG_DEFAULT = false
+local TOMS_DEBUG_FILE = "logs/toms_debug.txt"
+local TOMS_DEBUG_DIR = "logs"
 
 local function asNumber(value, fallback)
   local n = tonumber(value)
@@ -246,7 +248,224 @@ function M.build(api)
     diag.lastW = tonumber(diag.lastW) or 0
     diag.lastH = tonumber(diag.lastH) or 0
     diag.fallbackAfterTom = diag.fallbackAfterTom == true
+    diag.windowAllowed = diag.windowAllowed == true
+    diag.windowUsed = diag.windowUsed == true
+    diag.lastRenderType = tostring(diag.lastRenderType or "none")
+    diag.lastSyncMethod = tostring(diag.lastSyncMethod or "none")
+    diag.lastRenderError = tostring(diag.lastRenderError or "")
+    if type(diag.errors) ~= "table" then
+      diag.errors = {}
+    end
+    if type(diag.lastLayout) ~= "table" then
+      diag.lastLayout = {}
+    end
+    if type(diag.detectedTomGpus) ~= "table" then
+      diag.detectedTomGpus = {}
+    end
+    if type(diag.detectedDisplays) ~= "table" then
+      diag.detectedDisplays = {}
+    end
+    if type(diag.debugBypass) ~= "table" then
+      diag.debugBypass = {}
+    end
+    diag.debugFilePath = TOMS_DEBUG_FILE
     return diag
+  end
+
+  local function pushDiagError(diag, message)
+    if type(diag) ~= "table" then
+      return
+    end
+    if type(diag.errors) ~= "table" then
+      diag.errors = {}
+    end
+    local text = tostring(message or "")
+    if text == "" then
+      return
+    end
+    diag.errors[#diag.errors + 1] = text
+    local limit = 24
+    if #diag.errors > limit then
+      table.remove(diag.errors, 1)
+    end
+  end
+
+  local function rectText(bounds)
+    if type(bounds) ~= "table" then
+      return "N/A"
+    end
+    return string.format("x=%d y=%d w=%d h=%d", tonumber(bounds.x) or 0, tonumber(bounds.y) or 0, tonumber(bounds.w) or 0, tonumber(bounds.h) or 0)
+  end
+
+  local function addLine(lines, label, value)
+    lines[#lines + 1] = string.format("%-24s %s", tostring(label or "-"), tostring(value or ""))
+  end
+
+  local function writeTomDebugSnapshot(diag, model, source, width, height)
+    local fsApi = _G and _G.fs
+    if type(fsApi) ~= "table" then
+      diag.debugFileLastStatus = "fs_unavailable"
+      return false, "fs_unavailable"
+    end
+
+    local okWrite, errWrite = pcall(function()
+      if not fsApi.exists(TOMS_DEBUG_DIR) then
+        fsApi.makeDir(TOMS_DEBUG_DIR)
+      end
+
+      local handle = fsApi.open(TOMS_DEBUG_FILE, "w")
+      if not handle then
+        error("open_failed")
+      end
+
+      local lines = {}
+      local now = (type(os) == "table" and type(os.date) == "function") and os.date("%Y-%m-%d %H:%M:%S") or "N/A"
+      local launchAt = tostring(state.launchTimestamp or now)
+      local launchArgs = type(state.launchArgs) == "table" and table.concat(state.launchArgs, " ") or ""
+      local selectedRelayName = (((type(CFG.actions) == "table" and type(CFG.actions.laser_fire) == "table") and CFG.actions.laser_fire.relay)
+        or ((type(CFG.actions) == "table" and type(CFG.actions.laser_charge) == "table") and CFG.actions.laser_charge.relay)
+        or "N/A")
+      local selectedRelaySide = (((type(CFG.actions) == "table" and type(CFG.actions.laser_fire) == "table") and CFG.actions.laser_fire.side)
+        or ((type(CFG.actions) == "table" and type(CFG.actions.laser_charge) == "table") and CFG.actions.laser_charge.side)
+        or "N/A")
+      local methodMatches = type(state.runtimeMethodMatches) == "table" and state.runtimeMethodMatches or {}
+      local layout = type(diag.lastLayout) == "table" and diag.lastLayout or {}
+      local renderErrors = type(diag.errors) == "table" and diag.errors or {}
+      local useWindows = diag.windowAllowed == true
+      local usedWindows = diag.windowUsed == true
+      local debugEnabled = state.tomUiDiagnosticMode == true or TOMS_DEBUG_DEFAULT == true
+      local directDraw = tostring(diag.lastRenderType or ""):find("DIRECT", 1, true) ~= nil
+
+      lines[#lines + 1] = "TOMS DEBUG RUNTIME REPORT"
+      lines[#lines + 1] = "========================================"
+      addLine(lines, "Generated at", now)
+      addLine(lines, "Launch timestamp", launchAt)
+      addLine(lines, "Program version", tostring(state.update and state.update.localVersion or "N/A"))
+      addLine(lines, "Launch arguments", launchArgs ~= "" and launchArgs or "(none)")
+      addLine(lines, "Selected GPU", tostring(hw.monitorName or "N/A"))
+      addLine(lines, "Selected backend", tostring(hw.monitorBackend or "N/A"))
+      addLine(lines, "Selected keyboard", tostring(hw.keyboardName or "N/A"))
+      addLine(lines, "Selected redstone relay", tostring(selectedRelayName))
+      addLine(lines, "Selected relay side", tostring(selectedRelaySide))
+      addLine(lines, "Selected reactor", tostring(hw.reactorName or hw.logicName or "N/A"))
+      addLine(lines, "Selected laser", tostring(hw.laserName or "N/A"))
+      addLine(lines, "Runtime dimensions", string.format("%dx%d", tonumber(width) or 0, tonumber(height) or 0))
+      addLine(lines, "Runtime source", tostring(source or "unknown"))
+      lines[#lines + 1] = ""
+
+      lines[#lines + 1] = "[MODE]"
+      addLine(lines, "Debug mode", debugEnabled and "enabled" or "disabled")
+      addLine(lines, "Render type", tostring(diag.lastRenderType or "N/A"))
+      addLine(lines, "Draw mode", directDraw and "direct draw" or "normal draw")
+      addLine(lines, "Windows allowed", useWindows and "on" or "off")
+      addLine(lines, "Windows used", usedWindows and "on" or "off")
+      addLine(lines, "createWindow used", usedWindows and "yes" or "no")
+      addLine(lines, "Redraw count", tostring(diag.redrawCount or 0))
+      addLine(lines, "Sync count", tostring(diag.syncCount or 0))
+      addLine(lines, "Last sync method", tostring(diag.lastSyncMethod or "N/A"))
+      addLine(lines, "Fallback after Tom", diag.fallbackAfterTom and "yes" or "no")
+      lines[#lines + 1] = ""
+
+      lines[#lines + 1] = "[DETECTED TOM GPUS]"
+      local tomGpus = type(diag.detectedTomGpus) == "table" and diag.detectedTomGpus or {}
+      addLine(lines, "Count", tostring(#tomGpus))
+      if #tomGpus == 0 then
+        lines[#lines + 1] = "  - none detected"
+      else
+        for index, gpu in ipairs(tomGpus) do
+          local blocksW = tonumber(gpu.blocksW) or 0
+          local blocksH = tonumber(gpu.blocksH) or 0
+          local pxW = tonumber(gpu.pixelsW) or 0
+          local pxH = tonumber(gpu.pixelsH) or 0
+          local scaleX = (blocksW > 0) and math.floor((pxW / blocksW) + 0.5) or 0
+          local scaleY = (blocksH > 0) and math.floor((pxH / blocksH) + 0.5) or 0
+          local scaleText = (scaleX > 0 and scaleY > 0) and (tostring(scaleX) .. "x" .. tostring(scaleY)) or tostring(gpu.targetSize or "N/A")
+          lines[#lines + 1] = string.format("  #%d name=%s", index, tostring(gpu.name or "unknown"))
+          lines[#lines + 1] = string.format("     pixels=%dx%d blocks=%dx%d scale=%s area=%s",
+            pxW,
+            pxH,
+            blocksW,
+            blocksH,
+            scaleText,
+            tostring(gpu.runtimeArea or 0))
+          lines[#lines + 1] = string.format("     setSize tried=%s applied=%s mode=%s",
+            tostring(gpu.setSizeTried == true),
+            tostring(gpu.setSizeApplied == true),
+            tostring(gpu.setSizeMode or "none"))
+        end
+      end
+      lines[#lines + 1] = ""
+
+      lines[#lines + 1] = "[LAYOUT]"
+      addLine(lines, "Density", tostring(layout.density or "N/A"))
+      addLine(lines, "Layout mode", tostring(layout.mode or "N/A"))
+      addLine(lines, "Header", rectText(layout.header))
+      addLine(lines, "Reactor", rectText(layout.reactor))
+      addLine(lines, "Temperatures", rectText(layout.temperatures))
+      addLine(lines, "Laser", rectText(layout.laser))
+      addLine(lines, "Status", rectText(layout.status))
+      addLine(lines, "Footer", rectText(layout.footer))
+      lines[#lines + 1] = ""
+
+      lines[#lines + 1] = "[MATCHED METHODS]"
+      addLine(lines, "plasma", tostring(methodMatches.plasma or "N/A"))
+      addLine(lines, "case", tostring(methodMatches.case or "N/A"))
+      addLine(lines, "injection", tostring(methodMatches.injection or "N/A"))
+      addLine(lines, "active", tostring(methodMatches.active or "N/A"))
+      addLine(lines, "passive", tostring(methodMatches.passive or "N/A"))
+      addLine(lines, "steam", tostring(methodMatches.steam or "N/A"))
+      addLine(lines, "fuel", tostring(methodMatches.fuel or "N/A"))
+      addLine(lines, "laser energy", tostring(methodMatches.laserEnergy or "N/A"))
+      addLine(lines, "laser max", tostring(methodMatches.laserMax or "N/A"))
+      lines[#lines + 1] = ""
+
+      lines[#lines + 1] = "[CONTROLS]"
+      addLine(lines, "allow_control", tostring(CFG.allowControl == true))
+      addLine(lines, "pulse available", tostring(type(CFG.actions) == "table" and type(CFG.actions.laser_fire) == "table" and CFG.actions.laser_fire.relay ~= nil))
+      addLine(lines, "injection control available", tostring(state.injectionWritable == true))
+      lines[#lines + 1] = ""
+
+      lines[#lines + 1] = "[BYPASS CONFIRMATION]"
+      addLine(lines, "normal layout bypassed", tostring(diag.debugBypass.layoutNormal == true))
+      addLine(lines, "components bypassed", tostring(diag.debugBypass.components == true))
+      addLine(lines, "windows bypassed", tostring(diag.debugBypass.windows == true))
+      addLine(lines, "legacy render bypassed", tostring(diag.debugBypass.legacy == true))
+      lines[#lines + 1] = ""
+
+      lines[#lines + 1] = "[LAST FRAME SUMMARY]"
+      addLine(lines, "status", tostring(model.statusText or "N/A"))
+      addLine(lines, "phase", tostring(model.phase or "N/A"))
+      addLine(lines, "plasma", tostring(model.plasmaTemp or "N/A"))
+      addLine(lines, "case", tostring(model.caseTemp or "N/A"))
+      addLine(lines, "laser", tostring(model.laserState or "N/A") .. " " .. tostring(model.laserPct or 0) .. "%")
+      addLine(lines, "grid", model.energyKnown and string.format("%.0f%%", tonumber(model.energyPct) or 0) or "N/A")
+      addLine(lines, "action", tostring(model.lastAction or "N/A"))
+      lines[#lines + 1] = ""
+
+      lines[#lines + 1] = "[RENDER ERRORS]"
+      if tostring(diag.lastRenderError or "") ~= "" then
+        lines[#lines + 1] = "  - " .. tostring(diag.lastRenderError)
+      end
+      if #renderErrors == 0 and tostring(diag.lastRenderError or "") == "" then
+        lines[#lines + 1] = "  - none"
+      else
+        for i = 1, #renderErrors do
+          lines[#lines + 1] = "  - " .. tostring(renderErrors[i] or "")
+        end
+      end
+
+      handle.write(table.concat(lines, "\n"))
+      handle.close()
+    end)
+
+    if not okWrite then
+      diag.debugFileLastStatus = "write_failed"
+      diag.debugFileLastError = tostring(errWrite)
+      return false, tostring(errWrite)
+    end
+    diag.debugFileLastStatus = "ok"
+    diag.debugFileLastError = ""
+    return true, nil
   end
 
   local function buildLegacyLayout(layout, theme)
@@ -414,7 +633,7 @@ function M.build(api)
 
   local function computeDiagnosticLayout(width, height, theme)
     local root = rect(1, 1, width, height)
-    local headerH = math.max(3, math.min(4, theme.sizes.headerHeight + 2))
+    local headerH = math.max(4, math.min(5, theme.sizes.headerHeight + 3))
     local footerH = math.max(4, math.min(6, theme.sizes.footerHeight))
     local header = rect(1, 1, width, headerH)
     local footer = rect(1, height - footerH + 1, width, footerH)
@@ -452,6 +671,18 @@ function M.build(api)
     ui.safeText(bounds.x + 2, bounds.y + 1, string.upper(title), colors.white, border, math.max(1, bounds.w - 4), "left")
   end
 
+  local function drawSimpleKV(ui, bounds, row, label, value, valueColor, mutedColor)
+    local maxRows = math.max(1, bounds.h - 3)
+    if row < 0 or row >= maxRows then
+      return
+    end
+    local y = bounds.y + 2 + row
+    local labelW = math.max(8, math.min(12, math.floor(bounds.w * 0.36)))
+    local valueW = math.max(1, bounds.w - labelW - 4)
+    ui.safeText(bounds.x + 2, y, tostring(label or "-"), mutedColor, nil, labelW, "left")
+    ui.safeText(bounds.x + 2 + labelW + 1, y, tostring(value or "N/A"), valueColor, nil, valueW, "left")
+  end
+
   local function drawSimpleDiagnostic(ui, width, height, theme, model, source, renderType)
     local diagState = ensureTomRenderDiag()
     local d = computeDiagnosticLayout(width, height, theme)
@@ -468,34 +699,37 @@ function M.build(api)
     if d.header.h >= 3 then
       ui.safeText(d.header.x + 2, d.header.y + 2, "RENDER " .. tostring(renderType or "TOM_DIRECT"), theme.palette.textMuted or colors.lightGray, theme.palette.panelHeader, math.max(1, d.header.w - 4), "left")
     end
+    if d.header.h >= 4 then
+      ui.safeText(d.header.x + 2, d.header.y + 3, "DEBUG FILE: " .. TOMS_DEBUG_FILE, theme.palette.info or colors.cyan, theme.palette.panelHeader, math.max(1, d.header.w - 4), "left")
+    end
 
     drawSimplePanel(ui, d.reactor, "Reactor", theme.palette.border or colors.lightBlue, theme.palette.panelBg or colors.black)
-    ui.drawLabelValue(d.reactor, 0, "Global", model.statusText, model.statusTone, theme.palette.textMuted)
-    ui.drawLabelValue(d.reactor, 1, "Phase", model.phase, model.phaseTone, theme.palette.textMuted)
-    ui.drawLabelValue(d.reactor, 2, "Core", state.reactorFormed and "FORMED" or "UNFORMED", state.reactorFormed and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
-    ui.drawLabelValue(d.reactor, 3, "Injection", tostring(model.injectionRate) .. " mB/t", theme.palette.info, theme.palette.textMuted)
-    ui.drawLabelValue(d.reactor, 4, "Fuel", model.fuelMode, theme.palette.info, theme.palette.textMuted)
-    ui.drawLabelValue(d.reactor, 5, "Hohlraum", model.hohlraum, state.hohlraumPresent and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
+    drawSimpleKV(ui, d.reactor, 0, "Global", model.statusText, model.statusTone, theme.palette.textMuted)
+    drawSimpleKV(ui, d.reactor, 1, "Phase", model.phase, model.phaseTone, theme.palette.textMuted)
+    drawSimpleKV(ui, d.reactor, 2, "Core", state.reactorFormed and "FORMED" or "UNFORMED", state.reactorFormed and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
+    drawSimpleKV(ui, d.reactor, 3, "Injection", tostring(model.injectionRate) .. " mB/t", theme.palette.info, theme.palette.textMuted)
+    drawSimpleKV(ui, d.reactor, 4, "Fuel", model.fuelMode, theme.palette.info, theme.palette.textMuted)
+    drawSimpleKV(ui, d.reactor, 5, "Hohlraum", model.hohlraum, state.hohlraumPresent and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
 
     drawSimplePanel(ui, d.temperatures, "Temperatures", theme.palette.warning or colors.orange, theme.palette.panelBg or colors.black)
-    ui.drawLabelValue(d.temperatures, 0, "Plasma", model.plasmaTemp, theme.palette.warning, theme.palette.textMuted)
-    ui.drawLabelValue(d.temperatures, 1, "Case", model.caseTemp, theme.palette.critical, theme.palette.textMuted)
-    ui.drawLabelValue(d.temperatures, 2, "Ignition", "300.0 C", theme.palette.info, theme.palette.textMuted)
-    ui.drawLabelValue(d.temperatures, 3, "Laser Need", model.laserNeed, theme.palette.warning, theme.palette.textMuted)
-    ui.drawLabelValue(d.temperatures, 4, "Warnings", tostring(#model.warnings), #model.warnings > 0 and theme.palette.warning or theme.palette.ok, theme.palette.textMuted)
-    ui.drawLabelValue(d.temperatures, 5, "Blockers", tostring(#model.blockers), #model.blockers > 0 and theme.palette.critical or theme.palette.ok, theme.palette.textMuted)
+    drawSimpleKV(ui, d.temperatures, 0, "Plasma", model.plasmaTemp, theme.palette.warning, theme.palette.textMuted)
+    drawSimpleKV(ui, d.temperatures, 1, "Case", model.caseTemp, theme.palette.critical, theme.palette.textMuted)
+    drawSimpleKV(ui, d.temperatures, 2, "Ignition", "300.0 C", theme.palette.info, theme.palette.textMuted)
+    drawSimpleKV(ui, d.temperatures, 3, "Laser Need", model.laserNeed, theme.palette.warning, theme.palette.textMuted)
+    drawSimpleKV(ui, d.temperatures, 4, "Warnings", tostring(#model.warnings), #model.warnings > 0 and theme.palette.warning or theme.palette.ok, theme.palette.textMuted)
+    drawSimpleKV(ui, d.temperatures, 5, "Blockers", tostring(#model.blockers), #model.blockers > 0 and theme.palette.critical or theme.palette.ok, theme.palette.textMuted)
 
     drawSimplePanel(ui, d.laser, "Laser / Power", theme.palette.ok or colors.lime, theme.palette.panelBg or colors.black)
-    ui.drawLabelValue(d.laser, 0, "Laser State", model.laserState, model.laserTone, theme.palette.textMuted)
-    ui.drawLabelValue(d.laser, 1, "Laser Count", tostring(model.laserCount), theme.palette.info, theme.palette.textMuted)
-    ui.drawLabelValue(d.laser, 2, "Laser Ready", tostring(model.laserActiveCount) .. "/" .. tostring(model.laserCount), theme.palette.ok, theme.palette.textMuted)
-    ui.drawLabelValue(d.laser, 3, "Laser Pct", tostring(model.laserPct) .. "%", model.laserTone, theme.palette.textMuted)
-    ui.drawLabelValue(d.laser, 4, "Laser E", model.laserEnergy, theme.palette.info, theme.palette.textMuted)
-    ui.drawLabelValue(d.laser, 5, "Laser Max", model.laserMax, theme.palette.info, theme.palette.textMuted)
-    ui.drawLabelValue(d.laser, 6, "Grid", model.energyKnown and string.format("%.0f%%", model.energyPct) or "N/A", theme.palette.energy, theme.palette.textMuted)
-    ui.drawLabelValue(d.laser, 7, "Redraw", tostring(diagState.redrawCount), theme.palette.info, theme.palette.textMuted)
-    ui.drawLabelValue(d.laser, 8, "Sync", tostring(diagState.syncCount), theme.palette.info, theme.palette.textMuted)
-    ui.drawLabelValue(d.laser, 9, "Fallback", diagState.fallbackAfterTom and "YES" or "NO", diagState.fallbackAfterTom and theme.palette.warning or theme.palette.ok, theme.palette.textMuted)
+    drawSimpleKV(ui, d.laser, 0, "Laser State", model.laserState, model.laserTone, theme.palette.textMuted)
+    drawSimpleKV(ui, d.laser, 1, "Laser Count", tostring(model.laserCount), theme.palette.info, theme.palette.textMuted)
+    drawSimpleKV(ui, d.laser, 2, "Laser Ready", tostring(model.laserActiveCount) .. "/" .. tostring(model.laserCount), theme.palette.ok, theme.palette.textMuted)
+    drawSimpleKV(ui, d.laser, 3, "Laser Pct", tostring(model.laserPct) .. "%", model.laserTone, theme.palette.textMuted)
+    drawSimpleKV(ui, d.laser, 4, "Laser E", model.laserEnergy, theme.palette.info, theme.palette.textMuted)
+    drawSimpleKV(ui, d.laser, 5, "Laser Max", model.laserMax, theme.palette.info, theme.palette.textMuted)
+    drawSimpleKV(ui, d.laser, 6, "Grid", model.energyKnown and string.format("%.0f%%", model.energyPct) or "N/A", theme.palette.energy, theme.palette.textMuted)
+    drawSimpleKV(ui, d.laser, 7, "Redraw", tostring(diagState.redrawCount), theme.palette.info, theme.palette.textMuted)
+    drawSimpleKV(ui, d.laser, 8, "Sync", tostring(diagState.syncCount), theme.palette.info, theme.palette.textMuted)
+    drawSimpleKV(ui, d.laser, 9, "Fallback", diagState.fallbackAfterTom and "YES" or "NO", diagState.fallbackAfterTom and theme.palette.warning or theme.palette.ok, theme.palette.textMuted)
 
     ui.safeFilledRect(d.footer.x, d.footer.y, d.footer.w, d.footer.h, theme.palette.panelHeaderAlt or colors.gray)
     ui.safeFilledRect(d.footer.x, d.footer.y, d.footer.w, 1, theme.palette.borderStrong or colors.cyan)
@@ -556,6 +790,22 @@ function M.build(api)
       diag.windowAllowed = false
       diag.windowUsed = false
       diag.lastRenderType = "TOM_DIRECT_NO_WINDOWS"
+      diag.debugBypass = {
+        layoutNormal = true,
+        components = true,
+        windows = true,
+        legacy = true,
+      }
+      diag.lastLayout = {
+        mode = "diagnostic_direct",
+        density = theme.density,
+        header = layout.header,
+        reactor = layout.reactor,
+        temperatures = layout.temperatures,
+        laser = layout.laser,
+        status = nil,
+        footer = layout.footer,
+      }
       rootUi.drawBackdrop(layout.root or rect(1, 1, width, height))
       drawSimpleDiagnostic(rootUi, width, height, theme, model, source, "TOM_DIRECT_NO_WINDOWS")
       if type(api.buildButtons) == "function" and type(api.drawButtons) == "function" then
@@ -585,11 +835,31 @@ function M.build(api)
           surface = tostring(diag.lastSurface),
         })
       end
+      local okSnapshot, errSnapshot = writeTomDebugSnapshot(diag, model, source, width, height)
+      if not okSnapshot and (diag.redrawCount <= 2 or (diag.redrawCount % 10 == 0)) then
+        logWarn("Tom debug snapshot write failed", { err = tostring(errSnapshot) })
+      end
       return layout
     end
 
     layout = TomLayout.compute(width, height, theme, state.currentView)
     diag.renderPath = "tom_full"
+    diag.debugBypass = {
+      layoutNormal = false,
+      components = false,
+      windows = false,
+      legacy = false,
+    }
+    diag.lastLayout = {
+      mode = "normal",
+      density = layout.density or theme.density,
+      header = layout.header,
+      reactor = layout.left and layout.left.reactor or nil,
+      temperatures = layout.left and layout.left.temperatures or nil,
+      laser = layout.center and layout.center.laser or nil,
+      status = layout.left and layout.left.status or nil,
+      footer = layout.footer,
+    }
     rootUi.drawBackdrop(layout.root or rect(1, 1, width, height))
 
     if layout.tooSmall then
@@ -669,10 +939,12 @@ function M.build(api)
           end
           term.redirect(prev)
           if not okDraw then
+            pushDiagError(diag, "window_draw_failed:" .. tostring(errDraw))
             logWarn("Tom area draw failed", { err = tostring(errDraw) })
           end
           return
         end
+        pushDiagError(diag, "create_window_failed:" .. tostring(bounds.w) .. "x" .. tostring(bounds.h))
       end
       drawFn(rootUi, bounds)
     end
