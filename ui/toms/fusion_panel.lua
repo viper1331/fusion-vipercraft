@@ -429,7 +429,7 @@ function M.build(api)
       addLine(lines, "Render backend", tostring(surfaceCtx.backend or hw.monitorBackend or "N/A"))
       addLine(lines, "Render backend family", tostring(surfaceCtx.backendFamily or hw.monitorBackendFamily or "N/A"))
       addLine(lines, "Render wrapper", tostring(surfaceCtx.wrapperType or hw.monitorWrapperType or "N/A"))
-      addLine(lines, "Input source", tostring(surfaceCtx.inputSource or source or "N/A"))
+      addLine(lines, "Input channel", tostring(surfaceCtx.inputSource or source or "N/A"))
       addLine(lines, "Render source label", tostring(surfaceCtx.renderSource or source or "N/A"))
       addLine(lines, "Source changed", tostring((surfaceCtx.inputSource or "") ~= (surfaceCtx.renderSource or "")))
       addLine(lines, "Render surface type", tostring(surfaceCtx.renderSurfaceType or "N/A"))
@@ -444,6 +444,7 @@ function M.build(api)
       addLine(lines, "Renderer call path", tostring(surfaceCtx.sourcePath or "N/A"))
       addLine(lines, "Source resolved by", tostring(surfaceCtx.sourceResolvedBy or "N/A"))
       addLine(lines, "Term redirected to", tostring(surfaceCtx.termRedirectTarget or "N/A"))
+      addLine(lines, "Layout metric model", tostring(surfaceCtx.backendFamily or "") == "toms_native" and "native_pixels" or "text_grid")
       lines[#lines + 1] = ""
 
       lines[#lines + 1] = "[MODE]"
@@ -489,7 +490,7 @@ function M.build(api)
             wrappedW,
             wrappedH,
             tostring(gpu.runtimeArea or 0))
-          lines[#lines + 1] = string.format("     blocks=%dx%d scale=%s grid=%dx%d backend=%s",
+          lines[#lines + 1] = string.format("     blocks=%dx%d scale=%s grid(info)=%dx%d backend=%s",
             blocksW,
             blocksH,
             scaleText,
@@ -530,6 +531,7 @@ function M.build(api)
       lines[#lines + 1] = "[LAYOUT]"
       addLine(lines, "Density", tostring(layout.density or "N/A"))
       addLine(lines, "Layout mode", tostring(layout.mode or "N/A"))
+      addLine(lines, "Grid metrics usage", tostring(surfaceCtx.backendFamily or "") == "toms_native" and "informational_only" or "drives_layout")
       addLine(lines, "Header", rectText(layout.header))
       addLine(lines, "Reactor", rectText(layout.reactor))
       addLine(lines, "Temperatures", rectText(layout.temperatures))
@@ -729,15 +731,16 @@ function M.build(api)
     }
   end
 
-  local function computeNativeDiagnosticLayout(width, height)
+  local function computeNativeDiagnosticLayout(width, height, theme)
     local w = math.max(1, math.floor(tonumber(width) or 1))
     local h = math.max(1, math.floor(tonumber(height) or 1))
-    local margin = math.max(4, math.floor(math.min(w, h) * 0.02))
-    local gap = math.max(3, math.floor(margin * 0.6))
-    local headerH = math.max(34, math.floor(h * 0.12))
-    local footerH = math.max(36, math.floor(h * 0.13))
+    local metrics = type(theme) == "table" and type(theme.metrics) == "table" and theme.metrics or {}
+    local margin = math.max(6, math.floor(tonumber(metrics.outerMarginPx) or (math.min(w, h) * 0.02)))
+    local gap = math.max(4, math.floor(tonumber(metrics.panelGapPx) or (margin * 0.6)))
+    local headerH = math.max(30, math.floor(tonumber(metrics.headerHeightPx) or (h * 0.12)))
+    local footerH = math.max(34, math.floor(tonumber(metrics.footerHeightPx) or (h * 0.13)))
     if headerH + footerH + (margin * 2) >= h then
-      headerH = math.max(24, math.floor(h * 0.10))
+      headerH = math.max(22, math.floor(h * 0.10))
       footerH = math.max(24, math.floor(h * 0.10))
     end
     local contentY = margin + headerH + gap
@@ -793,10 +796,10 @@ function M.build(api)
     canvas.drawText(valueX, y, tostring(value or "N/A"), valueTone or p.text, nil)
   end
 
-  local function drawNativeDiagnostic(surface, width, height, model, source, diag)
+  local function drawNativeDiagnostic(surface, width, height, model, source, diag, theme)
     local canvas = makeTomNativeCanvas(surface, width, height, diag)
     local p = canvas.palette
-    local layout = computeNativeDiagnosticLayout(canvas.w, canvas.h)
+    local layout = computeNativeDiagnosticLayout(canvas.w, canvas.h, theme)
 
     canvas.fillRect(layout.root.x, layout.root.y, layout.root.w, layout.root.h, p.bg)
 
@@ -1093,7 +1096,9 @@ function M.build(api)
 
   local function render(source, surface, width, height, renderCtx)
     renderCtx = type(renderCtx) == "table" and renderCtx or {}
-    local theme = TomTheme.build(width, height)
+    local theme = TomTheme.build(width, height, {
+      backendFamily = tostring(renderCtx.backendFamily or hw.monitorBackendFamily or ""),
+    })
     local model = runtimeModel(theme)
     local diag = ensureTomRenderDiag()
     diag.redrawCount = diag.redrawCount + 1
@@ -1138,7 +1143,7 @@ function M.build(api)
     if simpleMode then
       if renderCtx.useNativeDebug == true and type(surface) == "table" then
         usedNativeDebug = true
-        layout = drawNativeDiagnostic(surface, width, height, model, source, diag)
+        layout = drawNativeDiagnostic(surface, width, height, model, source, diag, theme)
       else
         local rootUi = TomComponents.new({
           target = term.current(),

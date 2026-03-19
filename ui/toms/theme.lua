@@ -56,13 +56,16 @@ local function detectDensity(width, height)
   return "medium"
 end
 
-local function computeLineHeight(width, height, density)
-  local nativeLike = width >= 220 and height >= 120
+local function computeLineHeight(width, height, density, nativePreferred)
+  local nativeLike = nativePreferred == true or (width >= 220 and height >= 120)
   if nativeLike then
     if density == "large" then
       return clamp(math.floor(height / 34), 8, 13)
     end
-    return clamp(math.floor(height / 38), 6, 10)
+    if density == "medium" then
+      return clamp(math.floor(height / 40), 6, 10)
+    end
+    return clamp(math.floor(height / 42), 5, 8)
   end
   if density == "small" then
     return 1
@@ -70,12 +73,87 @@ local function computeLineHeight(width, height, density)
   return 2
 end
 
-function M.build(width, height)
+local function buildNativeMetrics(width, height, density, lineHeight)
+  local uiScale = clamp(math.min(width / 512, height / 384), 0.72, 2.10)
+  if density == "small" then
+    uiScale = clamp(uiScale, 0.72, 1.00)
+  elseif density == "large" then
+    uiScale = clamp(uiScale, 1.10, 2.10)
+  end
+
+  local outerMarginPx = clamp(math.floor((math.min(width, height) * 0.024) + 0.5), 6, 24)
+  local panelGapPx = clamp(math.floor((outerMarginPx * 0.72) + 0.5), 4, 16)
+  local panelPaddingPx = clamp(math.floor((outerMarginPx * 0.55) + 0.5), 3, 12)
+  local sectionGapPx = clamp(math.floor((panelGapPx * 0.72) + 0.5), 3, 12)
+  local textLineGapPx = clamp(math.floor((lineHeight * 0.28) + 0.5), 1, 4)
+
+  local headerHeightPx = clamp(math.floor((height * 0.12) + 0.5), 30, 66)
+  local footerHeightPx = clamp(math.floor((height * 0.14) + 0.5), 34, 74)
+  local titleHeightPx = clamp(math.floor((lineHeight * 1.10) + 0.5), 7, 16)
+  local subtitleHeightPx = clamp(math.floor((lineHeight * 0.88) + 0.5), 6, 14)
+  local rowHeightPx = clamp(lineHeight + textLineGapPx, 7, 18)
+  local panelHeaderHeightPx = clamp(math.floor((lineHeight * 1.05) + 0.5), 6, 14)
+  local buttonHeightPx = clamp(math.floor((lineHeight * 1.45) + 0.5), 9, 20)
+  local gaugeThicknessPx = clamp(math.floor((lineHeight * 0.45) + 0.5), 3, 8)
+  local badgeHeightPx = clamp(math.floor((lineHeight * 0.80) + 0.5), 5, 14)
+  local fontCharWidthPx = clamp(math.floor((lineHeight * 0.62) + 0.5), 4, 10)
+  local fontCharHeightPx = lineHeight
+
+  return {
+    nativePixels = true,
+    uiScale = uiScale,
+    outerMarginPx = outerMarginPx,
+    panelGapPx = panelGapPx,
+    panelPaddingPx = panelPaddingPx,
+    sectionGapPx = sectionGapPx,
+    textLineGapPx = textLineGapPx,
+    titleHeightPx = titleHeightPx,
+    subtitleHeightPx = subtitleHeightPx,
+    rowHeightPx = rowHeightPx,
+    headerHeightPx = headerHeightPx,
+    footerHeightPx = footerHeightPx,
+    panelHeaderHeightPx = panelHeaderHeightPx,
+    buttonHeightPx = buttonHeightPx,
+    gaugeThicknessPx = gaugeThicknessPx,
+    badgeHeightPx = badgeHeightPx,
+    fontCharWidthPx = fontCharWidthPx,
+    fontCharHeightPx = fontCharHeightPx,
+    laserModuleWidthPx = clamp(math.floor((lineHeight * 0.92) + 0.5), 6, 14),
+    laserModuleHeightPx = clamp(math.floor((lineHeight * 0.86) + 0.5), 6, 14),
+  }
+end
+
+function M.build(width, height, options)
+  options = type(options) == "table" and options or {}
   local w = math.max(1, asInt(width, 1))
   local h = math.max(1, asInt(height, 1))
   local density = detectDensity(w, h)
-  local lineHeight = computeLineHeight(w, h, density)
-  local nativeLike = lineHeight >= 5
+  local backendFamily = string.lower(tostring(options.backendFamily or ""))
+  local nativePreferred = backendFamily == "toms_native"
+  local lineHeight = computeLineHeight(w, h, density, nativePreferred)
+  local nativeLike = nativePreferred or lineHeight >= 5
+  local metrics = nativeLike and buildNativeMetrics(w, h, density, lineHeight) or {
+    nativePixels = false,
+    uiScale = 1,
+    outerMarginPx = 1,
+    panelGapPx = 1,
+    panelPaddingPx = 1,
+    sectionGapPx = 1,
+    textLineGapPx = 1,
+    titleHeightPx = 1,
+    subtitleHeightPx = 1,
+    rowHeightPx = math.max(1, lineHeight),
+    headerHeightPx = (density == "large") and 4 or 3,
+    footerHeightPx = (density == "small") and 6 or 8,
+    panelHeaderHeightPx = 1,
+    buttonHeightPx = (density == "small") and 2 or 3,
+    gaugeThicknessPx = 1,
+    badgeHeightPx = 1,
+    fontCharWidthPx = 1,
+    fontCharHeightPx = 1,
+    laserModuleWidthPx = 3,
+    laserModuleHeightPx = (density == "small") and 1 or 2,
+  }
 
   local baseScale = clamp(math.min(w / 180, h / 70), 0.70, 3.00)
   if density == "small" then
@@ -83,20 +161,21 @@ function M.build(width, height)
   elseif density == "large" then
     baseScale = clamp(baseScale, 1.10, 3.00)
   end
+  if nativeLike then
+    baseScale = metrics.uiScale
+  end
 
   local unit = math.max(1, asInt(baseScale, 1))
-  local outerMargin = nativeLike and clamp(math.floor(lineHeight * 0.55), 2, 8) or 1
-  local panelPadding = nativeLike and clamp(math.floor(lineHeight * 0.35), 1, 4) or 1
-  local panelGap = nativeLike and clamp(math.floor(lineHeight * 0.45), 2, 6) or 1
-  local sectionGap = nativeLike and clamp(math.floor(lineHeight * 0.30), 1, 4) or 1
-
-  local panelHeaderHeight = nativeLike and clamp(math.floor(lineHeight * 0.95), 6, 12) or 1
-  local headerHeight = nativeLike and clamp((lineHeight * 2) + panelHeaderHeight, 18, 38) or ((density == "large") and 4 or 3)
-  local footerHeight = nativeLike and clamp((lineHeight * 2) + panelHeaderHeight + 2, 20, 42) or ((density == "small") and 6 or 8)
-
-  local buttonHeight = nativeLike and clamp(lineHeight + 2, 8, 16) or ((density == "small") and 2 or 3)
-  local gaugeThickness = nativeLike and clamp(math.floor(lineHeight * 0.45), 3, 7) or 1
-  local badgeHeight = nativeLike and clamp(math.floor(lineHeight * 0.65), 4, 9) or 1
+  local outerMargin = metrics.outerMarginPx
+  local panelPadding = metrics.panelPaddingPx
+  local panelGap = metrics.panelGapPx
+  local sectionGap = metrics.sectionGapPx
+  local panelHeaderHeight = metrics.panelHeaderHeightPx
+  local headerHeight = metrics.headerHeightPx
+  local footerHeight = metrics.footerHeightPx
+  local buttonHeight = metrics.buttonHeightPx
+  local gaugeThickness = metrics.gaugeThicknessPx
+  local badgeHeight = metrics.badgeHeightPx
   local rowPadding = nativeLike and clamp(math.floor(lineHeight * 0.18), 1, 3) or 0
 
   return {
@@ -105,6 +184,7 @@ function M.build(width, height)
     density = density,
     scale = baseScale,
     nativeLike = nativeLike,
+    metrics = metrics,
     palette = {
       bgRoot = colors.black,
       bgBackdrop = colors.gray,
@@ -147,7 +227,7 @@ function M.build(width, height)
       panelPadding = panelPadding,
       panelGap = panelGap,
       sectionGap = sectionGap,
-      lineGap = nativeLike and math.max(1, math.floor(lineHeight * 0.20)) or 1,
+      lineGap = metrics.textLineGapPx,
       denseGap = nativeLike and math.max(1, math.floor(lineHeight * 0.10)) or 1,
       rowPadding = rowPadding,
     },
@@ -155,15 +235,15 @@ function M.build(width, height)
       headerHeight = headerHeight,
       footerHeight = footerHeight,
       panelHeaderHeight = panelHeaderHeight,
-      titleHeight = nativeLike and math.max(1, math.floor(lineHeight * 0.9)) or 1,
-      subtitleHeight = nativeLike and math.max(1, math.floor(lineHeight * 0.75)) or 1,
+      titleHeight = metrics.titleHeightPx,
+      subtitleHeight = metrics.subtitleHeightPx,
       lineHeight = lineHeight,
-      dataRowHeight = lineHeight,
+      dataRowHeight = metrics.rowHeightPx,
       gaugeThickness = gaugeThickness,
       buttonHeight = buttonHeight,
       badgeHeight = badgeHeight,
-      laserModuleHeight = nativeLike and clamp(math.floor(lineHeight * 0.9), 6, 14) or ((density == "small") and 1 or 2),
-      laserModuleWidth = nativeLike and clamp(math.floor(lineHeight * 0.8), 5, 10) or 3,
+      laserModuleHeight = metrics.laserModuleHeightPx,
+      laserModuleWidth = metrics.laserModuleWidthPx,
     },
     text = {
       normalize = normalizeText,

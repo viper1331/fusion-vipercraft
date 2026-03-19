@@ -3049,13 +3049,15 @@ function M.run(options)
         drawStats.nativeW = tonumber(pixelW) or 0
         drawStats.nativeH = tonumber(pixelH) or 0
         renderSource = "toms_gpu"
-        local useNativeDebug = false
+        local useNativeDebug = state.tomUiDiagnosticMode == true
+          and tostring(hw.monitorBackendFamily or "") == "toms_native"
+          and type(nativeSurface) == "table"
         tomRenderCtx = {
           backend = tostring(hw.monitorBackend or "toms_gpu"),
           backendFamily = tostring(hw.monitorBackendFamily or "toms_native"),
           wrapperType = tostring(hw.monitorWrapperType or "toms_native"),
           monitorName = tostring(hw.monitorName or "unknown"),
-          inputSource = tostring(source or "monitor"),
+          inputSource = tostring(source == "monitor" and "monitor_touch_channel" or source or "terminal"),
           renderSource = "toms_gpu",
           renderSurfaceType = tostring(type(renderSurface)),
           displaySurface = surface,
@@ -3072,7 +3074,7 @@ function M.run(options)
           sourcePath = "core.app.drawUI.drawSurface -> ui.toms.fusion_panel.render",
           wrappedPath = "io.monitor.setupMonitor -> io.display_backend.createSurface",
           sourceResolvedBy = "core.app.drawUI.drawSurface",
-          termRedirectTarget = tostring(source or "monitor"),
+          termRedirectTarget = tostring(renderSource == "toms_gpu" and "display_surface:toms_native" or source or "terminal"),
         }
       end
 

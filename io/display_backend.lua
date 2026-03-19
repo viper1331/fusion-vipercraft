@@ -1031,6 +1031,14 @@ local function buildTomNativeSurface(gpu, cfg, runtimeInfo, opts)
     end
   end
 
+  local charWidthEstimate = math.max(4, math.floor((lineHeight * 0.62) + 0.5))
+  if type(gpu) == "table" and type(gpu.getTextLength) == "function" then
+    local okW, wText = pcall(gpu.getTextLength, "W")
+    if okW and tonumber(wText) then
+      charWidthEstimate = math.max(1, math.floor((tonumber(wText) or 1) + 0.5))
+    end
+  end
+
   local scale = sanitizeTomScale(cfg and cfg.monitorScale)
   local palette = {}
   for k, v in pairs(DEFAULT_PALETTE) do
@@ -1040,6 +1048,17 @@ local function buildTomNativeSurface(gpu, cfg, runtimeInfo, opts)
   local function colorArgb(colorValue, fallbackKey)
     local key = INVERTED_COLORS[tonumber(colorValue) or 0] or fallbackKey
     return palette[key] or DEFAULT_PALETTE[fallbackKey]
+  end
+
+  local function normalizeArgb(colorValue, fallbackKey)
+    local n = tonumber(colorValue)
+    if n and n > 0xFFFF then
+      if n < 0 then
+        n = 0x100000000 + n
+      end
+      return math.floor(n)
+    end
+    return colorArgb(n or colors[fallbackKey] or colors.white, fallbackKey)
   end
 
   local function callGpu(methodName, ...)
@@ -1226,6 +1245,38 @@ local function buildTomNativeSurface(gpu, cfg, runtimeInfo, opts)
     drawText(cursorX, cursorY, raw, argbFg)
     cursorX = cursorX + #raw
   end
+
+  function surface.getTextLength(text)
+    return textPixelWidth(text)
+  end
+
+  function surface.filledRectangle(x, y, w, h, color)
+    fillRect(x, y, w, h, normalizeArgb(color, "black"))
+  end
+
+  function surface.fillRect(x, y, w, h, color)
+    fillRect(x, y, w, h, normalizeArgb(color, "black"))
+  end
+
+  function surface.fill(color)
+    fillRect(1, 1, pxW, pxH, normalizeArgb(color, "black"))
+  end
+
+  function surface.drawText(a, b, c, d)
+    local x, y, text, color = nil, nil, nil, nil
+    if type(a) == "number" and type(b) == "number" and type(c) == "string" then
+      x, y, text, color = a, b, c, d
+    elseif type(a) == "string" and type(b) == "number" and type(c) == "number" then
+      x, y, text, color = b, c, a, d
+    elseif type(a) == "number" and type(b) == "number" and type(c) == "number" and type(d) == "string" then
+      x, y, text, color = a, b, d, c
+    else
+      return false
+    end
+    drawText(x, y, text, normalizeArgb(color, "white"))
+    return true
+  end
+  surface.drawString = surface.drawText
 
   function surface.blit(text, fg, bg)
     text = tostring(text or "")
@@ -1414,6 +1465,11 @@ local function buildTomNativeSurface(gpu, cfg, runtimeInfo, opts)
     setSizeMode = runtimeInfo and runtimeInfo.setSizeMode or "none",
     targetSize = runtimeInfo and runtimeInfo.targetSize or nil,
     monitorConversion = false,
+    charW = charWidthEstimate,
+    charH = lineHeight,
+    textGridWidth = math.max(1, math.floor(pxW / math.max(1, charWidthEstimate))),
+    textGridHeight = math.max(1, math.floor(pxH / math.max(1, lineHeight))),
+    textGridInformational = true,
   }
 end
 

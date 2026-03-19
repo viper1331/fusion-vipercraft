@@ -66,6 +66,25 @@ local function makeSpaces(count)
   return string.rep(" ", count)
 end
 
+local COLOR_ARGB = {
+  [colors.white] = 0xFFF0F0F0,
+  [colors.orange] = 0xFFF2B233,
+  [colors.magenta] = 0xFFE57FD8,
+  [colors.lightBlue] = 0xFF99B2F2,
+  [colors.yellow] = 0xFFDEDE6C,
+  [colors.lime] = 0xFF7FCC19,
+  [colors.pink] = 0xFFF2B2CC,
+  [colors.gray] = 0xFF4C4C4C,
+  [colors.lightGray] = 0xFF999999,
+  [colors.cyan] = 0xFF4C99B2,
+  [colors.purple] = 0xFFB266E5,
+  [colors.blue] = 0xFF3366CC,
+  [colors.brown] = 0xFF7F664C,
+  [colors.green] = 0xFF57A64E,
+  [colors.red] = 0xFFCC4C4C,
+  [colors.black] = 0xFF111111,
+}
+
 function M.new(options)
   options = type(options) == "table" and options or {}
   local target = options.target or term.current()
@@ -85,10 +104,14 @@ function M.new(options)
   local palette = type(theme.palette) == "table" and theme.palette or {}
   local spacing = type(theme.spacing) == "table" and theme.spacing or {}
   local sizes = type(theme.sizes) == "table" and theme.sizes or {}
+  local metrics = type(theme.metrics) == "table" and theme.metrics or {}
+  local nativePixels = metrics.nativePixels == true
   local lineHeight = math.max(1, asInt(sizes.lineHeight, 1))
   local rowStep = math.max(1, asInt(sizes.dataRowHeight or lineHeight, lineHeight))
   local panelHeaderH = math.max(1, asInt(sizes.panelHeaderHeight, 1))
   local rowPadding = math.max(0, asInt(spacing.rowPadding, 0))
+  local fontCharWidth = math.max(1, asInt(metrics.fontCharWidthPx or 1, 1))
+  local fontCharHeight = math.max(1, asInt(metrics.fontCharHeightPx or lineHeight, lineHeight))
   local textRules = type(theme.text) == "table" and theme.text or {}
   local truncate = type(textRules.truncate) == "function"
     and textRules.truncate
@@ -104,11 +127,79 @@ function M.new(options)
     return truncate(tostring(text or ""), math.max(0, asInt(maxLen, 0)))
   end
 
+  local function colorToArgb(colorValue, fallback)
+    local n = tonumber(colorValue)
+    if n and n > 0xFFFF then
+      return math.floor(n)
+    end
+    if n and COLOR_ARGB[n] then
+      return COLOR_ARGB[n]
+    end
+    local fb = tonumber(fallback)
+    if fb and fb > 0xFFFF then
+      return math.floor(fb)
+    end
+    if fb and COLOR_ARGB[fb] then
+      return COLOR_ARGB[fb]
+    end
+    return COLOR_ARGB[colors.white]
+  end
+
+  local function callDrawVariants(methodName, variants)
+    local fn = type(target) == "table" and target[methodName] or nil
+    if type(fn) ~= "function" then
+      return false
+    end
+    for _, args in ipairs(variants or {}) do
+      local ok, result = pcall(fn, table.unpack(args))
+      if ok and result ~= false then
+        return true
+      end
+    end
+    return false
+  end
+
+  local function measureTextPixels(textValue)
+    local textRaw = tostring(textValue or "")
+    if textRaw == "" then
+      return 0
+    end
+    if type(target) == "table" and type(target.getTextLength) == "function" then
+      local okLen, len = pcall(target.getTextLength, textRaw)
+      if okLen and tonumber(len) then
+        return math.max(1, math.floor((tonumber(len) or 0) + 0.5))
+      end
+    end
+    return math.max(1, #textRaw * fontCharWidth)
+  end
+
   -- Safe drawing helpers inherited from fusion_panel_v2 philosophy:
   -- clip before drawing, never assume coordinates are valid, never crash on boundaries.
   local function safeFilledRect(x, y, w, h, bg)
     local clipped = fitRect(rect(x, y, w, h), width, height)
     if not clipped then return end
+    if nativePixels then
+      local fillColor = colorToArgb(bg or palette.panelBg or colors.black, palette.panelBg or colors.black)
+      if callDrawVariants("filledRectangle", {
+        { clipped.x, clipped.y, clipped.w, clipped.h, fillColor },
+        { clipped.x, clipped.y, clipped.x2, clipped.y2, fillColor },
+      }) then
+        return
+      end
+      if callDrawVariants("fillRect", {
+        { clipped.x, clipped.y, clipped.w, clipped.h, fillColor },
+        { clipped.x, clipped.y, clipped.x2, clipped.y2, fillColor },
+      }) then
+        return
+      end
+      if clipped.x == 1 and clipped.y == 1 and clipped.w >= width and clipped.h >= height then
+        if callDrawVariants("fill", {
+          { fillColor },
+        }) then
+          return
+        end
+      end
+    end
     local fillLine = makeSpaces(clipped.w)
     if fillLine == "" then return end
     if type(target.setBackgroundColor) == "function" and bg ~= nil then
@@ -141,31 +232,66 @@ function M.new(options)
     if yy < 1 or yy > height then return end
     local xx = asInt(x, 1)
     local textRaw = tostring(textValue or "")
-    local widthLimit = asInt(maxWidth, #textRaw)
+    local widthLimitRaw = asInt(maxWidth, nativePixels and measureTextPixels(textRaw) or #textRaw)
+    local widthLimit = widthLimitRaw
+    if nativePixels then
+      widthLimit = math.max(1, math.floor(widthLimitRaw / math.max(1, fontCharWidth)))
+    end
     if widthLimit <= 0 then return end
 
     local out = clipText(textRaw, widthLimit)
     local outLen = #out
     if outLen <= 0 then return end
+    local textSpan = nativePixels and measureTextPixels(out) or outLen
+    local limitSpan = nativePixels and widthLimitRaw or widthLimit
 
     if align == "center" then
-      xx = xx + math.floor((widthLimit - outLen) / 2)
+      xx = xx + math.floor((limitSpan - textSpan) / 2)
     elseif align == "right" then
-      xx = xx + (widthLimit - outLen)
+      xx = xx + (limitSpan - textSpan)
     end
 
-    if xx > width or (xx + outLen - 1) < 1 then return end
+    if xx > width or (xx + textSpan - 1) < 1 then return end
     if xx < 1 then
       local cut = 1 - xx
-      if cut >= outLen then return end
-      out = out:sub(cut + 1)
+      local cutChars = nativePixels and math.floor(cut / math.max(1, fontCharWidth)) or cut
+      if cutChars >= outLen then return end
+      out = out:sub(cutChars + 1)
       outLen = #out
+      textSpan = nativePixels and measureTextPixels(out) or outLen
       xx = 1
     end
-    if xx + outLen - 1 > width then
-      out = out:sub(1, width - xx + 1)
+    if xx + textSpan - 1 > width then
+      local remain = width - xx + 1
+      local maxChars = nativePixels and math.max(1, math.floor(remain / math.max(1, fontCharWidth))) or remain
+      out = out:sub(1, maxChars)
       outLen = #out
       if outLen <= 0 then return end
+      textSpan = nativePixels and measureTextPixels(out) or outLen
+    end
+
+    if bg ~= nil then
+      safeFilledRect(xx, yy, math.max(1, textSpan), math.max(1, nativePixels and fontCharHeight or 1), bg)
+    end
+
+    if nativePixels then
+      local textColor = colorToArgb(fg or palette.textPrimary or colors.white, palette.textPrimary or colors.white)
+      if callDrawVariants("drawText", {
+        { xx, yy, out, textColor },
+        { out, xx, yy, textColor },
+        { xx, yy, out },
+        { out, xx, yy },
+      }) then
+        return
+      end
+      if callDrawVariants("drawString", {
+        { xx, yy, out, textColor },
+        { out, xx, yy, textColor },
+        { xx, yy, out },
+        { out, xx, yy },
+      }) then
+        return
+      end
     end
 
     if type(target.setBackgroundColor) == "function" and bg ~= nil then
@@ -678,7 +804,8 @@ function M.new(options)
       local seg = list[i]
       local textValue = clipText(seg.text or "", remaining)
       safeText(x, y, textValue, seg.tone or palette.textMuted or colors.lightGray, bg, remaining, "left")
-      x = x + #textValue + gap
+      local step = nativePixels and measureTextPixels(textValue) or #textValue
+      x = x + step + gap
       remaining = (b.x + b.w - 1) - x
     end
   end
