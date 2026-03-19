@@ -63,6 +63,14 @@ local function clamp(minValue, value, maxValue)
   return value
 end
 
+local function argbToRgb(packed)
+  local n = tonumber(packed) or 0
+  if n < 0 then
+    n = 0x100000000 + n
+  end
+  return math.floor(n % 0x1000000)
+end
+
 local function readTermSize(obj)
   if not obj or type(obj.getSize) ~= "function" then
     return 0, 0
@@ -369,20 +377,59 @@ local function buildTomTermSurface(gpu, cfg)
 
   local function drawGlyph(x, y, char, color)
     if char == " " then return end
+    local rgbColor = argbToRgb(color)
+    local fgIndex = textColor
+
+    -- Certaines implementations Tom exigent d'abord une couleur globale.
+    callGpuVariants("setForeground", {
+      { color },
+      { rgbColor },
+      { fgIndex },
+    })
+    callGpuVariants("setTextColor", {
+      { color },
+      { rgbColor },
+      { fgIndex },
+    })
+
     if callGpuVariants("drawText", {
       { x, y, char, color, -1, scale },
+      { x, y, char, rgbColor, -1, scale },
       { char, x, y, color, -1, scale },
+      { char, x, y, rgbColor, -1, scale },
+      { x, y, color, char, -1, scale },
+      { x, y, rgbColor, char, -1, scale },
       { char, x, y, color },
+      { char, x, y, rgbColor },
       { x, y, char, color },
+      { x, y, char, rgbColor },
+      { x, y, color, char },
+      { x, y, rgbColor, char },
+      { x, y, char },
+      { char, x, y },
     }) then return end
     if callGpuVariants("drawString", {
       { x, y, char, color },
+      { x, y, char, rgbColor },
       { char, x, y, color },
+      { char, x, y, rgbColor },
+      { x, y, color, char },
+      { x, y, rgbColor, char },
+      { x, y, char },
+      { char, x, y },
     }) then return end
     callGpuVariants("drawChar", {
       { x, y, string.byte(char), color, -1, scale },
+      { x, y, char, color, -1, scale },
+      { x, y, char, rgbColor, -1, scale },
       { string.byte(char), x, y, color },
+      { char, x, y, color },
+      { char, x, y, rgbColor },
       { x, y, string.byte(char), color },
+      { x, y, char, color },
+      { x, y, char, rgbColor },
+      { x, y, char },
+      { char, x, y },
     })
   end
 
