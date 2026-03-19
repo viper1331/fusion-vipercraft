@@ -1,4 +1,54 @@
 local function loadDisplayBackend()
+  local function tryLoadFromPath(path)
+    if type(path) ~= "string" or path == "" then
+      return nil
+    end
+    if not (fs and type(fs.exists) == "function" and fs.exists(path) and (not fs.isDir or not fs.isDir(path))) then
+      return nil
+    end
+    if type(dofile) ~= "function" then
+      return nil
+    end
+    local ok, mod = pcall(dofile, path)
+    if ok and type(mod) == "table" then
+      return mod
+    end
+    return nil
+  end
+
+  local function collectCandidatePaths()
+    local out = {
+      "io/display_backend.lua",
+      "/io/display_backend.lua",
+      "../io/display_backend.lua",
+    }
+
+    if type(shell) == "table" and type(shell.getRunningProgram) == "function"
+      and fs and type(fs.getDir) == "function" and type(fs.combine) == "function" then
+      local running = tostring(shell.getRunningProgram() or "")
+      local runningDir = fs.getDir(running)
+      if runningDir ~= "" then
+        out[#out + 1] = fs.combine(runningDir, "io/display_backend.lua")
+        out[#out + 1] = fs.combine(runningDir, "../io/display_backend.lua")
+      end
+    end
+
+    if type(debug) == "table" and type(debug.getinfo) == "function"
+      and fs and type(fs.getDir) == "function" and type(fs.combine) == "function" then
+      local info = debug.getinfo(1, "S")
+      local source = info and info.source or ""
+      if type(source) == "string" and source:sub(1, 1) == "@" then
+        local thisPath = source:sub(2)
+        local thisDir = fs.getDir(thisPath)
+        if thisDir ~= "" then
+          out[#out + 1] = fs.combine(thisDir, "display_backend.lua")
+        end
+      end
+    end
+
+    return out
+  end
+
   if type(require) == "function" then
     local ok, mod = pcall(require, "io.display_backend")
     if ok and type(mod) == "table" then
@@ -6,10 +56,14 @@ local function loadDisplayBackend()
     end
   end
 
-  if type(dofile) == "function" and fs and type(fs.exists) == "function" and fs.exists("io/display_backend.lua") then
-    local ok, mod = pcall(dofile, "io/display_backend.lua")
-    if ok and type(mod) == "table" then
-      return mod
+  local seen = {}
+  for _, path in ipairs(collectCandidatePaths()) do
+    if not seen[path] then
+      seen[path] = true
+      local mod = tryLoadFromPath(path)
+      if mod then
+        return mod
+      end
     end
   end
 
