@@ -141,7 +141,36 @@ function M.run()
     deuterium = UI_PALETTE.buttonFuelD,
     dtFuel = UI_PALETTE.buttonFuelDT,
     inactive = UI_PALETTE.frameDim,
+    variant = "cc",
   }
+
+  local function syncStylesFromPalette()
+    styles.panel.default = {
+      bg = C.panelDark,
+      header = C.headerBg,
+      border = C.border,
+      trim = C.panelDark,
+      accent = C.info,
+      text = C.headerText or C.text,
+    }
+    styles.panel.accent = {
+      bg = C.panelDark,
+      header = C.headerBg,
+      border = C.borderDim,
+      trim = C.panelDark,
+      accent = C.info,
+      text = C.headerText or C.text,
+    }
+    styles.button.primary = { face = C.btnAction, border = C.borderDim, text = C.btnText }
+    styles.button.secondary = { face = C.panelMid, border = C.borderDim, text = C.btnText }
+    styles.button.danger = { face = C.bad, border = C.borderDim, text = C.btnText }
+    styles.button.fuelT = { face = C.tritium, border = C.borderDim, text = C.btnText }
+    styles.button.fuelD = { face = C.deuterium, border = C.borderDim, text = C.btnText }
+    styles.button.fuelDT = { face = C.dtFuel, border = C.borderDim, text = C.btnText }
+    styles.button.success = { face = C.ok, border = C.borderDim, text = C.btnText }
+    styles.button.disabled = { face = C.panel, border = C.inactive, text = C.dim }
+  end
+  syncStylesFromPalette()
 
   local function colorHex(c)
     return colors.toBlit(c)
@@ -268,9 +297,33 @@ function M.run()
     ui.write(x, y, text, tc or C.text, bc)
   end
 
-  local function applyPremiumPalette()
-    Theme.applyPremiumPalette(C)
+  local function applyPaletteForVariant(variant)
+    if variant == "tom" then
+      Theme.applyTomPalette(C)
+    else
+      Theme.applyPremiumPalette(C)
+    end
+    syncStylesFromPalette()
+
     if not term.isColor or not term.isColor() then return end
+    if variant == "tom" then
+      -- Palette neon sombre pour l'UI Tom dediee.
+      pcall(term.setPaletteColor, colors.black, 0.03, 0.04, 0.10)
+      pcall(term.setPaletteColor, colors.gray, 0.26, 0.29, 0.40)
+      pcall(term.setPaletteColor, colors.lightGray, 0.72, 0.76, 0.88)
+      pcall(term.setPaletteColor, colors.white, 0.94, 0.97, 1.00)
+      pcall(term.setPaletteColor, colors.blue, 0.13, 0.22, 0.56)
+      pcall(term.setPaletteColor, colors.lightBlue, 0.35, 0.63, 0.96)
+      pcall(term.setPaletteColor, colors.cyan, 0.23, 0.84, 0.94)
+      pcall(term.setPaletteColor, colors.green, 0.22, 0.74, 0.30)
+      pcall(term.setPaletteColor, colors.lime, 0.60, 0.97, 0.32)
+      pcall(term.setPaletteColor, colors.red, 0.96, 0.28, 0.35)
+      pcall(term.setPaletteColor, colors.orange, 0.97, 0.67, 0.12)
+      pcall(term.setPaletteColor, colors.yellow, 0.99, 0.88, 0.28)
+      pcall(term.setPaletteColor, colors.purple, 0.72, 0.42, 0.97)
+      return
+    end
+
     pcall(term.setPaletteColor, colors.black, 0.08, 0.08, 0.08)
     pcall(term.setPaletteColor, colors.gray, 0.53, 0.53, 0.53)
     pcall(term.setPaletteColor, colors.lightGray, 0.88, 0.86, 0.82)
@@ -284,6 +337,10 @@ function M.run()
     pcall(term.setPaletteColor, colors.orange, 0.94, 0.72, 0.34)
     pcall(term.setPaletteColor, colors.yellow, 0.95, 0.86, 0.43)
     pcall(term.setPaletteColor, colors.purple, 0.86, 0.50, 0.90)
+  end
+
+  local function applyPremiumPalette()
+    applyPaletteForVariant("cc")
   end
 
   local function centerText(y, text, tc, bc)
@@ -445,6 +502,20 @@ function M.run()
     if w < 4 or h < 3 then return end
     local skin = styles.panel.default
     local borderColor = accent or skin.border
+    if C.variant == "tom" and w >= 8 and h >= 5 then
+      ui.frame(x, y, w, h, C.borderDim, C.panelDark)
+      ui.frame(x + 1, y + 1, w - 2, h - 2, borderColor, C.panelDark)
+      if w > 4 and h > 4 then
+        ui.fill(x + 2, y + 2, w - 4, h - 3, C.panelDark)
+      end
+      if title and #title > 0 and w > 12 then
+        local t = shortText(string.upper(title), w - 8)
+        ui.hline(x + 2, y + 1, w - 4, C.headerBg)
+        ui.write(x + 3, y + 1, t, C.headerText, C.headerBg)
+      end
+      return
+    end
+
     ui.frame(x, y, w, h, borderColor, skin.bg)
     if w > 2 and h > 2 then
       ui.fill(x + 1, y + 1, w - 2, h - 2, skin.bg)
@@ -2155,7 +2226,8 @@ function M.run()
 
   function drawButtonPressedSprite(button, style)
     local skin = style or resolveButtonStyle(button)
-    local pressed = { face = UI_PALETTE.buttonPressed, border = skin.border or C.border, text = skin.text }
+    local pressedFace = (C.variant == "tom") and C.panelInner or C.panel
+    local pressed = { face = pressedFace, border = skin.border or C.border, text = skin.text }
     return drawButtonSprite(button, pressed)
   end
 
@@ -2170,7 +2242,7 @@ function M.run()
   function drawTabSprite(x, y, w, h, label, isActive, isPressed)
     local face = isActive and C.info or C.panelMid
     if isPressed then
-      face = C.panel
+      face = (C.variant == "tom") and C.panelInner or C.panel
     end
 
     ui.fill(x, y, w, h, face)
@@ -2784,6 +2856,12 @@ function M.run()
   local function drawUI()
     local function drawSurface(source, surface)
       term.redirect(surface)
+      local variant = "cc"
+      if source == "monitor" and hw.monitorBackend == "toms_gpu" then
+        variant = "tom"
+      end
+      applyPaletteForVariant(variant)
+      state.uiVariant = variant
       currentDrawSource = source
       clearHitboxes(source)
       state.controlBounds = nil

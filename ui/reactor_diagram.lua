@@ -133,6 +133,7 @@ function M.build(api)
     local configuredLaserCount = math.max(1, math.floor(tonumber(CFG.laserCount) or 1))
     local detectedLaserCount = math.max(0, math.floor(tonumber(state.laserDetectedCount) or 0))
     local displayedLaserCount = configuredLaserCount
+    local tomVariant = C.variant == "tom"
 
     local laserStateTone = C.dim
     if laserState == "READY" then
@@ -452,14 +453,20 @@ function M.build(api)
     -- 1) ligne d'information en haut
     -- 2) bloc laser (cartouche + modules) juste en dessous
     -- 3) reacteur ensuite
-    local moduleW = clamp(math.min(gw * cellW - 2, 14), 10, 14)
+    local moduleW = tomVariant
+      and clamp(math.min(gw * cellW - 2, 18), 12, 18)
+      or clamp(math.min(gw * cellW - 2, 14), 10, 14)
     if moduleW % 2 ~= 0 then moduleW = moduleW - 1 end
     local beamX = rx + (gcx - 1) * cellW
     local moduleX = clamp(beamX - math.floor(moduleW / 2) + 1, x + 2, x + w - moduleW - 1)
     -- Hierarchie visuelle LAS forcee:
     -- niveau 1 (info) en haut, niveau 2 (bloc laser) juste dessous.
-    local infoY = clamp(ry - 11, y + 1, ry - 7)
-    local moduleY = clamp(infoY + 2, y + 3, ry - 4)
+    local infoY = tomVariant
+      and clamp(ry - 13, y + 2, ry - 8)
+      or clamp(ry - 11, y + 1, ry - 7)
+    local moduleY = tomVariant
+      and clamp(infoY + 2, y + 4, ry - 5)
+      or clamp(infoY + 2, y + 3, ry - 4)
     local gapTop = moduleY + 1
     local gapBottom = ry - 1
     local moduleBg = C.panelMid
@@ -492,6 +499,10 @@ function M.build(api)
       writeAt(gxCol, moduleY, " ", C.text, moduleBg)
     end
     writeAt(moduleX + math.floor((moduleW - #moduleLabel) / 2), moduleY, moduleLabel, moduleFg, moduleBg)
+    if tomVariant and moduleY > y + 2 then
+      -- Separation franche entre la ligne d'info LAS et le bloc LAS.
+      writeAt(moduleX, moduleY - 1, string.rep("-", moduleW), C.borderDim, C.panelDark)
+    end
 
     -- Representation LAS: 1 petit module = 1 laser.
     -- Les modules sont empiles verticalement (plus d'alignement horizontal).
@@ -623,7 +634,8 @@ function M.build(api)
       if infoSepY >= y + 2 then
         local sepW = clamp(moduleW + 6, 14, math.max(14, gw * cellW - 4))
         local sepX = clamp(beamX - math.floor(sepW / 2) + 1, x + 2, x + w - sepW - 1)
-        writeAt(sepX, infoSepY, string.rep("-", sepW), C.borderDim, C.panelDark)
+        local sepChar = tomVariant and "=" or "-"
+        writeAt(sepX, infoSepY, string.rep(sepChar, sepW), C.borderDim, C.panelDark)
       end
       writeAt(laserTxtX, infoY, laserTxt, laserTone, C.panelDark)
     elseif moduleX + moduleW + 1 <= x + w - 2 then
@@ -635,7 +647,9 @@ function M.build(api)
     -- - T PLAS ancree visuellement dans la zone coeur.
     -- - T STRUCT ancree sur le contour reacteur.
     -- Traces orthogonales uniquement (pas de diagonales).
-    local tempY = math.min(math.max(y + 2, ry - 2), y + h - 4)
+    local tempY = tomVariant
+      and math.min(math.max(y + 5, ry - 2), y + h - 4)
+      or math.min(math.max(y + 2, ry - 2), y + h - 4)
     if tempY >= y + 2 and tempY <= y + h - 4 and w >= 50 then
       local plasText = "T PLAS " .. (state.reactorPresent and formatTemperature(state.plasmaTemp, { compact = true, decimals = 2 }) or "N/A")
       local structText = "T STRUCT " .. (state.reactorPresent and formatTemperature(state.caseTemp, { compact = true, decimals = 2 }) or "N/A")

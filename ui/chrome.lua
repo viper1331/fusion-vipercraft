@@ -99,6 +99,20 @@ function M.build(api)
       return
     end
 
+    if C.variant == "tom" then
+      local leftText = shortText("FUSION SUPERVISOR", math.max(8, tw - 4))
+      local centerText = shortText(string.upper(phase), math.max(8, tw - 4))
+      local alertKey = critical and "ALERT" or "INFO"
+      local alertValue = shortText(firstWarn, 24)
+      local rightText = alertKey .. " " .. alertValue
+
+      hline(1, 1, tw, C.headerBg)
+      writeAt(2, 1, leftText, C.headerText, C.headerBg)
+      writeAt(math.max(2, math.floor((tw - #centerText) / 2)), 1, centerText, phaseColor(phase), C.headerBg)
+      writeAt(math.max(2, tw - #rightText - 1), 1, rightText, critical and (pulse and C.bad or C.warn) or C.info, C.headerBg)
+      return
+    end
+
     local segments
     if tw < 54 then
       segments = {
@@ -146,6 +160,19 @@ function M.build(api)
       { key = "FUEL", value = "D " .. formatFuelLevel(state.deuteriumAmount) .. " T " .. formatFuelLevel(state.tritiumAmount), tone = C.fuel },
       { key = "OUT", value = shortText(tostring(hw.monitorName or "term"), 10), tone = C.info },
     }
+
+    if C.variant == "tom" then
+      local footerText = table.concat({
+        "ACT " .. shortText(state.lastAction or "NONE", 22),
+        "VIEW " .. viewCode,
+        "PHS " .. shortText(phase, 16),
+        "LAS " .. shortText(laserText, 14),
+        "GRID " .. (state.energyKnown and string.format("%3.0f%%", state.energyPct) or "N/A"),
+      }, " | ")
+      hline(1, th, tw, C.footerBg)
+      writeAt(2, th, shortText(footerText, tw - 2), C.headerText or C.text, C.footerBg)
+      return
+    end
 
     local compact
     if tw < 42 then
