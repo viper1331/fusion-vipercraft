@@ -143,12 +143,15 @@ function M.run(ctx)
   local nativeSurface = makeNativeTomSurface(448, 384)
   local renderCtx = {
     backend = "toms_gpu",
+    backendFamily = "toms_native",
+    wrapperType = "toms_native_debug",
     inputSource = "monitor",
     renderSource = "toms_gpu",
     displaySurface = {},
     nativeSurface = nativeSurface,
-    displayWidth = 74,
-    displayHeight = 76,
+    displayWidth = 448,
+    displayHeight = 384,
+    runtimeArea = 448 * 384,
     nativeWidth = 448,
     nativeHeight = 384,
     useNativeDebug = true,
@@ -193,8 +196,8 @@ function M.run(ctx)
     fail(211, "Debug report runtime dimensions are not 448x384")
     return
   end
-  if not string.find(body, "Display dimensions%s+74x76") then
-    fail(212, "Debug report missing wrapped display dimensions 74x76")
+  if not string.find(body, "Display dimensions%s+448x384") then
+    fail(212, "Debug report missing wrapped display dimensions 448x384")
     return
   end
   if not string.find(body, "Native dimensions%s+448x384") then

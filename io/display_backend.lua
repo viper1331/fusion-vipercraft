@@ -1006,7 +1006,427 @@ local function buildTomTermSurface(gpu, cfg, runtimeInfo)
   }
 end
 
-function M.createSurface(candidate, cfg)
+local function buildTomNativeSurface(gpu, cfg, runtimeInfo, opts)
+  opts = type(opts) == "table" and opts or {}
+  runtimeInfo = type(runtimeInfo) == "table" and runtimeInfo or {}
+  local pxW = tonumber(runtimeInfo.pxW) or 0
+  local pxH = tonumber(runtimeInfo.pxH) or 0
+  if pxW <= 0 or pxH <= 0 then
+    local rw, rh = readTomResolution(gpu)
+    pxW = tonumber(rw) or pxW
+    pxH = tonumber(rh) or pxH
+  end
+  pxW = math.max(1, math.floor(pxW))
+  pxH = math.max(1, math.floor(pxH))
+
+  local lineHeight = 1
+  for _, methodName in ipairs({ "getFontHeight", "getTextHeight", "getCharHeight" }) do
+    local fn = type(gpu) == "table" and gpu[methodName] or nil
+    if type(fn) == "function" then
+      local okH, h = pcall(fn)
+      if okH and tonumber(h) then
+        lineHeight = math.max(1, math.floor(tonumber(h) + 0.5))
+        break
+      end
+    end
+  end
+
+  local scale = sanitizeTomScale(cfg and cfg.monitorScale)
+  local palette = {}
+  for k, v in pairs(DEFAULT_PALETTE) do
+    palette[k] = v
+  end
+
+  local function colorArgb(colorValue, fallbackKey)
+    local key = INVERTED_COLORS[tonumber(colorValue) or 0] or fallbackKey
+    return palette[key] or DEFAULT_PALETTE[fallbackKey]
+  end
+
+  local function callGpu(methodName, ...)
+    local fn = type(gpu) == "table" and gpu[methodName] or nil
+    if type(fn) ~= "function" then
+      return false
+    end
+    local ok = pcall(fn, ...)
+    return ok
+  end
+
+  local function callGpuVariants(methodName, variants)
+    for _, args in ipairs(variants or {}) do
+      if callGpu(methodName, table.unpack(args)) then
+        return true
+      end
+    end
+    return false
+  end
+
+  local function clampRect(x, y, w, h)
+    local x1 = math.floor(tonumber(x) or 1)
+    local y1 = math.floor(tonumber(y) or 1)
+    local ww = math.max(0, math.floor(tonumber(w) or 0))
+    local hh = math.max(0, math.floor(tonumber(h) or 0))
+    if ww <= 0 or hh <= 0 then
+      return nil
+    end
+    local x2 = x1 + ww - 1
+    local y2 = y1 + hh - 1
+    if x2 < 1 or y2 < 1 or x1 > pxW or y1 > pxH then
+      return nil
+    end
+    if x1 < 1 then x1 = 1 end
+    if y1 < 1 then y1 = 1 end
+    if x2 > pxW then x2 = pxW end
+    if y2 > pxH then y2 = pxH end
+    local cw = (x2 - x1) + 1
+    local ch = (y2 - y1) + 1
+    if cw <= 0 or ch <= 0 then
+      return nil
+    end
+    return x1, y1, cw, ch, x2, y2
+  end
+
+  local function fillRect(x, y, w, h, color)
+    local x1, y1, cw, ch, x2, y2 = clampRect(x, y, w, h)
+    if not x1 then return end
+    if callGpuVariants("filledRectangle", {
+      { x1, y1, cw, ch, color },
+      { x1, y1, x2, y2, color },
+    }) then return end
+    if callGpuVariants("fillRect", {
+      { x1, y1, cw, ch, color },
+      { x1, y1, x2, y2, color },
+    }) then return end
+    if x1 == 1 and y1 == 1 and cw >= pxW and ch >= pxH then
+      if callGpu("fill", color) then return end
+    end
+  end
+
+  local function textPixelWidth(text)
+    local raw = tostring(text or "")
+    if type(gpu) == "table" and type(gpu.getTextLength) == "function" then
+      local ok, pixelW = pcall(gpu.getTextLength, raw)
+      if ok and tonumber(pixelW) then
+        return math.max(1, math.floor(tonumber(pixelW) + 0.5))
+      end
+    end
+    return math.max(1, #raw)
+  end
+
+  local function drawText(x, y, text, argbColor)
+    local xx = math.floor(tonumber(x) or 1)
+    local yy = math.floor(tonumber(y) or 1)
+    local raw = tostring(text or "")
+    if raw == "" then return end
+    if yy < 1 or yy > pxH then return end
+    local color = tonumber(argbColor) or DEFAULT_PALETTE.white
+    local rgb = argbToRgb(color)
+    if callGpuVariants("drawText", {
+      { xx, yy, raw, color, -1, scale },
+      { xx, yy, raw, rgb, -1, scale },
+      { raw, xx, yy, color, -1, scale },
+      { raw, xx, yy, rgb, -1, scale },
+      { xx, yy, color, raw },
+      { xx, yy, rgb, raw },
+      { xx, yy, raw, color },
+      { xx, yy, raw, rgb },
+      { raw, xx, yy, color },
+      { raw, xx, yy, rgb },
+      { xx, yy, raw },
+      { raw, xx, yy },
+    }) then return end
+    if callGpuVariants("drawString", {
+      { xx, yy, raw, color },
+      { xx, yy, raw, rgb },
+      { raw, xx, yy, color },
+      { raw, xx, yy, rgb },
+      { xx, yy, color, raw },
+      { xx, yy, rgb, raw },
+      { xx, yy, raw },
+      { raw, xx, yy },
+    }) then return end
+    for i = 1, #raw do
+      local ch = raw:sub(i, i)
+      callGpuVariants("drawChar", {
+        { xx + i - 1, yy, string.byte(ch), color, -1, scale },
+        { xx + i - 1, yy, ch, color, -1, scale },
+        { xx + i - 1, yy, ch, rgb, -1, scale },
+      })
+    end
+  end
+
+  local function syncGpu()
+    if callGpu("sync") then return end
+    if callGpu("flush") then return end
+    callGpu("update")
+  end
+
+  local cursorX, cursorY = 1, 1
+  local textColor, bgColor = colors.white, colors.black
+  local cursorBlink = false
+
+  local surface = {}
+
+  function surface.getSize()
+    return pxW, pxH
+  end
+
+  function surface.setCursorPos(x, y)
+    cursorX = math.floor(tonumber(x) or cursorX)
+    cursorY = math.floor(tonumber(y) or cursorY)
+  end
+
+  function surface.getCursorPos()
+    return cursorX, cursorY
+  end
+
+  function surface.setCursorBlink(enabled)
+    cursorBlink = not not enabled
+  end
+
+  function surface.getCursorBlink()
+    return cursorBlink
+  end
+
+  function surface.setTextColor(color)
+    textColor = tonumber(color) or textColor
+  end
+  surface.setTextColour = surface.setTextColor
+
+  function surface.getTextColor()
+    return textColor
+  end
+  surface.getTextColour = surface.getTextColor
+
+  function surface.setBackgroundColor(color)
+    bgColor = tonumber(color) or bgColor
+  end
+  surface.setBackgroundColour = surface.setBackgroundColor
+
+  function surface.getBackgroundColor()
+    return bgColor
+  end
+  surface.getBackgroundColour = surface.getBackgroundColor
+
+  function surface.clear()
+    fillRect(1, 1, pxW, pxH, colorArgb(bgColor, "black"))
+  end
+
+  function surface.clearLine()
+    fillRect(1, cursorY, pxW, lineHeight, colorArgb(bgColor, "black"))
+  end
+
+  function surface.write(value)
+    local raw = tostring(value or "")
+    if raw == "" then return end
+    if cursorY < 1 or cursorY > pxH then return end
+    local argbBg = colorArgb(bgColor, "black")
+    local argbFg = colorArgb(textColor, "white")
+    local width = textPixelWidth(raw)
+    fillRect(cursorX, cursorY, width, lineHeight, argbBg)
+    drawText(cursorX, cursorY, raw, argbFg)
+    cursorX = cursorX + #raw
+  end
+
+  function surface.blit(text, fg, bg)
+    text = tostring(text or "")
+    fg = tostring(fg or "")
+    bg = tostring(bg or "")
+    local n = math.min(#text, #fg, #bg)
+    if n <= 0 then return end
+    for i = 1, n do
+      local ch = text:sub(i, i)
+      local fgIdx = colorFromBlit(fg:sub(i, i)) or colors.white
+      local bgIdx = colorFromBlit(bg:sub(i, i)) or colors.black
+      local x = cursorX + i - 1
+      fillRect(x, cursorY, 1, lineHeight, colorArgb(bgIdx, "black"))
+      if ch ~= " " then
+        drawText(x, cursorY, ch, colorArgb(fgIdx, "white"))
+      end
+    end
+    cursorX = cursorX + n
+  end
+
+  function surface.scroll(_)
+    -- No buffered text grid in native mode; full redraw is done every frame.
+  end
+
+  function surface.isColor()
+    return true
+  end
+  surface.isColour = surface.isColor
+
+  function surface.getPaletteColor(color)
+    local packed = colorArgb(color, "white")
+    local r = math.floor((packed % 0x1000000) / 0x10000)
+    local g = math.floor((packed % 0x10000) / 0x100)
+    local b = math.floor(packed % 0x100)
+    return r / 255, g / 255, b / 255
+  end
+  surface.getPaletteColour = surface.getPaletteColor
+
+  function surface.setPaletteColor(color, r, g, b)
+    local key = INVERTED_COLORS[tonumber(color) or 0]
+    if not key then return end
+    if g ~= nil and b ~= nil then
+      local rr = clamp(0, math.floor((tonumber(r) or 0) * 255 + 0.5), 255)
+      local gg = clamp(0, math.floor((tonumber(g) or 0) * 255 + 0.5), 255)
+      local bb = clamp(0, math.floor((tonumber(b) or 0) * 255 + 0.5), 255)
+      palette[key] = 0xFF000000 + (rr * 0x10000) + (gg * 0x100) + bb
+      return
+    end
+    local packed = tonumber(r)
+    if packed then
+      if packed < 0x1000000 then
+        packed = 0xFF000000 + packed
+      end
+      palette[key] = packed
+    end
+  end
+  surface.setPaletteColour = surface.setPaletteColor
+
+  function surface.setTextScale()
+    -- No-op for native Tom GPU surface.
+  end
+
+  function surface.mapPixel(x, y)
+    return math.floor(tonumber(x) or 1), math.floor(tonumber(y) or 1)
+  end
+
+  local function makeWindow(parent, ox, oy, ww, hh)
+    local win = {}
+    local baseX = math.floor(tonumber(ox) or 1)
+    local baseY = math.floor(tonumber(oy) or 1)
+    local winW = math.max(1, math.floor(tonumber(ww) or 1))
+    local winH = math.max(1, math.floor(tonumber(hh) or 1))
+    local wx, wy = 1, 1
+    local wfg, wbg = colors.white, colors.black
+    local wblink = false
+
+    local function mapPos(x, y)
+      return baseX + x - 1, baseY + y - 1
+    end
+
+    function win.getSize() return winW, winH end
+    function win.setCursorPos(x, y)
+      wx = math.floor(tonumber(x) or wx)
+      wy = math.floor(tonumber(y) or wy)
+    end
+    function win.getCursorPos() return wx, wy end
+    function win.setCursorBlink(v) wblink = not not v end
+    function win.getCursorBlink() return wblink end
+    function win.setTextColor(v) wfg = tonumber(v) or wfg end
+    win.setTextColour = win.setTextColor
+    function win.getTextColor() return wfg end
+    win.getTextColour = win.getTextColor
+    function win.setBackgroundColor(v) wbg = tonumber(v) or wbg end
+    win.setBackgroundColour = win.setBackgroundColor
+    function win.getBackgroundColor() return wbg end
+    win.getBackgroundColour = win.getBackgroundColor
+
+    function win.write(value)
+      local gx, gy = mapPos(wx, wy)
+      parent.setCursorPos(gx, gy)
+      parent.setTextColor(wfg)
+      parent.setBackgroundColor(wbg)
+      parent.write(value)
+      wx = wx + #tostring(value or "")
+    end
+
+    function win.blit(text, fg, bg)
+      local gx, gy = mapPos(wx, wy)
+      parent.setCursorPos(gx, gy)
+      parent.blit(text, fg, bg)
+      wx = wx + math.min(#tostring(text or ""), #tostring(fg or ""), #tostring(bg or ""))
+    end
+
+    function win.clear()
+      local gx, gy = mapPos(1, 1)
+      parent.setBackgroundColor(wbg)
+      local argb = colorArgb(wbg, "black")
+      fillRect(gx, gy, winW, winH, argb)
+    end
+
+    function win.clearLine()
+      local gx, gy = mapPos(1, wy)
+      parent.setBackgroundColor(wbg)
+      fillRect(gx, gy, winW, lineHeight, colorArgb(wbg, "black"))
+    end
+
+    function win.scroll(_)
+      -- No buffered text grid in native mode.
+    end
+
+    function win.isColor() return true end
+    win.isColour = win.isColor
+    win.getPaletteColor = parent.getPaletteColor
+    win.getPaletteColour = parent.getPaletteColour
+    win.setPaletteColor = parent.setPaletteColor
+    win.setPaletteColour = parent.setPaletteColour
+    function win.setTextScale() end
+    function win.mapPixel(x, y)
+      local gx, gy = mapPos(math.floor(tonumber(x) or 1), math.floor(tonumber(y) or 1))
+      return gx - baseX + 1, gy - baseY + 1
+    end
+    function win.flush() if type(parent.flush) == "function" then parent.flush() end end
+    win.sync = win.flush
+    function win.createWindow(x, y, w, h)
+      local nx = baseX + math.max(0, math.floor(tonumber(x) or 1) - 1)
+      local ny = baseY + math.max(0, math.floor(tonumber(y) or 1) - 1)
+      return makeWindow(parent, nx, ny, w, h)
+    end
+
+    return win
+  end
+
+  function surface.createWindow(x, y, w, h)
+    local ox = clamp(1, math.floor(tonumber(x) or 1), pxW)
+    local oy = clamp(1, math.floor(tonumber(y) or 1), pxH)
+    local maxW = (pxW - ox) + 1
+    local maxH = (pxH - oy) + 1
+    local ww = clamp(1, math.floor(tonumber(w) or maxW), maxW)
+    local hh = clamp(1, math.floor(tonumber(h) or maxH), maxH)
+    return makeWindow(surface, ox, oy, ww, hh)
+  end
+
+  function surface.flush()
+    syncGpu()
+  end
+  surface.sync = surface.flush
+
+  local wrapperType = opts.debug and "toms_native_debug" or "toms_native"
+  return surface, {
+    kind = "toms_gpu",
+    backendFamily = "toms_native",
+    wrapperType = wrapperType,
+    touchEvent = "tm_monitor_touch",
+    mapPixel = surface.mapPixel,
+    createWindow = surface.createWindow,
+    width = pxW,
+    height = pxH,
+    wrappedWidth = pxW,
+    wrappedHeight = pxH,
+    pixelWidth = pxW,
+    pixelHeight = pxH,
+    area = math.max(0, math.floor(pxW * pxH)),
+    runtimeArea = runtimeInfo and runtimeInfo.areaPx or math.max(0, math.floor(pxW * pxH)),
+    setSizeTried = runtimeInfo and runtimeInfo.setSizeTried or false,
+    setSizeApplied = runtimeInfo and runtimeInfo.setSizeApplied or false,
+    setSizeMode = runtimeInfo and runtimeInfo.setSizeMode or "none",
+    targetSize = runtimeInfo and runtimeInfo.targetSize or nil,
+    monitorConversion = false,
+  }
+end
+
+local function sanitizeTomWrapperMode(value)
+  local mode = string.lower(tostring(value or "native"))
+  if mode == "compat" or mode == "compat_term" or mode == "text_grid" then
+    return "compat_term"
+  end
+  return "native"
+end
+
+function M.createSurface(candidate, cfg, opts)
+  opts = type(opts) == "table" and opts or {}
   if type(candidate) ~= "table" or not candidate.obj then
     return nil, { kind = "none", touchEvent = "monitor_touch" }
   end
@@ -1020,18 +1440,37 @@ function M.createSurface(candidate, cfg)
     if type(finalProbe) == "table" then
       runtimeInfo = finalProbe
     end
-    return buildTomTermSurface(candidate.obj, cfg, runtimeInfo)
+    local wrapperMode = sanitizeTomWrapperMode((cfg and cfg.tomWrapperMode) or opts.tomWrapperMode)
+    if wrapperMode == "compat_term" then
+      local surface, meta = buildTomTermSurface(candidate.obj, cfg, runtimeInfo)
+      if type(meta) == "table" then
+        meta.backendFamily = "toms_native"
+        meta.wrapperType = opts.debug and "toms_native_debug_compat" or "toms_native_compat"
+        meta.monitorConversion = true
+        meta.wrappedWidth = tonumber(meta.width) or 0
+        meta.wrappedHeight = tonumber(meta.height) or 0
+      end
+      return surface, meta
+    end
+    return buildTomNativeSurface(candidate.obj, cfg, runtimeInfo, { debug = opts.debug == true })
   end
 
   return candidate.obj, {
     kind = candidate.kind or "cc_monitor",
+    backendFamily = "classic_monitor",
+    wrapperType = "classic_monitor",
     touchEvent = candidate.touchEvent or "monitor_touch",
     mapPixel = nil,
     createWindow = nil,
     width = candidate.w,
     height = candidate.h,
+    wrappedWidth = candidate.w,
+    wrappedHeight = candidate.h,
+    pixelWidth = candidate.w,
+    pixelHeight = candidate.h,
     area = math.max(0, math.floor((tonumber(candidate.w) or 0) * (tonumber(candidate.h) or 0))),
     runtimeArea = tonumber(candidate.runtimeArea) or 0,
+    monitorConversion = false,
   }
 end
 

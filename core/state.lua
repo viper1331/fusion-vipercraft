@@ -180,6 +180,8 @@ function M.defaultHardwareState()
     monitorName = nil,
     displaySurface = nil,
     monitorBackend = "terminal",
+    monitorBackendFamily = "terminal_fallback",
+    monitorWrapperType = "terminal",
     monitorScale = nil,
     monitorTouchEvent = "monitor_touch",
     monitorTouchMapper = nil,

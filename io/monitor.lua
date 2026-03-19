@@ -85,6 +85,17 @@ local DisplayBackend = loadDisplayBackend()
 
 local M = {}
 
+local function backendFamily(kind)
+  local value = string.lower(tostring(kind or ""))
+  if value == "toms_gpu" or value == "toms_native" then
+    return "toms_native"
+  end
+  if value == "cc_monitor" or value == "classic_monitor" then
+    return "classic_monitor"
+  end
+  return "terminal_fallback"
+end
+
 local function logInfo(logger, message, meta)
   if type(logger) == "table" and type(logger.info) == "function" then
     logger.info(message, meta)
@@ -142,11 +153,14 @@ local function resolveMonitorCandidate(hw, provided, getTypeOf)
   return normalizeCandidateShape(detected, hw.monitorName, hw.monitor)
 end
 
-function M.setupMonitor(nativeTerm, hw, CFG, C, chosenCandidate, getTypeOf, logger)
+function M.setupMonitor(nativeTerm, hw, CFG, C, chosenCandidate, getTypeOf, logger, options)
+  options = type(options) == "table" and options or {}
   local outputMode = string.lower(tostring((CFG and CFG.displayOutput) or "monitor"))
 
   hw.displaySurface = nil
   hw.monitorBackend = "terminal"
+  hw.monitorBackendFamily = "terminal_fallback"
+  hw.monitorWrapperType = "terminal"
   hw.monitorTouchEvent = "monitor_touch"
   hw.monitorTouchMapper = nil
   hw.monitorWindows = nil
@@ -165,11 +179,15 @@ function M.setupMonitor(nativeTerm, hw, CFG, C, chosenCandidate, getTypeOf, logg
       touchEvent = "monitor_touch",
     }
 
-    local surface, meta = DisplayBackend.createSurface(candidate, CFG)
+    local surface, meta = DisplayBackend.createSurface(candidate, CFG, {
+      debug = options.tomDebug == true,
+    })
     hw.displaySurface = surface or hw.monitor
     hw.monitorSurfaceMeta = type(meta) == "table" and meta or nil
 
     hw.monitorBackend = (meta and meta.kind) or candidate.kind or "cc_monitor"
+    hw.monitorBackendFamily = (meta and meta.backendFamily) or backendFamily(hw.monitorBackend)
+    hw.monitorWrapperType = (meta and meta.wrapperType) or hw.monitorBackendFamily
     hw.monitorTouchEvent = (meta and meta.touchEvent) or candidate.touchEvent or "monitor_touch"
     hw.monitorTouchMapper = meta and meta.mapPixel or nil
     local createWindow = type(hw.displaySurface) == "table" and hw.displaySurface.createWindow
@@ -188,6 +206,26 @@ function M.setupMonitor(nativeTerm, hw, CFG, C, chosenCandidate, getTypeOf, logg
         selected = hw.monitorBackend,
         monitor = candidate.name or hw.monitorName or "unknown",
       })
+    end
+
+    if candidate.kind == "toms_gpu" then
+      if meta and meta.monitorConversion then
+        logWarn(logger, "Tom native candidate converted to compat wrapper", {
+          monitor = candidate.name or hw.monitorName or "unknown",
+          backend = hw.monitorBackend or "toms_gpu",
+          family = hw.monitorBackendFamily or "toms_native",
+          wrapper = hw.monitorWrapperType or "unknown",
+          source = "io.monitor.setupMonitor -> io.display_backend.createSurface",
+        })
+      else
+        logInfo(logger, "Tom native wrapper active", {
+          monitor = candidate.name or hw.monitorName or "unknown",
+          backend = hw.monitorBackend or "toms_gpu",
+          family = hw.monitorBackendFamily or "toms_native",
+          wrapper = hw.monitorWrapperType or "unknown",
+          source = "io.monitor.setupMonitor -> io.display_backend.createSurface",
+        })
+      end
     end
 
     local setTextScale = hw.monitor and hw.monitor.setTextScale
@@ -220,6 +258,9 @@ function M.setupMonitor(nativeTerm, hw, CFG, C, chosenCandidate, getTypeOf, logg
           setSizeTried = tostring((meta and meta.setSizeTried) and 1 or 0),
           setSizeApplied = tostring((meta and meta.setSizeApplied) and 1 or 0),
           setSizeMode = tostring((meta and meta.setSizeMode) or "none"),
+          family = tostring(hw.monitorBackendFamily or "unknown"),
+          wrapper = tostring(hw.monitorWrapperType or "unknown"),
+          conversion = tostring((meta and meta.monitorConversion) and 1 or 0),
           surfaceType = tostring(type(hw.displaySurface)),
           nativeType = tostring(type(hw.monitor)),
         })
@@ -232,6 +273,8 @@ function M.setupMonitor(nativeTerm, hw, CFG, C, chosenCandidate, getTypeOf, logg
     logInfo(logger, "Monitor backend ready", {
       monitor = candidate.name or hw.monitorName or "unknown",
       backend = hw.monitorBackend or "unknown",
+      family = hw.monitorBackendFamily or "terminal_fallback",
+      wrapper = hw.monitorWrapperType or "unknown",
       touch = hw.monitorTouchEvent or "monitor_touch",
       output = outputMode,
       area = tostring((meta and meta.runtimeArea) or (candidate.runtimeArea) or 0),

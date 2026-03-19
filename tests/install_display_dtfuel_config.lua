@@ -98,6 +98,62 @@ function M.run(ctx)
     ok("applyConfigToRuntime ui.displayBackend applique")
   end
 
+  local runtimeAlias = {
+    preferredMonitor = nil,
+    monitorScale = 0.5,
+    uiScale = 1.0,
+    displayOutput = "monitor",
+    displayBackend = "auto",
+    energyUnit = "j",
+    laserCount = 1,
+    refreshDelay = 0.2,
+    logEnabled = true,
+    logLevel = "info",
+    logToFile = true,
+    logToTerminal = false,
+    logFile = "fusion.log",
+    logMaxFileBytes = 262144,
+    preferredReactor = nil,
+    preferredLogicAdapter = nil,
+    preferredLaser = nil,
+    preferredInduction = nil,
+    knownReaders = { deuterium = nil, tritium = nil, inventory = nil },
+    knownRelays = {
+      laser_charge = { relay = nil, side = "top" },
+      tritium = { relay = nil, side = "front" },
+      deuterium = { relay = nil, side = "front" },
+    },
+    actions = {
+      dt_fuel = nil,
+    },
+  }
+
+  local aliasCfgTom = {
+    monitor = { name = nil, scale = 0.5 },
+    devices = {},
+    relays = {
+      laser = { name = nil, side = "top" },
+      tritium = { name = nil, side = "front" },
+      deuterium = { name = nil, side = "front" },
+    },
+    readers = {},
+    ui = {
+      preferredView = "SUP",
+      scale = 1.0,
+      output = "monitor",
+      displayBackend = "toms_native",
+      energyUnit = "j",
+      laserCount = 1,
+      refreshDelay = 0.2,
+    },
+  }
+  CoreConfig.applyConfigToRuntime(aliasCfgTom, runtimeAlias)
+  if runtimeAlias.displayBackend ~= "toms_gpu" then
+    fail(1241, "Alias toms_native doit etre normalise vers toms_gpu")
+  else
+    ok("Alias toms_native normalise vers toms_gpu")
+  end
+
   if type(runtimeCfg.actions.dt_fuel) ~= "table" then
     fail(125, "applyConfigToRuntime doit initialiser actions.dt_fuel")
   elseif runtimeCfg.actions.dt_fuel.relay ~= "relay_dt_a" or runtimeCfg.actions.dt_fuel.side ~= "back" then
@@ -120,7 +176,7 @@ function M.run(ctx)
       preferredView = "SUP",
       scale = 1.0,
       output = "monitor",
-      displayBackend = "cc_monitor",
+      displayBackend = "classic_monitor",
       energyUnit = "j",
       laserCount = 1,
       refreshDelay = 0.2,
@@ -128,10 +184,44 @@ function M.run(ctx)
     actions = {},
   }
 
-  CoreConfig.applyConfigToRuntime(fallbackCfg, runtimeCfg)
-  if type(runtimeCfg.actions.dt_fuel) ~= "table"
-    or runtimeCfg.actions.dt_fuel.relay ~= "relay_dt_b"
-    or runtimeCfg.actions.dt_fuel.side ~= "left" then
+  local runtimeClassic = {
+    preferredMonitor = nil,
+    monitorScale = 0.5,
+    uiScale = 1.0,
+    displayOutput = "monitor",
+    displayBackend = "auto",
+    energyUnit = "j",
+    laserCount = 1,
+    refreshDelay = 0.2,
+    logEnabled = true,
+    logLevel = "info",
+    logToFile = true,
+    logToTerminal = false,
+    logFile = "fusion.log",
+    logMaxFileBytes = 262144,
+    preferredReactor = nil,
+    preferredLogicAdapter = nil,
+    preferredLaser = nil,
+    preferredInduction = nil,
+    knownReaders = { deuterium = nil, tritium = nil, inventory = nil },
+    knownRelays = {
+      laser_charge = { relay = nil, side = "top" },
+      tritium = { relay = nil, side = "front" },
+      deuterium = { relay = nil, side = "front" },
+    },
+    actions = {
+      dt_fuel = nil,
+    },
+  }
+
+  CoreConfig.applyConfigToRuntime(fallbackCfg, runtimeClassic)
+  if runtimeClassic.displayBackend ~= "cc_monitor" then
+    fail(1271, "Alias classic_monitor/cc_monitor doit etre normalise vers cc_monitor")
+    return
+  end
+  if type(runtimeClassic.actions.dt_fuel) ~= "table"
+    or runtimeClassic.actions.dt_fuel.relay ~= "relay_dt_b"
+    or runtimeClassic.actions.dt_fuel.side ~= "left" then
     fail(127, "Fallback relays.dtFuel -> actions.dt_fuel invalide")
   else
     ok("Fallback relays.dtFuel -> actions.dt_fuel valide")

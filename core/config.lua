@@ -30,6 +30,9 @@ local VALID_DISPLAY_BACKENDS = {
   auto = true,
   cc_monitor = true,
   toms_gpu = true,
+  classic_monitor = true,
+  toms_native = true,
+  terminal_fallback = true,
 }
 
 local VALID_ENERGY_UNITS = {
@@ -238,10 +241,29 @@ function M.sanitizeDisplayOutput(value, fallback)
   return fallback
 end
 
-function M.sanitizeDisplayBackend(value, fallback)
+local function normalizeDisplayBackendValue(value)
   local mode = string.lower(tostring(value or ""))
-  if VALID_DISPLAY_BACKENDS[mode] then return mode end
-  return fallback
+  if mode == "classic_monitor" then
+    return "cc_monitor"
+  end
+  if mode == "toms_native" then
+    return "toms_gpu"
+  end
+  if mode == "terminal_fallback" then
+    return "auto"
+  end
+  if VALID_DISPLAY_BACKENDS[mode] then
+    return mode
+  end
+  return nil
+end
+
+function M.sanitizeDisplayBackend(value, fallback)
+  local normalized = normalizeDisplayBackendValue(value)
+  if normalized then
+    return normalized
+  end
+  return normalizeDisplayBackendValue(fallback)
 end
 
 function M.sanitizeEnergyUnit(value, fallback)
@@ -365,7 +387,7 @@ function M.validateConfig(config)
   end
 
   local displayBackend = config.ui and config.ui.displayBackend
-  if displayBackend ~= nil and (type(displayBackend) ~= "string" or not VALID_DISPLAY_BACKENDS[string.lower(displayBackend)]) then
+  if displayBackend ~= nil and M.sanitizeDisplayBackend(displayBackend, nil) == nil then
     table.insert(errors, "ui.displayBackend is invalid")
   end
 

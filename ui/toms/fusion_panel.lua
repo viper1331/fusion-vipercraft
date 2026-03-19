@@ -7,6 +7,64 @@ local M = {}
 local TOMS_DEBUG_DEFAULT = false
 local TOMS_DEBUG_FILE = "logs/toms_debug.txt"
 local TOMS_DEBUG_DIR = "logs"
+local debugFileTargetCache = nil
+
+local function resolveProgramRootDir()
+  if type(fs) ~= "table" or type(fs.getDir) ~= "function" then
+    return ""
+  end
+
+  if type(debug) == "table" and type(debug.getinfo) == "function" then
+    local info = debug.getinfo(2, "S") or debug.getinfo(1, "S")
+    local source = info and info.source or ""
+    if type(source) == "string" and source:sub(1, 1) == "@" then
+      local modulePath = source:sub(2):gsub("\\", "/")
+      local moduleDir = fs.getDir(modulePath)
+      local parentDir = fs.getDir(moduleDir)
+      local rootDir = fs.getDir(parentDir)
+      if type(rootDir) == "string" and rootDir ~= "" then
+        return rootDir
+      end
+    end
+  end
+
+  if type(shell) == "table" and type(shell.getRunningProgram) == "function" then
+    local running = tostring(shell.getRunningProgram() or "")
+    if running ~= "" then
+      local runningDir = fs.getDir(running)
+      if type(runningDir) == "string" then
+        return runningDir
+      end
+    end
+  end
+
+  return ""
+end
+
+local function getDebugFileTarget()
+  if type(debugFileTargetCache) == "table" then
+    return debugFileTargetCache
+  end
+
+  local target = {
+    displayPath = TOMS_DEBUG_FILE,
+    writeDir = TOMS_DEBUG_DIR,
+    writeFile = TOMS_DEBUG_FILE,
+    rootDir = "",
+  }
+
+  if type(fs) == "table" and type(fs.combine) == "function" then
+    local rootDir = resolveProgramRootDir()
+    target.rootDir = rootDir
+    if rootDir ~= "" then
+      target.writeDir = fs.combine(rootDir, TOMS_DEBUG_DIR)
+      target.writeFile = fs.combine(rootDir, TOMS_DEBUG_FILE)
+    end
+  end
+
+  debugFileTargetCache = target
+  return target
+end
 
 local function asNumber(value, fallback)
   local n = tonumber(value)
@@ -268,7 +326,9 @@ function M.build(api)
     if type(diag.debugBypass) ~= "table" then
       diag.debugBypass = {}
     end
-    diag.debugFilePath = TOMS_DEBUG_FILE
+    local debugTarget = getDebugFileTarget()
+    diag.debugFilePath = debugTarget.displayPath
+    diag.debugFileResolvedPath = debugTarget.writeFile
     return diag
   end
 
@@ -307,13 +367,14 @@ function M.build(api)
       diag.debugFileLastStatus = "fs_unavailable"
       return false, "fs_unavailable"
     end
+    local debugTarget = getDebugFileTarget()
 
     local okWrite, errWrite = pcall(function()
-      if not fsApi.exists(TOMS_DEBUG_DIR) then
-        fsApi.makeDir(TOMS_DEBUG_DIR)
+      if not fsApi.exists(debugTarget.writeDir) then
+        fsApi.makeDir(debugTarget.writeDir)
       end
 
-      local handle = fsApi.open(TOMS_DEBUG_FILE, "w")
+      local handle = fsApi.open(debugTarget.writeFile, "w")
       if not handle then
         error("open_failed")
       end
@@ -343,8 +404,13 @@ function M.build(api)
       addLine(lines, "Launch timestamp", launchAt)
       addLine(lines, "Program version", tostring(state.update and state.update.localVersion or "N/A"))
       addLine(lines, "Launch arguments", launchArgs ~= "" and launchArgs or "(none)")
+      addLine(lines, "Debug file (display)", tostring(debugTarget.displayPath))
+      addLine(lines, "Debug file (resolved)", tostring(debugTarget.writeFile))
       addLine(lines, "Selected GPU", tostring(hw.monitorName or "N/A"))
       addLine(lines, "Selected backend", tostring(hw.monitorBackend or "N/A"))
+      addLine(lines, "Selected backend family", tostring(hw.monitorBackendFamily or "N/A"))
+      addLine(lines, "Selected wrapper", tostring(hw.monitorWrapperType or "N/A"))
+      addLine(lines, "Selected classic monitor", tostring(diag.selectedClassicMonitor or "N/A"))
       addLine(lines, "Selected keyboard", tostring(hw.keyboardName or "N/A"))
       addLine(lines, "Selected redstone relay", tostring(selectedRelayName))
       addLine(lines, "Selected relay side", tostring(selectedRelaySide))
@@ -356,15 +422,22 @@ function M.build(api)
 
       lines[#lines + 1] = "[SURFACE PIPELINE]"
       addLine(lines, "Render backend", tostring(surfaceCtx.backend or hw.monitorBackend or "N/A"))
+      addLine(lines, "Render backend family", tostring(surfaceCtx.backendFamily or hw.monitorBackendFamily or "N/A"))
+      addLine(lines, "Render wrapper", tostring(surfaceCtx.wrapperType or hw.monitorWrapperType or "N/A"))
       addLine(lines, "Input source", tostring(surfaceCtx.inputSource or source or "N/A"))
       addLine(lines, "Render source label", tostring(surfaceCtx.renderSource or source or "N/A"))
+      addLine(lines, "Source changed", tostring((surfaceCtx.inputSource or "") ~= (surfaceCtx.renderSource or "")))
       addLine(lines, "Render surface type", tostring(surfaceCtx.renderSurfaceType or "N/A"))
       addLine(lines, "Display surface type", tostring(surfaceCtx.displaySurfaceType or "N/A"))
       addLine(lines, "Native surface type", tostring(surfaceCtx.nativeSurfaceType or "N/A"))
       addLine(lines, "Display dimensions", tostring(surfaceCtx.displayWidth or 0) .. "x" .. tostring(surfaceCtx.displayHeight or 0))
       addLine(lines, "Native dimensions", tostring(surfaceCtx.nativeWidth or 0) .. "x" .. tostring(surfaceCtx.nativeHeight or 0))
+      addLine(lines, "Wrapped dimensions", tostring(surfaceCtx.wrappedWidth or 0) .. "x" .. tostring(surfaceCtx.wrappedHeight or 0))
+      addLine(lines, "Usable area", tostring(surfaceCtx.runtimeArea or 0))
+      addLine(lines, "Monitor conversion", tostring(surfaceCtx.monitorConversion == true))
       addLine(lines, "Surface created at", tostring(surfaceCtx.wrappedPath or "N/A"))
       addLine(lines, "Renderer call path", tostring(surfaceCtx.sourcePath or "N/A"))
+      addLine(lines, "Source resolved by", tostring(surfaceCtx.sourceResolvedBy or "N/A"))
       addLine(lines, "Term redirected to", tostring(surfaceCtx.termRedirectTarget or "N/A"))
       lines[#lines + 1] = ""
 
@@ -403,10 +476,37 @@ function M.build(api)
             blocksH,
             scaleText,
             tostring(gpu.runtimeArea or 0))
+          lines[#lines + 1] = string.format("     wrapped=%dx%d backend=%s",
+            tonumber(gpu.wrappedW) or blocksW,
+            tonumber(gpu.wrappedH) or blocksH,
+            tostring(gpu.backend or "toms_gpu"))
           lines[#lines + 1] = string.format("     setSize tried=%s applied=%s mode=%s",
             tostring(gpu.setSizeTried == true),
             tostring(gpu.setSizeApplied == true),
             tostring(gpu.setSizeMode or "none"))
+        end
+      end
+      lines[#lines + 1] = ""
+
+      lines[#lines + 1] = "[DETECTED CLASSIC MONITORS]"
+      local classicDisplays = {}
+      for _, display in ipairs(type(diag.detectedDisplays) == "table" and diag.detectedDisplays or {}) do
+        if tostring(display.backend or "") == "cc_monitor" then
+          classicDisplays[#classicDisplays + 1] = display
+        end
+      end
+      addLine(lines, "Count", tostring(#classicDisplays))
+      if #classicDisplays == 0 then
+        lines[#lines + 1] = "  - none detected"
+      else
+        for index, display in ipairs(classicDisplays) do
+          lines[#lines + 1] = string.format("  #%d name=%s", index, tostring(display.name or "unknown"))
+          lines[#lines + 1] = string.format("     native=%dx%d wrapped=%dx%d area=%s",
+            tonumber(display.pixelsW) or tonumber(display.blocksW) or 0,
+            tonumber(display.pixelsH) or tonumber(display.blocksH) or 0,
+            tonumber(display.wrappedW) or tonumber(display.blocksW) or 0,
+            tonumber(display.wrappedH) or tonumber(display.blocksH) or 0,
+            tostring(display.runtimeArea or 0))
         end
       end
       lines[#lines + 1] = ""
@@ -445,6 +545,7 @@ function M.build(api)
       addLine(lines, "components bypassed", tostring(diag.debugBypass.components == true))
       addLine(lines, "windows bypassed", tostring(diag.debugBypass.windows == true))
       addLine(lines, "legacy render bypassed", tostring(diag.debugBypass.legacy == true))
+      addLine(lines, "debug wrapper parity", tostring(surfaceCtx.wrapperType or ""):find("toms_native", 1, true) and "true" or "false")
       lines[#lines + 1] = ""
 
       lines[#lines + 1] = "[LAST FRAME SUMMARY]"
@@ -480,6 +581,7 @@ function M.build(api)
     end
     diag.debugFileLastStatus = "ok"
     diag.debugFileLastError = ""
+    diag.debugFileResolvedPath = debugTarget.writeFile
     return true, nil
   end
 
@@ -1028,8 +1130,18 @@ function M.build(api)
     diag.lastSurface = tostring(hw.monitorName or source or "unknown")
     diag.lastW = tonumber(width) or 0
     diag.lastH = tonumber(height) or 0
+    if type(diag.detectedDisplays) == "table" and (diag.selectedClassicMonitor == nil or diag.selectedClassicMonitor == "") then
+      for _, display in ipairs(diag.detectedDisplays) do
+        if tostring(display.backend or "") == "cc_monitor" then
+          diag.selectedClassicMonitor = tostring(display.name or "")
+          break
+        end
+      end
+    end
     diag.surfaceContext = {
       backend = tostring(renderCtx.backend or hw.monitorBackend or "unknown"),
+      backendFamily = tostring(renderCtx.backendFamily or hw.monitorBackendFamily or "unknown"),
+      wrapperType = tostring(renderCtx.wrapperType or hw.monitorWrapperType or "unknown"),
       inputSource = tostring(renderCtx.inputSource or source or "unknown"),
       renderSource = tostring(renderCtx.renderSource or source or "unknown"),
       renderSurfaceType = tostring(type(surface)),
@@ -1037,10 +1149,15 @@ function M.build(api)
       nativeSurfaceType = tostring(type(renderCtx.nativeSurface)),
       displayWidth = tonumber(renderCtx.displayWidth) or 0,
       displayHeight = tonumber(renderCtx.displayHeight) or 0,
+      wrappedWidth = tonumber(renderCtx.displayWidth) or tonumber(width) or 0,
+      wrappedHeight = tonumber(renderCtx.displayHeight) or tonumber(height) or 0,
       nativeWidth = tonumber(renderCtx.nativeWidth) or 0,
       nativeHeight = tonumber(renderCtx.nativeHeight) or 0,
+      runtimeArea = tonumber(renderCtx.runtimeArea) or (math.max(0, (tonumber(width) or 0) * (tonumber(height) or 0))),
+      monitorConversion = renderCtx.monitorConversion == true,
       sourcePath = tostring(renderCtx.sourcePath or "ui.toms.fusion_panel.render"),
       wrappedPath = tostring(renderCtx.wrappedPath or "unknown"),
+      sourceResolvedBy = tostring(renderCtx.sourceResolvedBy or "ui.toms.fusion_panel.render"),
       termRedirectTarget = tostring(renderCtx.termRedirectTarget or "term.current"),
     }
 
@@ -1185,7 +1302,8 @@ function M.build(api)
       end
     end
 
-    local useWindows = source == "monitor"
+    local inputSource = tostring(renderCtx.inputSource or source or "monitor")
+    local useWindows = inputSource == "monitor"
       and type(surface) == "table"
       and type(surface.createWindow) == "function"
       and theme.density ~= "small"
@@ -1194,6 +1312,7 @@ function M.build(api)
     diag.lastRenderType = useWindows and "TOM_WINDOWS" or "TOM_DIRECT"
     logDebug("Tom render path", {
       source = tostring(source),
+      inputSource = tostring(inputSource),
       width = tostring(width),
       height = tostring(height),
       createWindow = tostring(useWindows),

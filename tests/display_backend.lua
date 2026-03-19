@@ -87,6 +87,14 @@ function M.run(ctx)
     fail(85, "Surface Tom GPU non creee")
     return
   end
+  if type(gpuMeta) ~= "table" or gpuMeta.backendFamily ~= "toms_native" or tostring(gpuMeta.wrapperType or "") ~= "toms_native" then
+    fail(851, "Surface Tom GPU doit utiliser le wrapper natif Tom")
+    return
+  end
+  if gpuMeta.monitorConversion == true then
+    fail(852, "Surface Tom GPU native ne doit pas etre convertie en mode monitor")
+    return
+  end
 
   local requiredMethods = {
     "getSize",
@@ -110,6 +118,10 @@ function M.run(ctx)
   local w, h = gpuSurface.getSize()
   if tonumber(w) == nil or tonumber(h) == nil or w < 1 or h < 1 then
     fail(87, "Surface Tom GPU: taille invalide")
+    return
+  end
+  if w ~= 192 or h ~= 108 then
+    fail(871, "Surface Tom GPU native doit conserver les dimensions pixels (192x108)")
     return
   end
   ok("Surface Tom GPU taille valide: " .. tostring(w) .. "x" .. tostring(h))

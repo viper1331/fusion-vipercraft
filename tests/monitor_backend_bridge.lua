@@ -66,15 +66,38 @@ function M.run(ctx)
   else
     ok("Pont backend->kind monitor valide")
   end
+  if hw.monitorBackendFamily ~= "toms_native" then
+    fail(981, "La famille backend attendue est toms_native")
+    return
+  end
+  if tostring(hw.monitorWrapperType or "") ~= "toms_native" then
+    fail(982, "Le wrapper attendu est toms_native")
+    return
+  end
+  if type(hw.monitorSurfaceMeta) ~= "table" or hw.monitorSurfaceMeta.monitorConversion == true then
+    fail(983, "La surface Tom ne doit pas etre convertie en mode monitor")
+    return
+  end
 
   if type(hw.displaySurface) ~= "table"
     or type(hw.displaySurface.setBackgroundColor) ~= "function"
     or type(hw.displaySurface.setTextColor) ~= "function"
     or type(hw.displaySurface.clear) ~= "function" then
-    fail(99, "Surface Tom term-compat non initialisee")
+    fail(99, "Surface Tom native non initialisee")
   else
     ok("Surface Tom active et compatible")
   end
+
+  if type(hw.displaySurface.getSize) ~= "function" then
+    fail(991, "Surface Tom native sans getSize")
+    return
+  end
+  local w, h = hw.displaySurface.getSize()
+  if w ~= 192 or h ~= 108 then
+    fail(992, "Surface Tom native doit exposer les dimensions pixels")
+    return
+  end
+  ok("Surface Tom native dimensions pixels OK")
 end
 
 return M

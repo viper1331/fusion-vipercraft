@@ -625,13 +625,15 @@ function M.run(options)
       logger.error("setupMonitor returned false", { context = context or "runtime" })
       return false
     end
-    logger.info("Display surface configured", {
-      context = context or "runtime",
-      monitor = hw.monitorName or "none",
-      backend = hw.monitorBackend or "terminal",
-      output = CFG.displayOutput,
-    })
-    return true
+      logger.info("Display surface configured", {
+        context = context or "runtime",
+        monitor = hw.monitorName or "none",
+        backend = hw.monitorBackend or "terminal",
+        family = hw.monitorBackendFamily or "terminal_fallback",
+        wrapper = hw.monitorWrapperType or "terminal",
+        output = CFG.displayOutput,
+      })
+      return true
   end
 
   local function computeLayout(tw, th)
@@ -1875,6 +1877,8 @@ function M.run(options)
         backend = tostring(candidate.backend or "unknown"),
         blocksW = tonumber(candidate.w) or 0,
         blocksH = tonumber(candidate.h) or 0,
+        wrappedW = tonumber(candidate.w) or 0,
+        wrappedH = tonumber(candidate.h) or 0,
         pixelsW = tonumber(candidate.pxW) or 0,
         pixelsH = tonumber(candidate.pxH) or 0,
         runtimeArea = tonumber(candidate.runtimeArea) or 0,
@@ -1886,6 +1890,13 @@ function M.run(options)
       drawDiag.detectedDisplays[#drawDiag.detectedDisplays + 1] = entry
       if entry.backend == "toms_gpu" then
         drawDiag.detectedTomGpus[#drawDiag.detectedTomGpus + 1] = entry
+      end
+    end
+    drawDiag.selectedClassicMonitor = nil
+    for _, entry in ipairs(drawDiag.detectedDisplays) do
+      if entry.backend == "cc_monitor" then
+        drawDiag.selectedClassicMonitor = entry.name
+        break
       end
     end
     drawDiag.lastDisplayPreference = CoreConfig.sanitizeDisplayBackend(CFG.displayBackend, "auto")
@@ -2020,11 +2031,15 @@ function M.run(options)
       logger.error("IoMonitor.setupMonitor unavailable")
       return false
     end
-    IoMonitor.setupMonitor(nativeTerm, hw, CFG, C, chosen, getTypeOf, logger)
+    IoMonitor.setupMonitor(nativeTerm, hw, CFG, C, chosen, getTypeOf, logger, {
+      tomDebug = state.tomUiDiagnosticMode == true,
+    })
     if chosen then
       logger.info("Display backend selected", {
         name = chosen.name,
         backend = hw.monitorBackend or chosen.backend or "unknown",
+        family = hw.monitorBackendFamily or "terminal_fallback",
+        wrapper = hw.monitorWrapperType or "terminal",
         size = tostring(chosen.w or 0) .. "x" .. tostring(chosen.h or 0),
         reason = selectionMeta and selectionMeta.reason or "unknown",
       })
@@ -2951,7 +2966,7 @@ function M.run(options)
       drawStats.frameId = drawStats.frameId + 1
       term.redirect(surface)
       local variant = "cc"
-      if source == "monitor" and hw.monitorBackend == "toms_gpu" then
+      if source == "monitor" and (hw.monitorBackendFamily == "toms_native" or hw.monitorBackend == "toms_gpu") then
         variant = "tom"
       end
       applyPaletteForVariant(variant)
@@ -2973,6 +2988,9 @@ function M.run(options)
       drawStats.fallbackAfterTom = false
       drawStats.renderPath = "legacy"
       drawStats.surfaceBackend = tostring(hw.monitorBackend or "terminal")
+      drawStats.surfaceFamily = tostring(hw.monitorBackendFamily or "terminal_fallback")
+      drawStats.surfaceWrapper = tostring(hw.monitorWrapperType or "terminal")
+      drawStats.surfaceConversion = tostring((hw.monitorSurfaceMeta and hw.monitorSurfaceMeta.monitorConversion) and 1 or 0)
       drawStats.surfaceVariant = tostring(variant)
       drawStats.surfaceDisplayName = tostring(hw.monitorName or "terminal")
       drawStats.lastSyncMethod = "none"
@@ -3002,26 +3020,30 @@ function M.run(options)
         end
         drawStats.nativeW = tonumber(pixelW) or 0
         drawStats.nativeH = tonumber(pixelH) or 0
-        local useNativeDebug = (state.tomUiDiagnosticMode == true and type(nativeSurface) == "table" and drawStats.nativeW > 0 and drawStats.nativeH > 0)
-        if useNativeDebug then
-          renderSurface = nativeSurface
-          renderW = drawStats.nativeW
-          renderH = drawStats.nativeH
-        end
+        renderSource = "toms_gpu"
+        local useNativeDebug = false
         tomRenderCtx = {
           backend = tostring(hw.monitorBackend or "toms_gpu"),
+          backendFamily = tostring(hw.monitorBackendFamily or "toms_native"),
+          wrapperType = tostring(hw.monitorWrapperType or "toms_native"),
           monitorName = tostring(hw.monitorName or "unknown"),
           inputSource = tostring(source or "monitor"),
           renderSource = "toms_gpu",
+          renderSurfaceType = tostring(type(renderSurface)),
           displaySurface = surface,
+          displaySurfaceType = tostring(type(surface)),
           nativeSurface = nativeSurface,
+          nativeSurfaceType = tostring(type(nativeSurface)),
           displayWidth = tonumber(tw) or 0,
           displayHeight = tonumber(th) or 0,
+          runtimeArea = tonumber(meta.runtimeArea) or (math.max(0, (tonumber(tw) or 0) * (tonumber(th) or 0))),
           nativeWidth = tonumber(drawStats.nativeW) or 0,
           nativeHeight = tonumber(drawStats.nativeH) or 0,
+          monitorConversion = (meta and meta.monitorConversion) == true,
           useNativeDebug = useNativeDebug,
           sourcePath = "core.app.drawUI.drawSurface -> ui.toms.fusion_panel.render",
           wrappedPath = "io.monitor.setupMonitor -> io.display_backend.createSurface",
+          sourceResolvedBy = "core.app.drawUI.drawSurface",
           termRedirectTarget = tostring(source or "monitor"),
         }
       end
@@ -3032,6 +3054,9 @@ function M.run(options)
         renderLabel = tostring(tomRenderCtx and tomRenderCtx.renderSource or renderSource),
         variant = variant,
         backend = tostring(hw.monitorBackend or "terminal"),
+        family = tostring(hw.monitorBackendFamily or "terminal_fallback"),
+        wrapper = tostring(hw.monitorWrapperType or "terminal"),
+        conversion = tostring((hw.monitorSurfaceMeta and hw.monitorSurfaceMeta.monitorConversion) and 1 or 0),
         monitor = tostring(hw.monitorName or "none"),
         width = tostring(renderW),
         height = tostring(renderH),
