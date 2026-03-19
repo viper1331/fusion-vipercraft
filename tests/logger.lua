@@ -8,6 +8,21 @@ local function trim(text)
   return (text:gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
+local function countLines(path)
+  local handle = fs.open(path, "r")
+  if not handle then
+    return 0
+  end
+  local count = 0
+  while true do
+    local line = handle.readLine()
+    if line == nil then break end
+    count = count + 1
+  end
+  handle.close()
+  return count
+end
+
 function M.run(ctx)
   local fail = assert(ctx.fail, "ctx.fail requis")
   local ok = assert(ctx.ok, "ctx.ok requis")
@@ -89,12 +104,25 @@ function M.run(ctx)
   logger.configure({ maxFileBytes = 8192 })
   for i = 1, 200 do
     logger.error("line " .. tostring(i) .. " " .. string.rep("#", 80))
+    if i % 50 == 0 then sleep(0) end
   end
 
   if not fs.exists(tmpLog) then
     fail(117, "Le fichier de log principal est manquant apres ecritures")
   else
     ok("Ecriture soutenue logger OK")
+  end
+
+  logger.configure({ level = "error", maxFileBytes = 262144, maxLines = 1000 })
+  for i = 1, 1200 do
+    logger.error("linecap " .. tostring(i))
+    if i % 50 == 0 then sleep(0) end
+  end
+  local totalLines = countLines(tmpLog)
+  if totalLines > 1000 then
+    fail(118, "Le logger depasse la limite de 1000 lignes: " .. tostring(totalLines))
+  else
+    ok("Limite 1000 lignes logger OK (" .. tostring(totalLines) .. ")")
   end
 
   -- Nettoyage test.

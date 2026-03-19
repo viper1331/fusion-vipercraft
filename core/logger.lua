@@ -72,6 +72,17 @@ local function sanitizeMaxBytes(value, fallback)
   return n
 end
 
+local function sanitizeMaxLines(value, fallback)
+  local n = tonumber(value)
+  if not n then
+    return fallback or 1000
+  end
+  n = math.floor(n + 0.5)
+  if n < 100 then n = 100 end
+  if n > 100000 then n = 100000 end
+  return n
+end
+
 local function stringifyMeta(meta)
   if meta == nil then
     return ""
@@ -116,10 +127,12 @@ function M.new(options)
     toTerminal = sanitizeBool(options.toTerminal, false),
     file = sanitizePath(options.file, "fusion.log"),
     maxFileBytes = sanitizeMaxBytes(options.maxFileBytes, 262144),
+    maxLines = sanitizeMaxLines(options.maxLines, 1000),
     prefix = trimText(options.prefix) ~= "" and trimText(options.prefix) or "fusion",
   }
 
   local logger = {}
+  local trackedLineCount = nil
 
   local function shouldLog(level)
     if not cfg.enabled then
@@ -191,6 +204,76 @@ function M.new(options)
         pcall(fsApi.delete, cfg.file)
       end
     end
+    trackedLineCount = nil
+  end
+
+  local function countFileLines(path)
+    if type(fsApi) ~= "table" or type(fsApi.open) ~= "function" then
+      return nil
+    end
+    local handle = fsApi.open(path, "r")
+    if not handle then
+      return 0
+    end
+    local count = 0
+    while true do
+      local line = handle.readLine()
+      if line == nil then break end
+      count = count + 1
+    end
+    handle.close()
+    return count
+  end
+
+  local function trimFileToMaxLines()
+    if not cfg.toFile then return end
+    if type(fsApi) ~= "table" or type(fsApi.exists) ~= "function" or type(fsApi.open) ~= "function" then
+      return
+    end
+    if not fsApi.exists(cfg.file) then
+      trackedLineCount = 0
+      return
+    end
+
+    if trackedLineCount == nil then
+      trackedLineCount = countFileLines(cfg.file)
+    end
+    if not trackedLineCount or trackedLineCount <= cfg.maxLines then
+      return
+    end
+
+    local reader = fsApi.open(cfg.file, "r")
+    if not reader then
+      return
+    end
+    local ring = {}
+    local idx = 1
+    local kept = 0
+    while true do
+      local line = reader.readLine()
+      if line == nil then break end
+      ring[idx] = line
+      idx = idx + 1
+      if idx > cfg.maxLines then idx = 1 end
+      if kept < cfg.maxLines then
+        kept = kept + 1
+      end
+    end
+    reader.close()
+
+    local writer = fsApi.open(cfg.file, "w")
+    if not writer then
+      return
+    end
+    if kept > 0 then
+      local start = (idx <= kept) and idx or 1
+      for i = 0, kept - 1 do
+        local slot = ((start + i - 1) % kept) + 1
+        writer.writeLine(ring[slot] or "")
+      end
+    end
+    writer.close()
+    trackedLineCount = kept
   end
 
   local function appendFile(line)
@@ -208,6 +291,12 @@ function M.new(options)
     end
     handle.writeLine(line)
     handle.close()
+    if trackedLineCount == nil then
+      trackedLineCount = countFileLines(cfg.file)
+    else
+      trackedLineCount = trackedLineCount + 1
+    end
+    trimFileToMaxLines()
     return true
   end
 
@@ -276,6 +365,8 @@ function M.new(options)
     cfg.toTerminal = sanitizeBool(nextCfg.toTerminal, cfg.toTerminal)
     cfg.file = sanitizePath(nextCfg.file, cfg.file)
     cfg.maxFileBytes = sanitizeMaxBytes(nextCfg.maxFileBytes, cfg.maxFileBytes)
+    cfg.maxLines = sanitizeMaxLines(nextCfg.maxLines, cfg.maxLines)
+    trackedLineCount = nil
     if trimText(nextCfg.prefix) ~= "" then
       cfg.prefix = trimText(nextCfg.prefix)
     end
@@ -290,6 +381,7 @@ function M.new(options)
       toTerminal = cfg.toTerminal,
       file = cfg.file,
       maxFileBytes = cfg.maxFileBytes,
+      maxLines = cfg.maxLines,
       prefix = cfg.prefix,
     }
   end
