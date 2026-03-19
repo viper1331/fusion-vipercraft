@@ -143,32 +143,10 @@ local function splitVertical(bounds, specs, wantedGap)
   return out
 end
 
-local function computeColumns(contentBounds, theme)
-  local density = theme.density
-  local gap = theme.spacing.panelGap
-  local stacked = density == "small" and (contentBounds.w < 112 or contentBounds.h < 32)
-
-  if stacked then
-    local rows = splitVertical(contentBounds, {
-      { key = "left", min = 3, weight = 3 },
-      { key = "center", min = 5, weight = 5 },
-      { key = "right", min = 3, weight = 4 },
-    }, gap)
-    return rows, true
-  end
-
-  local columns = splitHorizontal(contentBounds, {
-    { key = "left", min = (density == "large") and 28 or 22, weight = 26 },
-    { key = "center", min = (density == "large") and 54 or 40, weight = 50 },
-    { key = "right", min = (density == "large") and 28 or 22, weight = 24 },
-  }, gap)
-  return columns, false
-end
-
 function M.compute(width, height, theme, currentView)
   local w = math.max(1, asInt(width, 1))
   local h = math.max(1, asInt(height, 1))
-  local minW, minH = 40, 16
+  local minW, minH = 42, 18
 
   if w < minW or h < minH then
     return {
@@ -193,70 +171,52 @@ function M.compute(width, height, theme, currentView)
     footer = rect(1, header.y2 + 1, w, 1)
   end
 
-  local contentY = header.y2 + 1
-  local contentH = math.max(1, footer.y - contentY)
-  local content = rect(1, contentY, w, contentH)
+  local content = rect(1, header.y2 + 1, w, math.max(1, footer.y - (header.y2 + 1)))
   local contentInner = inset(content, spacing.outerMargin, spacing.outerMargin, spacing.outerMargin, spacing.outerMargin)
+  local isSmallStack = theme.density == "small" and (contentInner.w < 112 or contentInner.h < 34)
 
-  local columns, stacked = computeColumns(contentInner, theme)
+  local columns
+  local stacked = false
+  if isSmallStack then
+    stacked = true
+    columns = splitVertical(contentInner, {
+      { key = "left", min = 4, weight = 5 },
+      { key = "center", min = 6, weight = 8 },
+      { key = "right", min = 4, weight = 6 },
+    }, spacing.panelGap)
+  else
+    columns = splitHorizontal(contentInner, {
+      { key = "left", min = (theme.density == "large") and 28 or 22, weight = 24 },
+      { key = "center", min = (theme.density == "large") and 62 or 44, weight = 52 },
+      { key = "right", min = (theme.density == "large") and 28 or 22, weight = 24 },
+    }, spacing.panelGap)
+  end
 
   local leftInner = inset(columns.left, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding)
   local centerInner = inset(columns.center, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding)
   local rightInner = inset(columns.right, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding)
 
-  local leftSections
-  if leftInner.h < 7 then
-    leftSections = {
-      summary = leftInner,
-      temps = leftInner,
-      events = leftInner,
-    }
-  else
-    leftSections = splitVertical(leftInner, {
-      { key = "summary", min = 3, weight = 3 },
-      { key = "temps", min = 3, weight = 3 },
-      { key = "events", min = 3, weight = 4 },
-    }, spacing.sectionGap)
-  end
+  local leftPanels = splitVertical(leftInner, {
+    { key = "status", min = 4, weight = 4 },
+    { key = "safety", min = 3, weight = 3 },
+    { key = "events", min = 4, weight = 4 },
+  }, spacing.sectionGap)
 
-  local centerSections
-  if centerInner.h < 8 then
-    centerSections = {
-      headline = centerInner,
-      reactor = centerInner,
-      runtime = centerInner,
-    }
-  else
-    centerSections = splitVertical(centerInner, {
-      { key = "headline", min = 2, weight = 2 },
-      { key = "reactor", min = 4, weight = 7 },
-      { key = "runtime", min = 2, weight = 3 },
-    }, spacing.sectionGap)
-  end
+  local centerPanels = splitVertical(centerInner, {
+    { key = "headline", min = 2, weight = 2 },
+    { key = "laser", min = 3, weight = 3 },
+    { key = "core", min = 6, weight = 8 },
+    { key = "runtime", min = 3, weight = 4 },
+  }, spacing.sectionGap)
 
-  local rightSections
-  if rightInner.h < 7 then
-    rightSections = {
-      nav = rightInner,
-      actions = rightInner,
-      io = rightInner,
-    }
-  else
-    rightSections = splitVertical(rightInner, {
-      { key = "nav", min = 3, weight = 3 },
-      { key = "actions", min = 4, weight = 6 },
-      { key = "io", min = 3, weight = 3 },
-    }, spacing.sectionGap)
-  end
+  local rightPanels = splitVertical(rightInner, {
+    { key = "nav", min = 3, weight = 3 },
+    { key = "actions", min = 5, weight = 6 },
+    { key = "io", min = 4, weight = 4 },
+  }, spacing.sectionGap)
 
-  local buttonBounds = inset(rightSections.actions, 1, 1, 1, 1)
-
-  local legacyMode = "standard"
-  if stacked then
-    legacyMode = "compact"
-  elseif theme.density == "large" then
-    legacyMode = "large"
-  end
+  local buttonBounds = inset(rightPanels.actions, 1, 2, 1, 1)
+  local legacyMode = stacked and "compact" or ((theme.density == "large") and "large" or "standard")
 
   return {
     tooSmall = false,
@@ -270,14 +230,14 @@ function M.compute(width, height, theme, currentView)
     content = content,
     footer = footer,
     columns = columns,
-    left = leftSections,
-    center = centerSections,
-    right = rightSections,
+    left = leftPanels,
+    center = centerPanels,
+    right = rightPanels,
     controls = {
-      navBounds = rightSections.nav,
-      actionBounds = rightSections.actions,
+      navBounds = rightPanels.nav,
+      actionBounds = rightPanels.actions,
       buttonBounds = buttonBounds,
-      ioBounds = rightSections.io,
+      ioBounds = rightPanels.io,
     },
     legacy = {
       mode = legacyMode,

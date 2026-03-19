@@ -32,8 +32,10 @@ end
 local function abbreviate(text, maxLen)
   text = normalizeText(text)
   maxLen = math.max(1, asInt(maxLen, 1))
-  if #text <= maxLen then return text end
-  local compact = text:gsub("[%s_%-]+", "")
+  if #text <= maxLen then
+    return text
+  end
+  local compact = text:gsub("[%s_%-_]+", "")
   if #compact <= maxLen then
     return compact
   end
@@ -45,10 +47,10 @@ local function abbreviate(text, maxLen)
 end
 
 local function detectDensity(width, height)
-  if width < 92 or height < 28 then
+  if width < 92 or height < 30 then
     return "small"
   end
-  if width >= 150 and height >= 44 then
+  if width >= 150 and height >= 46 then
     return "large"
   end
   return "medium"
@@ -59,23 +61,24 @@ function M.build(width, height)
   local h = math.max(1, asInt(height, 1))
   local density = detectDensity(w, h)
 
-  local baseScale = clamp(math.min(w / 120, h / 40), 0.75, 1.8)
+  local baseScale = clamp(math.min(w / 136, h / 42), 0.75, 2.0)
   if density == "small" then
     baseScale = clamp(baseScale, 0.75, 0.95)
   elseif density == "large" then
-    baseScale = clamp(baseScale, 1.2, 1.8)
+    baseScale = clamp(baseScale, 1.15, 2.0)
   end
 
-  local outerMargin = math.max(1, asInt(baseScale * 1.2, 1))
-  local panelPadding = math.max(1, asInt(baseScale * 1.0, 1))
-  local panelGap = math.max(1, asInt(baseScale * 1.4, 1))
+  local unit = math.max(1, asInt(baseScale, 1))
+  local outerMargin = math.max(1, asInt(baseScale * 1.0, 1))
+  local panelPadding = math.max(1, asInt(baseScale * 0.9, 1))
+  local panelGap = math.max(1, asInt(baseScale * 1.2, 1))
   local sectionGap = math.max(1, asInt(baseScale * 1.0, 1))
-  local lineSpacing = 1
 
   local headerHeight = (density == "large") and 3 or 2
   local footerHeight = (density == "small") and 1 or 2
   local buttonHeight = (density == "small") and 2 or 3
   local gaugeThickness = (density == "large") and 2 or 1
+  local badgeHeight = (density == "small") and 1 or 2
 
   return {
     width = w,
@@ -84,14 +87,18 @@ function M.build(width, height)
     scale = baseScale,
     palette = {
       bgRoot = colors.black,
-      bgNoise = colors.gray,
+      bgBackdrop = colors.gray,
       panelBg = colors.black,
-      panelBgSoft = colors.blue,
-      panelBgRaised = colors.gray,
+      panelBgSoft = colors.gray,
+      panelBgRaised = colors.blue,
+      panelHeader = colors.blue,
+      panelHeaderAlt = colors.gray,
       border = colors.lightBlue,
       borderStrong = colors.cyan,
+      borderSoft = colors.blue,
       textPrimary = colors.white,
       textMuted = colors.lightGray,
+      textDim = colors.gray,
       info = colors.cyan,
       ok = colors.lime,
       warning = colors.orange,
@@ -99,7 +106,9 @@ function M.build(width, height)
       accent = colors.purple,
       energy = colors.yellow,
       buttonFace = colors.gray,
-      buttonActive = colors.blue,
+      buttonPrimary = colors.blue,
+      buttonWarn = colors.orange,
+      buttonDanger = colors.red,
       reactorShell = colors.lightBlue,
       reactorShellDark = colors.blue,
       reactorCoreIdle = colors.cyan,
@@ -108,15 +117,18 @@ function M.build(width, height)
       reactorCoreWarn = colors.red,
       reactorFlowT = colors.green,
       reactorFlowDT = colors.purple,
-      reactorFlowD = colors.orange,
+      reactorFlowD = colors.red,
       reactorLaser = colors.yellow,
+      reactorLaserCharge = colors.lightBlue,
     },
     spacing = {
+      unit = unit,
       outerMargin = outerMargin,
       panelPadding = panelPadding,
       panelGap = panelGap,
       sectionGap = sectionGap,
-      lineSpacing = lineSpacing,
+      lineGap = 1,
+      denseGap = 1,
     },
     sizes = {
       headerHeight = headerHeight,
@@ -127,7 +139,9 @@ function M.build(width, height)
       dataRowHeight = 1,
       gaugeThickness = gaugeThickness,
       buttonHeight = buttonHeight,
-      badgeHeight = 1,
+      badgeHeight = badgeHeight,
+      laserModuleHeight = (density == "small") and 1 or 2,
+      laserModuleWidth = 3,
     },
     text = {
       normalize = normalizeText,
