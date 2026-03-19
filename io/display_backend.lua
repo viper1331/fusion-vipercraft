@@ -235,11 +235,60 @@ end
 
 local function buildTomTermSurface(gpu, cfg)
   local scale = sanitizeTomScale(cfg and cfg.monitorScale)
-  local charW = math.max(2, math.floor((6 * scale) + 0.5))
-  local charH = math.max(3, math.floor((9 * scale) + 0.5))
   local pxW, pxH = readTomResolution(gpu)
-  local width = math.max(1, math.floor((pxW or 192) / charW))
-  local height = math.max(1, math.floor((pxH or 108) / charH))
+
+  local function detectTextMetrics()
+    local defaultCharW = math.max(2, math.floor((6 * scale) + 0.5))
+    local defaultCharH = math.max(3, math.floor((9 * scale) + 0.5))
+
+    local measuredW = nil
+    if type(gpu and gpu.getTextLength) == "function" then
+      local okW, rawW = pcall(gpu.getTextLength, "W")
+      if okW and tonumber(rawW) then
+        measuredW = math.max(1, math.floor((tonumber(rawW) or 1) + 0.5))
+      end
+    end
+
+    local measuredH = nil
+    local hAccessors = {
+      "getFontHeight",
+      "getTextHeight",
+      "getCharHeight",
+    }
+    for _, methodName in ipairs(hAccessors) do
+      local fn = gpu and gpu[methodName]
+      if type(fn) == "function" then
+        local okH, rawH = pcall(fn)
+        if okH and tonumber(rawH) then
+          measuredH = math.max(1, math.floor((tonumber(rawH) or 1) + 0.5))
+          break
+        end
+      end
+    end
+
+    local charW = measuredW or defaultCharW
+    local charH = measuredH or defaultCharH
+
+    local effectivePxW = pxW or 192
+    local effectivePxH = pxH or 108
+    local width = math.max(1, math.floor(effectivePxW / math.max(1, charW)))
+    local height = math.max(1, math.floor(effectivePxH / math.max(1, charH)))
+
+    -- Tom GPU expose des APIs differentes selon versions/modpacks.
+    -- Si la grille resulte en UI inutilisable, on compacte moins les cellules.
+    if width < 60 or height < 24 then
+      local tunedCharW = math.max(1, math.floor(effectivePxW / 90))
+      local tunedCharH = math.max(1, math.floor(effectivePxH / 40))
+      charW = math.max(1, math.min(charW, tunedCharW))
+      charH = math.max(1, math.min(charH, tunedCharH))
+      width = math.max(1, math.floor(effectivePxW / charW))
+      height = math.max(1, math.floor(effectivePxH / charH))
+    end
+
+    return charW, charH, width, height
+  end
+
+  local charW, charH, width, height = detectTextMetrics()
 
   local palette = {}
   for k, v in pairs(DEFAULT_PALETTE) do
@@ -265,6 +314,15 @@ local function buildTomTermSurface(gpu, cfg)
     end
     local ok = pcall(fn, ...)
     return ok
+  end
+
+  local function callGpuVariants(methodName, variants)
+    for _, args in ipairs(variants or {}) do
+      if callGpu(methodName, table.unpack(args)) then
+        return true
+      end
+    end
+    return false
   end
 
   local function syncGpu()
@@ -294,8 +352,16 @@ local function buildTomTermSurface(gpu, cfg)
   end
 
   local function drawFill(x, y, w, h, color)
-    if callGpu("filledRectangle", x, y, w, h, color) then return end
-    if callGpu("fillRect", x, y, w, h, color) then return end
+    local x2 = x + math.max(0, w - 1)
+    local y2 = y + math.max(0, h - 1)
+    if callGpuVariants("filledRectangle", {
+      { x, y, w, h, color },
+      { x, y, x2, y2, color },
+    }) then return end
+    if callGpuVariants("fillRect", {
+      { x, y, w, h, color },
+      { x, y, x2, y2, color },
+    }) then return end
     if x == 1 and y == 1 and pxW and pxH and w >= pxW and h >= pxH then
       if callGpu("fill", color) then return end
     end
@@ -303,9 +369,21 @@ local function buildTomTermSurface(gpu, cfg)
 
   local function drawGlyph(x, y, char, color)
     if char == " " then return end
-    if callGpu("drawText", x, y, char, color, -1, scale) then return end
-    if callGpu("drawString", x, y, char, color) then return end
-    callGpu("drawChar", x, y, string.byte(char), color, -1, scale)
+    if callGpuVariants("drawText", {
+      { x, y, char, color, -1, scale },
+      { char, x, y, color, -1, scale },
+      { char, x, y, color },
+      { x, y, char, color },
+    }) then return end
+    if callGpuVariants("drawString", {
+      { x, y, char, color },
+      { char, x, y, color },
+    }) then return end
+    callGpuVariants("drawChar", {
+      { x, y, string.byte(char), color, -1, scale },
+      { string.byte(char), x, y, color },
+      { x, y, string.byte(char), color },
+    })
   end
 
   local cursorX, cursorY = 1, 1

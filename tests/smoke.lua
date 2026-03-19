@@ -132,6 +132,7 @@ local modules = {
   "display_backend.lua",
   "display_selection_preference.lua",
   "monitor_backend_bridge.lua",
+  "tom_surface_compat.lua",
   "install_display_dtfuel_config.lua",
   "reactor_diagram_render.lua",
   "responsive_render.lua",
