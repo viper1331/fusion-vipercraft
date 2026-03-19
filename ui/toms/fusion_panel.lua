@@ -331,6 +331,7 @@ function M.build(api)
       local methodMatches = type(state.runtimeMethodMatches) == "table" and state.runtimeMethodMatches or {}
       local layout = type(diag.lastLayout) == "table" and diag.lastLayout or {}
       local renderErrors = type(diag.errors) == "table" and diag.errors or {}
+      local surfaceCtx = type(diag.surfaceContext) == "table" and diag.surfaceContext or {}
       local useWindows = diag.windowAllowed == true
       local usedWindows = diag.windowUsed == true
       local debugEnabled = state.tomUiDiagnosticMode == true or TOMS_DEBUG_DEFAULT == true
@@ -350,7 +351,21 @@ function M.build(api)
       addLine(lines, "Selected reactor", tostring(hw.reactorName or hw.logicName or "N/A"))
       addLine(lines, "Selected laser", tostring(hw.laserName or "N/A"))
       addLine(lines, "Runtime dimensions", string.format("%dx%d", tonumber(width) or 0, tonumber(height) or 0))
-      addLine(lines, "Runtime source", tostring(source or "unknown"))
+      addLine(lines, "Runtime source", tostring(surfaceCtx.renderSource or source or "unknown"))
+      lines[#lines + 1] = ""
+
+      lines[#lines + 1] = "[SURFACE PIPELINE]"
+      addLine(lines, "Render backend", tostring(surfaceCtx.backend or hw.monitorBackend or "N/A"))
+      addLine(lines, "Input source", tostring(surfaceCtx.inputSource or source or "N/A"))
+      addLine(lines, "Render source label", tostring(surfaceCtx.renderSource or source or "N/A"))
+      addLine(lines, "Render surface type", tostring(surfaceCtx.renderSurfaceType or "N/A"))
+      addLine(lines, "Display surface type", tostring(surfaceCtx.displaySurfaceType or "N/A"))
+      addLine(lines, "Native surface type", tostring(surfaceCtx.nativeSurfaceType or "N/A"))
+      addLine(lines, "Display dimensions", tostring(surfaceCtx.displayWidth or 0) .. "x" .. tostring(surfaceCtx.displayHeight or 0))
+      addLine(lines, "Native dimensions", tostring(surfaceCtx.nativeWidth or 0) .. "x" .. tostring(surfaceCtx.nativeHeight or 0))
+      addLine(lines, "Surface created at", tostring(surfaceCtx.wrappedPath or "N/A"))
+      addLine(lines, "Renderer call path", tostring(surfaceCtx.sourcePath or "N/A"))
+      addLine(lines, "Term redirected to", tostring(surfaceCtx.termRedirectTarget or "N/A"))
       lines[#lines + 1] = ""
 
       lines[#lines + 1] = "[MODE]"
@@ -466,6 +481,243 @@ function M.build(api)
     diag.debugFileLastStatus = "ok"
     diag.debugFileLastError = ""
     return true, nil
+  end
+
+  local function makeTomNativeCanvas(surface, width, height, diag)
+    local w = math.max(1, math.floor(tonumber(width) or 1))
+    local h = math.max(1, math.floor(tonumber(height) or 1))
+    local lineH = math.max(8, math.floor(math.max(8, h) * 0.024))
+    local palette = {
+      bg = 0xFF0B1020,
+      panel = 0xFF101A33,
+      panelHeader = 0xFF16375E,
+      border = 0xFF4AA3FF,
+      text = 0xFFE8F4FF,
+      muted = 0xFFA7BDD9,
+      ok = 0xFF6DDE7B,
+      warn = 0xFFF5C04C,
+      bad = 0xFFF46969,
+      info = 0xFF66CCFF,
+    }
+
+    local function callSafe(methodName, ...)
+      local fn = type(surface) == "table" and surface[methodName] or nil
+      if type(fn) ~= "function" then
+        return false
+      end
+      local ok, err = pcall(fn, ...)
+      if not ok then
+        pushDiagError(diag, "native_" .. tostring(methodName) .. "_failed:" .. tostring(err))
+      end
+      return ok
+    end
+
+    local function callVariants(methodName, variants)
+      for _, args in ipairs(variants or {}) do
+        if callSafe(methodName, table.unpack(args)) then
+          return true
+        end
+      end
+      return false
+    end
+
+    local function clampRect(x, y, rw, rh)
+      local x1 = math.floor(tonumber(x) or 1)
+      local y1 = math.floor(tonumber(y) or 1)
+      local ww = math.max(0, math.floor(tonumber(rw) or 0))
+      local hh = math.max(0, math.floor(tonumber(rh) or 0))
+      if ww <= 0 or hh <= 0 then
+        return nil
+      end
+      local x2 = x1 + ww - 1
+      local y2 = y1 + hh - 1
+      if x2 < 1 or y2 < 1 or x1 > w or y1 > h then
+        return nil
+      end
+      if x1 < 1 then x1 = 1 end
+      if y1 < 1 then y1 = 1 end
+      if x2 > w then x2 = w end
+      if y2 > h then y2 = h end
+      local cw = (x2 - x1) + 1
+      local ch = (y2 - y1) + 1
+      if cw <= 0 or ch <= 0 then
+        return nil
+      end
+      return x1, y1, cw, ch
+    end
+
+    local function fillRect(x, y, rw, rh, color)
+      local x1, y1, cw, ch = clampRect(x, y, rw, rh)
+      if not x1 then return end
+      local x2 = x1 + cw - 1
+      local y2 = y1 + ch - 1
+      if callVariants("filledRectangle", {
+        { x1, y1, cw, ch, color },
+        { x1, y1, x2, y2, color },
+      }) then return end
+      if callVariants("fillRect", {
+        { x1, y1, cw, ch, color },
+        { x1, y1, x2, y2, color },
+      }) then return end
+      if x1 == 1 and y1 == 1 and cw >= w and ch >= h and callSafe("fill", color) then
+        return
+      end
+    end
+
+    local function drawText(x, y, text, color, bgColor)
+      local xx = math.floor(tonumber(x) or 1)
+      local yy = math.floor(tonumber(y) or 1)
+      local raw = tostring(text or "")
+      if raw == "" then return end
+      if yy < 1 or yy > h then return end
+      local textWidth = #raw
+      if type(surface) == "table" and type(surface.getTextLength) == "function" then
+        local okLen, len = pcall(surface.getTextLength, raw)
+        if okLen and tonumber(len) then
+          textWidth = math.max(1, math.floor(tonumber(len)))
+        end
+      end
+      if bgColor ~= nil then
+        fillRect(xx, yy, math.max(1, textWidth), lineH, bgColor)
+      end
+      if callVariants("drawText", {
+        { xx, yy, raw, color },
+        { raw, xx, yy, color },
+        { xx, yy, raw },
+        { raw, xx, yy },
+      }) then return end
+      callVariants("drawString", {
+        { xx, yy, raw, color },
+        { raw, xx, yy, color },
+        { xx, yy, raw },
+        { raw, xx, yy },
+      })
+    end
+
+    local function sync()
+      if callSafe("sync") then return end
+      if callSafe("flush") then return end
+      callSafe("update")
+    end
+
+    return {
+      w = w,
+      h = h,
+      lineH = lineH,
+      palette = palette,
+      fillRect = fillRect,
+      drawText = drawText,
+      sync = sync,
+    }
+  end
+
+  local function computeNativeDiagnosticLayout(width, height)
+    local w = math.max(1, math.floor(tonumber(width) or 1))
+    local h = math.max(1, math.floor(tonumber(height) or 1))
+    local margin = math.max(4, math.floor(math.min(w, h) * 0.02))
+    local gap = math.max(3, math.floor(margin * 0.6))
+    local headerH = math.max(34, math.floor(h * 0.12))
+    local footerH = math.max(36, math.floor(h * 0.13))
+    if headerH + footerH + (margin * 2) >= h then
+      headerH = math.max(24, math.floor(h * 0.10))
+      footerH = math.max(24, math.floor(h * 0.10))
+    end
+    local contentY = margin + headerH + gap
+    local contentH = math.max(20, h - contentY - footerH - margin - gap)
+    local usableW = math.max(20, w - (margin * 2) - (gap * 2))
+    local colW = math.max(8, math.floor(usableW / 3))
+    local leftW = colW
+    local centerW = colW
+    local rightW = math.max(8, usableW - leftW - centerW)
+    local leftX = margin
+    local midX = leftX + leftW + gap
+    local rightX = midX + centerW + gap
+
+    local function mkRect(x, y, rw, rh)
+      return {
+        x = math.floor(x),
+        y = math.floor(y),
+        w = math.max(1, math.floor(rw)),
+        h = math.max(1, math.floor(rh)),
+      }
+    end
+
+    return {
+      mode = "diagnostic_native_pixels",
+      density = "native",
+      root = mkRect(1, 1, w, h),
+      header = mkRect(margin, margin, w - (margin * 2), headerH),
+      reactor = mkRect(leftX, contentY, leftW, contentH),
+      temperatures = mkRect(midX, contentY, centerW, contentH),
+      laser = mkRect(rightX, contentY, rightW, contentH),
+      status = nil,
+      footer = mkRect(margin, h - footerH - margin + 1, w - (margin * 2), footerH),
+    }
+  end
+
+  local function drawNativePanel(canvas, bounds, title, tone)
+    local p = canvas.palette
+    canvas.fillRect(bounds.x, bounds.y, bounds.w, bounds.h, p.panel)
+    canvas.fillRect(bounds.x, bounds.y, bounds.w, 2, p.border)
+    canvas.fillRect(bounds.x + 1, bounds.y + 1, math.max(1, bounds.w - 2), math.max(1, canvas.lineH), tone or p.panelHeader)
+    canvas.drawText(bounds.x + 4, bounds.y + 2, string.upper(tostring(title or "")), p.text, nil)
+  end
+
+  local function drawNativeKV(canvas, bounds, row, label, value, valueTone)
+    local p = canvas.palette
+    local y = bounds.y + canvas.lineH + 5 + (row * canvas.lineH)
+    if y > (bounds.y + bounds.h - canvas.lineH) then
+      return
+    end
+    local labelX = bounds.x + 4
+    local valueX = bounds.x + math.max(80, math.floor(bounds.w * 0.45))
+    canvas.drawText(labelX, y, tostring(label or "-"), p.muted, nil)
+    canvas.drawText(valueX, y, tostring(value or "N/A"), valueTone or p.text, nil)
+  end
+
+  local function drawNativeDiagnostic(surface, width, height, model, source, diag)
+    local canvas = makeTomNativeCanvas(surface, width, height, diag)
+    local p = canvas.palette
+    local layout = computeNativeDiagnosticLayout(canvas.w, canvas.h)
+
+    canvas.fillRect(layout.root.x, layout.root.y, layout.root.w, layout.root.h, p.bg)
+
+    drawNativePanel(canvas, layout.header, "TOMS DEBUG MODE", p.panelHeader)
+    canvas.drawText(layout.header.x + 4, layout.header.y + canvas.lineH + 4, "SOURCE: " .. tostring(source or "unknown"), p.info, nil)
+    canvas.drawText(layout.header.x + 4, layout.header.y + (canvas.lineH * 2) + 4, "GPU: " .. tostring(hw.monitorName or "N/A"), p.info, nil)
+    canvas.drawText(layout.header.x + math.max(120, math.floor(layout.header.w * 0.55)), layout.header.y + canvas.lineH + 4, string.format("RUNTIME: %dx%d", canvas.w, canvas.h), p.warn, nil)
+    canvas.drawText(layout.header.x + 4, layout.header.y + (canvas.lineH * 3) + 4, "DEBUG FILE: " .. TOMS_DEBUG_FILE, p.text, nil)
+
+    drawNativePanel(canvas, layout.reactor, "Reactor", p.panelHeader)
+    drawNativeKV(canvas, layout.reactor, 0, "Global", model.statusText, p.ok)
+    drawNativeKV(canvas, layout.reactor, 1, "Phase", model.phase, p.info)
+    drawNativeKV(canvas, layout.reactor, 2, "Core", state.reactorFormed and "FORMED" or "UNFORMED", state.reactorFormed and p.ok or p.warn)
+    drawNativeKV(canvas, layout.reactor, 3, "Injection", tostring(model.injectionRate) .. " mB/t", p.info)
+    drawNativeKV(canvas, layout.reactor, 4, "Fuel", model.fuelMode, p.info)
+    drawNativeKV(canvas, layout.reactor, 5, "Hohlraum", model.hohlraum, state.hohlraumPresent and p.ok or p.warn)
+
+    drawNativePanel(canvas, layout.temperatures, "Temperatures", p.warn)
+    drawNativeKV(canvas, layout.temperatures, 0, "Plasma", model.plasmaTemp, p.warn)
+    drawNativeKV(canvas, layout.temperatures, 1, "Case", model.caseTemp, p.bad)
+    drawNativeKV(canvas, layout.temperatures, 2, "Ignition", "300.0 C", p.info)
+    drawNativeKV(canvas, layout.temperatures, 3, "Blockers", tostring(#model.blockers), (#model.blockers > 0) and p.bad or p.ok)
+    drawNativeKV(canvas, layout.temperatures, 4, "Warnings", tostring(#model.warnings), (#model.warnings > 0) and p.warn or p.ok)
+
+    drawNativePanel(canvas, layout.laser, "Laser / Power", p.ok)
+    drawNativeKV(canvas, layout.laser, 0, "Laser State", model.laserState, p.ok)
+    drawNativeKV(canvas, layout.laser, 1, "Laser Pct", tostring(model.laserPct) .. "%", p.ok)
+    drawNativeKV(canvas, layout.laser, 2, "Laser E", model.laserEnergy, p.info)
+    drawNativeKV(canvas, layout.laser, 3, "Laser Max", model.laserMax, p.info)
+    drawNativeKV(canvas, layout.laser, 4, "Grid", model.energyKnown and string.format("%.0f%%", model.energyPct) or "N/A", p.info)
+    drawNativeKV(canvas, layout.laser, 5, "Redraw", tostring(diag.redrawCount or 0), p.info)
+    drawNativeKV(canvas, layout.laser, 6, "Sync", tostring(diag.syncCount or 0), p.info)
+
+    drawNativePanel(canvas, layout.footer, "Controls", p.panelHeader)
+    canvas.drawText(layout.footer.x + 4, layout.footer.y + canvas.lineH + 4, "REFRESH | LASER PULSE | INJ - | INJ + | QUIT | UI DIAG", p.text, nil)
+    canvas.drawText(layout.footer.x + 4, layout.footer.y + (canvas.lineH * 2) + 4, "DIRECT TOM GPU | NO WINDOWS | LAYOUT/COMPONENTS BYPASSED", p.info, nil)
+
+    canvas.sync()
+    return layout
   end
 
   local function buildLegacyLayout(layout, theme)
@@ -766,14 +1018,9 @@ function M.build(api)
     return false
   end
 
-  local function render(source, surface, width, height)
+  local function render(source, surface, width, height, renderCtx)
+    renderCtx = type(renderCtx) == "table" and renderCtx or {}
     local theme = TomTheme.build(width, height)
-    local rootUi = TomComponents.new({
-      target = term.current(),
-      width = width,
-      height = height,
-      theme = theme,
-    })
     local model = runtimeModel(theme)
     local diag = ensureTomRenderDiag()
     diag.redrawCount = diag.redrawCount + 1
@@ -781,11 +1028,40 @@ function M.build(api)
     diag.lastSurface = tostring(hw.monitorName or source or "unknown")
     diag.lastW = tonumber(width) or 0
     diag.lastH = tonumber(height) or 0
+    diag.surfaceContext = {
+      backend = tostring(renderCtx.backend or hw.monitorBackend or "unknown"),
+      inputSource = tostring(renderCtx.inputSource or source or "unknown"),
+      renderSource = tostring(renderCtx.renderSource or source or "unknown"),
+      renderSurfaceType = tostring(type(surface)),
+      displaySurfaceType = tostring(type(renderCtx.displaySurface)),
+      nativeSurfaceType = tostring(type(renderCtx.nativeSurface)),
+      displayWidth = tonumber(renderCtx.displayWidth) or 0,
+      displayHeight = tonumber(renderCtx.displayHeight) or 0,
+      nativeWidth = tonumber(renderCtx.nativeWidth) or 0,
+      nativeHeight = tonumber(renderCtx.nativeHeight) or 0,
+      sourcePath = tostring(renderCtx.sourcePath or "ui.toms.fusion_panel.render"),
+      wrappedPath = tostring(renderCtx.wrappedPath or "unknown"),
+      termRedirectTarget = tostring(renderCtx.termRedirectTarget or "term.current"),
+    }
 
     local simpleMode = (state.tomUiDiagnosticMode == true) or (TOMS_DEBUG_DEFAULT == true)
     local layout = nil
+    local usedNativeDebug = false
     if simpleMode then
-      layout = computeDiagnosticLayout(width, height, theme)
+      if renderCtx.useNativeDebug == true and type(surface) == "table" then
+        usedNativeDebug = true
+        layout = drawNativeDiagnostic(surface, width, height, model, source, diag)
+      else
+        local rootUi = TomComponents.new({
+          target = term.current(),
+          width = width,
+          height = height,
+          theme = theme,
+        })
+        layout = computeDiagnosticLayout(width, height, theme)
+        rootUi.drawBackdrop(layout.root or rect(1, 1, width, height))
+        drawSimpleDiagnostic(rootUi, width, height, theme, model, source, "TOM_DIRECT_NO_WINDOWS")
+      end
       diag.renderPath = "tom_simple_diag"
       diag.windowAllowed = false
       diag.windowUsed = false
@@ -806,9 +1082,10 @@ function M.build(api)
         status = nil,
         footer = layout.footer,
       }
-      rootUi.drawBackdrop(layout.root or rect(1, 1, width, height))
-      drawSimpleDiagnostic(rootUi, width, height, theme, model, source, "TOM_DIRECT_NO_WINDOWS")
-      if type(api.buildButtons) == "function" and type(api.drawButtons) == "function" then
+      if type(layout) ~= "table" then
+        layout = computeDiagnosticLayout(width, height, theme)
+      end
+      if (not usedNativeDebug) and type(api.buildButtons) == "function" and type(api.drawButtons) == "function" then
         api.buildButtons(buildLegacyLayout({
           legacy = {
             mode = "standard",
@@ -860,6 +1137,12 @@ function M.build(api)
       status = layout.left and layout.left.status or nil,
       footer = layout.footer,
     }
+    local rootUi = TomComponents.new({
+      target = term.current(),
+      width = width,
+      height = height,
+      theme = theme,
+    })
     rootUi.drawBackdrop(layout.root or rect(1, 1, width, height))
 
     if layout.tooSmall then

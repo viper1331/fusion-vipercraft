@@ -150,6 +150,7 @@ function M.setupMonitor(nativeTerm, hw, CFG, C, chosenCandidate, getTypeOf, logg
   hw.monitorTouchEvent = "monitor_touch"
   hw.monitorTouchMapper = nil
   hw.monitorWindows = nil
+  hw.monitorSurfaceMeta = nil
 
   if type(term) == "table" and type(term.redirect) == "function" then
     pcall(term.redirect, nativeTerm)
@@ -166,6 +167,7 @@ function M.setupMonitor(nativeTerm, hw, CFG, C, chosenCandidate, getTypeOf, logg
 
     local surface, meta = DisplayBackend.createSurface(candidate, CFG)
     hw.displaySurface = surface or hw.monitor
+    hw.monitorSurfaceMeta = type(meta) == "table" and meta or nil
 
     hw.monitorBackend = (meta and meta.kind) or candidate.kind or "cc_monitor"
     hw.monitorTouchEvent = (meta and meta.touchEvent) or candidate.touchEvent or "monitor_touch"
@@ -218,6 +220,8 @@ function M.setupMonitor(nativeTerm, hw, CFG, C, chosenCandidate, getTypeOf, logg
           setSizeTried = tostring((meta and meta.setSizeTried) and 1 or 0),
           setSizeApplied = tostring((meta and meta.setSizeApplied) and 1 or 0),
           setSizeMode = tostring((meta and meta.setSizeMode) or "none"),
+          surfaceType = tostring(type(hw.displaySurface)),
+          nativeType = tostring(type(hw.monitor)),
         })
       end
     end

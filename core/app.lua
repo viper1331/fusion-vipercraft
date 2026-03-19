@@ -2961,8 +2961,12 @@ function M.run(options)
       state.controlBounds = nil
 
       local tw, th = term.getSize()
+      local renderSource = source
+      local renderSurface = surface
+      local renderW, renderH = tw, th
+      local tomRenderCtx = nil
       local rendered = false
-      drawStats.lastSource = source
+      drawStats.lastSource = renderSource
       drawStats.lastW = tw
       drawStats.lastH = th
       drawStats.lastSurface = tostring(hw.monitorName or source)
@@ -2976,19 +2980,68 @@ function M.run(options)
       drawStats.tomRenderAttempted = (variant == "tom")
       drawStats.tomRenderSucceeded = false
 
+      if variant == "tom" then
+        local meta = type(hw.monitorSurfaceMeta) == "table" and hw.monitorSurfaceMeta or {}
+        local nativeSurface = hw.monitor
+        local pixelW = tonumber(meta.pixelWidth) or tonumber(meta.pxW) or 0
+        local pixelH = tonumber(meta.pixelHeight) or tonumber(meta.pxH) or 0
+        if (pixelW <= 0 or pixelH <= 0) and type(nativeSurface) == "table" then
+          if type(nativeSurface.getResolution) == "function" then
+            local okRes, rx, ry = pcall(nativeSurface.getResolution)
+            if okRes then
+              pixelW = tonumber(rx) or pixelW
+              pixelH = tonumber(ry) or pixelH
+            end
+          elseif type(nativeSurface.getSize) == "function" then
+            local okRes, rx, ry = pcall(nativeSurface.getSize)
+            if okRes then
+              pixelW = tonumber(rx) or pixelW
+              pixelH = tonumber(ry) or pixelH
+            end
+          end
+        end
+        drawStats.nativeW = tonumber(pixelW) or 0
+        drawStats.nativeH = tonumber(pixelH) or 0
+        local useNativeDebug = (state.tomUiDiagnosticMode == true and type(nativeSurface) == "table" and drawStats.nativeW > 0 and drawStats.nativeH > 0)
+        if useNativeDebug then
+          renderSurface = nativeSurface
+          renderW = drawStats.nativeW
+          renderH = drawStats.nativeH
+        end
+        tomRenderCtx = {
+          backend = tostring(hw.monitorBackend or "toms_gpu"),
+          monitorName = tostring(hw.monitorName or "unknown"),
+          inputSource = tostring(source or "monitor"),
+          renderSource = "toms_gpu",
+          displaySurface = surface,
+          nativeSurface = nativeSurface,
+          displayWidth = tonumber(tw) or 0,
+          displayHeight = tonumber(th) or 0,
+          nativeWidth = tonumber(drawStats.nativeW) or 0,
+          nativeHeight = tonumber(drawStats.nativeH) or 0,
+          useNativeDebug = useNativeDebug,
+          sourcePath = "core.app.drawUI.drawSurface -> ui.toms.fusion_panel.render",
+          wrappedPath = "io.monitor.setupMonitor -> io.display_backend.createSurface",
+          termRedirectTarget = tostring(source or "monitor"),
+        }
+      end
+
       logger.debug("Display draw start", {
         frame = tostring(drawStats.frameId),
-        source = source,
+        source = renderSource,
+        renderLabel = tostring(tomRenderCtx and tomRenderCtx.renderSource or renderSource),
         variant = variant,
         backend = tostring(hw.monitorBackend or "terminal"),
         monitor = tostring(hw.monitorName or "none"),
-        width = tostring(tw),
-        height = tostring(th),
+        width = tostring(renderW),
+        height = tostring(renderH),
+        nativeWidth = tostring(drawStats.nativeW or 0),
+        nativeHeight = tostring(drawStats.nativeH or 0),
         tomDiag = tostring(state.tomUiDiagnosticMode == true),
       })
 
       if variant == "tom" and tomRenderer and type(tomRenderer.render) == "function" then
-        local okTom, errTom = pcall(tomRenderer.render, source, surface, tw, th)
+        local okTom, errTom = pcall(tomRenderer.render, renderSource, renderSurface, renderW, renderH, tomRenderCtx)
         if okTom then
           rendered = true
           drawStats.renderPath = state.tomUiDiagnosticMode and "tom_simple_diag" or "tom_full"
@@ -3004,10 +3057,10 @@ function M.run(options)
         if variant == "tom" then
           drawStats.fallbackAfterTom = true
           logger.warn("Tom render fallback to legacy", {
-            source = source,
+            source = renderSource,
             backend = tostring(hw.monitorBackend or "none"),
-            width = tostring(tw),
-            height = tostring(th),
+            width = tostring(renderW),
+            height = tostring(renderH),
           })
         end
         local layout = computeLayout(tw, th)
@@ -3058,7 +3111,7 @@ function M.run(options)
 
       logger.debug("Display draw end", {
         frame = tostring(drawStats.frameId),
-        source = source,
+        source = renderSource,
         variant = variant,
         path = tostring(drawStats.renderPath or "legacy"),
         fallback = tostring(drawStats.fallbackAfterTom == true),

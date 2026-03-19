@@ -184,6 +184,7 @@ function M.defaultHardwareState()
     monitorTouchEvent = "monitor_touch",
     monitorTouchMapper = nil,
     monitorWindows = nil,
+    monitorSurfaceMeta = nil,
     reactor = nil,
     reactorName = nil,
     logic = nil,
