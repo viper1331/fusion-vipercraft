@@ -95,6 +95,10 @@ local function handleMainChar(ch, api)
   elseif ch == "7" then
     state.currentView = "setup"
     api.pushEvent("View setup")
+  elseif ch == "8" then
+    state.tomUiDiagnosticMode = not state.tomUiDiagnosticMode
+    state.lastAction = state.tomUiDiagnosticMode and "Tom UI diag ON" or "Tom UI diag OFF"
+    api.pushEvent(state.lastAction)
   elseif ch == "i" then
     api.triggerAutomaticIgnitionSequence()
   elseif ch == "l" then

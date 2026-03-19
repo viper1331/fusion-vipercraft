@@ -145,6 +145,19 @@ function M.defaultRuntimeState(localVersion, updateEnabled)
 
     tick = 0,
     debugHitboxes = false,
+    tomUiDiagnosticMode = false,
+    tomRenderDiag = {
+      redrawCount = 0,
+      syncCount = 0,
+      windowAllowed = false,
+      windowUsed = false,
+      renderPath = "none",
+      lastSource = "none",
+      lastW = 0,
+      lastH = 0,
+      lastSurface = "none",
+      fallbackAfterTom = false,
+    },
   }
 end
 

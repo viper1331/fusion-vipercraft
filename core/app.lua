@@ -9,7 +9,8 @@
 
 local M = {}
 
-function M.run()
+function M.run(options)
+  options = type(options) == "table" and options or {}
   local Theme = require("ui.theme")
   local UIComponents = require("ui.components")
   local UIViews = require("ui.views")
@@ -53,6 +54,10 @@ function M.run()
   local state = CoreState.new(CoreState.defaultRuntimeState(LOCAL_VERSION, UPDATE_ENABLED))
   local hw = CoreState.defaultHardwareState()
   local setupMonitor
+  if options.tomsDebug == true then
+    state.tomUiDiagnosticMode = true
+    state.lastAction = "Tom UI diag ON (--toms-debug)"
+  end
   local logger = CoreLogger.new({
     fs = fs,
     term = nativeTerm,
@@ -68,6 +73,7 @@ function M.run()
   logger.info("Fusion runtime boot", {
     version = tostring(LOCAL_VERSION),
     refreshDelay = tostring(CFG.refreshDelay),
+    tomsDebug = tostring(state.tomUiDiagnosticMode == true),
   })
 
   local UI_PALETTE = {
@@ -2608,6 +2614,11 @@ function M.run()
         state.lastAction = "Quit requested"
         pushEvent("Quit requested")
       end,
+      toggleTomDiagnostic = function()
+        state.tomUiDiagnosticMode = not state.tomUiDiagnosticMode
+        state.lastAction = state.tomUiDiagnosticMode and "Tom UI diag ON" or "Tom UI diag OFF"
+        pushEvent(state.lastAction)
+      end,
       toggleDebugHitboxes = function()
         state.debugHitboxes = not state.debugHitboxes
         state.lastAction = state.debugHitboxes and "Hitbox debug ON" or "Hitbox debug OFF"
@@ -2896,7 +2907,14 @@ function M.run()
   })
 
   local function drawUI()
+    local drawStats = type(state.tomRenderDiag) == "table" and state.tomRenderDiag or {}
+    state.tomRenderDiag = drawStats
+    drawStats.redrawCount = tonumber(drawStats.redrawCount) or 0
+    drawStats.syncCount = tonumber(drawStats.syncCount) or 0
+    drawStats.frameId = tonumber(drawStats.frameId) or 0
+
     local function drawSurface(source, surface)
+      drawStats.frameId = drawStats.frameId + 1
       term.redirect(surface)
       local variant = "cc"
       if source == "monitor" and hw.monitorBackend == "toms_gpu" then
@@ -2910,17 +2928,45 @@ function M.run()
 
       local tw, th = term.getSize()
       local rendered = false
+      drawStats.lastSource = source
+      drawStats.lastW = tw
+      drawStats.lastH = th
+      drawStats.lastSurface = tostring(hw.monitorName or source)
+      drawStats.fallbackAfterTom = false
+      drawStats.renderPath = "legacy"
+
+      logger.debug("Display draw start", {
+        frame = tostring(drawStats.frameId),
+        source = source,
+        variant = variant,
+        backend = tostring(hw.monitorBackend or "terminal"),
+        monitor = tostring(hw.monitorName or "none"),
+        width = tostring(tw),
+        height = tostring(th),
+        tomDiag = tostring(state.tomUiDiagnosticMode == true),
+      })
 
       if variant == "tom" and tomRenderer and type(tomRenderer.render) == "function" then
         local okTom, errTom = pcall(tomRenderer.render, source, surface, tw, th)
         if okTom then
           rendered = true
+          drawStats.renderPath = state.tomUiDiagnosticMode and "tom_simple_diag" or "tom_full"
         else
           logger.error("Tom renderer failed", { err = tostring(errTom) })
+          drawStats.renderPath = "tom_error"
         end
       end
 
       if not rendered then
+        if variant == "tom" then
+          drawStats.fallbackAfterTom = true
+          logger.warn("Tom render fallback to legacy", {
+            source = source,
+            backend = tostring(hw.monitorBackend or "none"),
+            width = tostring(tw),
+            height = tostring(th),
+          })
+        end
         local layout = computeLayout(tw, th)
 
         term.setBackgroundColor(C.bg)
@@ -2957,13 +3003,31 @@ function M.run()
 
       if type(surface.flush) == "function" then
         pcall(surface.flush)
+        drawStats.syncCount = drawStats.syncCount + 1
+        logger.debug("Display sync", { frame = tostring(drawStats.frameId), source = source, method = "flush" })
       elseif type(surface.sync) == "function" then
         pcall(surface.sync)
+        drawStats.syncCount = drawStats.syncCount + 1
+        logger.debug("Display sync", { frame = tostring(drawStats.frameId), source = source, method = "sync" })
       end
+
+      logger.debug("Display draw end", {
+        frame = tostring(drawStats.frameId),
+        source = source,
+        variant = variant,
+        path = tostring(drawStats.renderPath or "legacy"),
+        fallback = tostring(drawStats.fallbackAfterTom == true),
+      })
     end
 
     local mode = resolveDisplayOutputMode()
     local monitorSurface = hw.displaySurface or hw.monitor
+    logger.debug("Display composition", {
+      mode = tostring(mode),
+      monitor = tostring(monitorSurface ~= nil),
+      backend = tostring(hw.monitorBackend or "terminal"),
+      order = (mode == "both" and monitorSurface) and "terminal->monitor" or (mode == "monitor" and "monitor-only" or "terminal-only"),
+    })
     if mode == "monitor" and monitorSurface then
       drawSurface("monitor", monitorSurface)
       clearHitboxes("terminal")

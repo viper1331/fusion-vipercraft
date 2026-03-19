@@ -3,6 +3,8 @@ local TomLayout = require("ui.toms.layout")
 local TomComponents = require("ui.toms.components")
 
 local M = {}
+-- Manual force switch for local debugging from this module.
+local TOMS_DEBUG_DEFAULT = false
 
 local function asNumber(value, fallback)
   local n = tonumber(value)
@@ -89,6 +91,16 @@ function M.build(api)
   local function logWarn(message, meta)
     if type(log.warn) == "function" then
       log.warn(message, meta)
+    end
+  end
+  local function logInfo(message, meta)
+    if type(log.info) == "function" then
+      log.info(message, meta)
+    end
+  end
+  local function logDebug(message, meta)
+    if type(log.debug) == "function" then
+      log.debug(message, meta)
     end
   end
 
@@ -217,6 +229,24 @@ function M.build(api)
       hohlraum = state.hohlraumPresent and "PRESENT" or "MISSING",
       allowControl = CFG.allowControl == true,
     }
+  end
+
+  local function ensureTomRenderDiag()
+    if type(state.tomRenderDiag) ~= "table" then
+      state.tomRenderDiag = {}
+    end
+    local diag = state.tomRenderDiag
+    diag.redrawCount = tonumber(diag.redrawCount) or 0
+    diag.syncCount = tonumber(diag.syncCount) or 0
+    diag.windowAllowed = diag.windowAllowed == true
+    diag.windowUsed = diag.windowUsed == true
+    diag.renderPath = tostring(diag.renderPath or "none")
+    diag.lastSource = tostring(diag.lastSource or "none")
+    diag.lastSurface = tostring(diag.lastSurface or "none")
+    diag.lastW = tonumber(diag.lastW) or 0
+    diag.lastH = tonumber(diag.lastH) or 0
+    diag.fallbackAfterTom = diag.fallbackAfterTom == true
+    return diag
   end
 
   local function buildLegacyLayout(layout, theme)
@@ -382,6 +412,106 @@ function M.build(api)
     ui.drawLabelValue(bounds, 3, "Laser", model.laserState, model.laserTone, theme.palette.textMuted)
   end
 
+  local function computeDiagnosticLayout(width, height, theme)
+    local root = rect(1, 1, width, height)
+    local headerH = math.max(3, math.min(4, theme.sizes.headerHeight + 2))
+    local footerH = math.max(4, math.min(6, theme.sizes.footerHeight))
+    local header = rect(1, 1, width, headerH)
+    local footer = rect(1, height - footerH + 1, width, footerH)
+    local content = rect(1, header.y2 + 1, width, math.max(1, footer.y - (header.y2 + 1)))
+    local contentInner = inset(content, 1, 1, 1, 1)
+    local colGap = 1
+    local usableW = contentInner.w - (colGap * 2)
+    if usableW < 3 then usableW = 3 end
+    local baseW = math.floor(usableW / 3)
+    if baseW < 8 then baseW = 8 end
+    local leftW = baseW
+    local midW = baseW
+    local rightW = math.max(8, usableW - leftW - midW)
+    local leftX = contentInner.x
+    local midX = leftX + leftW + colGap
+    local rightX = midX + midW + colGap
+    local panelY = contentInner.y
+    local panelH = contentInner.h
+
+    return {
+      root = root,
+      header = header,
+      footer = footer,
+      reactor = rect(leftX, panelY, leftW, panelH),
+      temperatures = rect(midX, panelY, midW, panelH),
+      laser = rect(rightX, panelY, rightW, panelH),
+      controls = inset(footer, 1, 1, 1, 1),
+      footerStatus = rect(footer.x + 1, footer.y, math.max(1, footer.w - 2), 1),
+    }
+  end
+
+  local function drawSimplePanel(ui, bounds, title, border, bg)
+    ui.safeFrame(bounds, border, bg)
+    ui.safeFilledRect(bounds.x + 1, bounds.y + 1, math.max(1, bounds.w - 2), 1, border)
+    ui.safeText(bounds.x + 2, bounds.y + 1, string.upper(title), colors.white, border, math.max(1, bounds.w - 4), "left")
+  end
+
+  local function drawSimpleDiagnostic(ui, width, height, theme, model, source, renderType)
+    local diagState = ensureTomRenderDiag()
+    local d = computeDiagnosticLayout(width, height, theme)
+    local bg = theme.palette.bgRoot or colors.black
+    ui.safeFilledRect(d.root.x, d.root.y, d.root.w, d.root.h, bg)
+
+    local title = "TOMS DEBUG MODE"
+    local sizeText = tostring(width) .. "x" .. tostring(height)
+    local surfaceText = "SRC " .. tostring(source) .. " | GPU " .. tostring(model.monitorName)
+    ui.safeFilledRect(d.header.x, d.header.y, d.header.w, d.header.h, theme.palette.panelHeader or colors.blue)
+    ui.safeText(d.header.x + 2, d.header.y, title, theme.palette.textPrimary or colors.white, theme.palette.panelHeader, math.max(1, d.header.w - 4), "left")
+    ui.safeText(d.header.x + 2, d.header.y + 1, surfaceText, theme.palette.info or colors.cyan, theme.palette.panelHeader, math.max(1, d.header.w - 4), "left")
+    ui.safeText(d.header.x + 2, d.header.y + 1, "GPU " .. sizeText, theme.palette.warning or colors.orange, theme.palette.panelHeader, math.max(1, d.header.w - 4), "right")
+    if d.header.h >= 3 then
+      ui.safeText(d.header.x + 2, d.header.y + 2, "RENDER " .. tostring(renderType or "TOM_DIRECT"), theme.palette.textMuted or colors.lightGray, theme.palette.panelHeader, math.max(1, d.header.w - 4), "left")
+    end
+
+    drawSimplePanel(ui, d.reactor, "Reactor", theme.palette.border or colors.lightBlue, theme.palette.panelBg or colors.black)
+    ui.drawLabelValue(d.reactor, 0, "Global", model.statusText, model.statusTone, theme.palette.textMuted)
+    ui.drawLabelValue(d.reactor, 1, "Phase", model.phase, model.phaseTone, theme.palette.textMuted)
+    ui.drawLabelValue(d.reactor, 2, "Core", state.reactorFormed and "FORMED" or "UNFORMED", state.reactorFormed and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
+    ui.drawLabelValue(d.reactor, 3, "Injection", tostring(model.injectionRate) .. " mB/t", theme.palette.info, theme.palette.textMuted)
+    ui.drawLabelValue(d.reactor, 4, "Fuel", model.fuelMode, theme.palette.info, theme.palette.textMuted)
+    ui.drawLabelValue(d.reactor, 5, "Hohlraum", model.hohlraum, state.hohlraumPresent and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
+
+    drawSimplePanel(ui, d.temperatures, "Temperatures", theme.palette.warning or colors.orange, theme.palette.panelBg or colors.black)
+    ui.drawLabelValue(d.temperatures, 0, "Plasma", model.plasmaTemp, theme.palette.warning, theme.palette.textMuted)
+    ui.drawLabelValue(d.temperatures, 1, "Case", model.caseTemp, theme.palette.critical, theme.palette.textMuted)
+    ui.drawLabelValue(d.temperatures, 2, "Ignition", "300.0 C", theme.palette.info, theme.palette.textMuted)
+    ui.drawLabelValue(d.temperatures, 3, "Laser Need", model.laserNeed, theme.palette.warning, theme.palette.textMuted)
+    ui.drawLabelValue(d.temperatures, 4, "Warnings", tostring(#model.warnings), #model.warnings > 0 and theme.palette.warning or theme.palette.ok, theme.palette.textMuted)
+    ui.drawLabelValue(d.temperatures, 5, "Blockers", tostring(#model.blockers), #model.blockers > 0 and theme.palette.critical or theme.palette.ok, theme.palette.textMuted)
+
+    drawSimplePanel(ui, d.laser, "Laser / Power", theme.palette.ok or colors.lime, theme.palette.panelBg or colors.black)
+    ui.drawLabelValue(d.laser, 0, "Laser State", model.laserState, model.laserTone, theme.palette.textMuted)
+    ui.drawLabelValue(d.laser, 1, "Laser Count", tostring(model.laserCount), theme.palette.info, theme.palette.textMuted)
+    ui.drawLabelValue(d.laser, 2, "Laser Ready", tostring(model.laserActiveCount) .. "/" .. tostring(model.laserCount), theme.palette.ok, theme.palette.textMuted)
+    ui.drawLabelValue(d.laser, 3, "Laser Pct", tostring(model.laserPct) .. "%", model.laserTone, theme.palette.textMuted)
+    ui.drawLabelValue(d.laser, 4, "Laser E", model.laserEnergy, theme.palette.info, theme.palette.textMuted)
+    ui.drawLabelValue(d.laser, 5, "Laser Max", model.laserMax, theme.palette.info, theme.palette.textMuted)
+    ui.drawLabelValue(d.laser, 6, "Grid", model.energyKnown and string.format("%.0f%%", model.energyPct) or "N/A", theme.palette.energy, theme.palette.textMuted)
+    ui.drawLabelValue(d.laser, 7, "Redraw", tostring(diagState.redrawCount), theme.palette.info, theme.palette.textMuted)
+    ui.drawLabelValue(d.laser, 8, "Sync", tostring(diagState.syncCount), theme.palette.info, theme.palette.textMuted)
+    ui.drawLabelValue(d.laser, 9, "Fallback", diagState.fallbackAfterTom and "YES" or "NO", diagState.fallbackAfterTom and theme.palette.warning or theme.palette.ok, theme.palette.textMuted)
+
+    ui.safeFilledRect(d.footer.x, d.footer.y, d.footer.w, d.footer.h, theme.palette.panelHeaderAlt or colors.gray)
+    ui.safeFilledRect(d.footer.x, d.footer.y, d.footer.w, 1, theme.palette.borderStrong or colors.cyan)
+    ui.safeText(d.footer.x + 2, d.footer.y, "CONTROLS: REFRESH | LASER PULSE | INJ - | INJ + | QUIT | UI DIAG", theme.palette.textPrimary, theme.palette.panelHeaderAlt, math.max(1, d.footer.w - 4), "left")
+    ui.safeText(d.footer.x + 2, d.footer.y + 1, "NO WINDOWS | DIRECT SURFACE DRAW | PIPELINE CHECK", theme.palette.info, theme.palette.panelHeaderAlt, math.max(1, d.footer.w - 4), "left")
+
+    state.controlBounds = {
+      x = d.controls.x,
+      y = math.min(d.controls.y2, d.controls.y + 1),
+      w = d.controls.w,
+      h = math.max(1, d.controls.h - 1),
+    }
+
+    return d
+  end
+
   local function drawLegacyView(view, legacyLayout)
     if view == "diagnostic" and type(api.drawDiagnosticView) == "function" then
       api.drawDiagnosticView(legacyLayout)
@@ -404,13 +534,62 @@ function M.build(api)
 
   local function render(source, surface, width, height)
     local theme = TomTheme.build(width, height)
-    local layout = TomLayout.compute(width, height, theme, state.currentView)
     local rootUi = TomComponents.new({
       target = term.current(),
       width = width,
       height = height,
       theme = theme,
     })
+    local model = runtimeModel(theme)
+    local diag = ensureTomRenderDiag()
+    diag.redrawCount = diag.redrawCount + 1
+    diag.lastSource = tostring(source or "unknown")
+    diag.lastSurface = tostring(hw.monitorName or source or "unknown")
+    diag.lastW = tonumber(width) or 0
+    diag.lastH = tonumber(height) or 0
+
+    local simpleMode = (state.tomUiDiagnosticMode == true) or (TOMS_DEBUG_DEFAULT == true)
+    local layout = nil
+    if simpleMode then
+      layout = computeDiagnosticLayout(width, height, theme)
+      diag.renderPath = "tom_simple_diag"
+      diag.windowAllowed = false
+      diag.windowUsed = false
+      diag.lastRenderType = "TOM_DIRECT_NO_WINDOWS"
+      rootUi.drawBackdrop(layout.root or rect(1, 1, width, height))
+      drawSimpleDiagnostic(rootUi, width, height, theme, model, source, "TOM_DIRECT_NO_WINDOWS")
+      if type(api.buildButtons) == "function" and type(api.drawButtons) == "function" then
+        api.buildButtons(buildLegacyLayout({
+          legacy = {
+            mode = "standard",
+            top = 1,
+            bottom = height,
+            height = height,
+            width = width,
+            left = rect(1, 1, math.max(1, math.floor(width / 3)), height),
+            center = rect(1, 1, math.max(1, math.floor(width / 3)), height),
+            right = rect(1, 1, width, height),
+          },
+          stacked = false,
+        }, theme))
+        api.drawButtons(api.getCurrentInputSource and api.getCurrentInputSource() or "monitor")
+      end
+      if diag.redrawCount <= 2 or (diag.redrawCount % 20 == 0) then
+        logInfo("Tom diagnostic draw", {
+          source = diag.lastSource,
+          width = tostring(diag.lastW),
+          height = tostring(diag.lastH),
+          createWindow = "false",
+          redraw = tostring(diag.redrawCount),
+          sync = tostring(diag.syncCount),
+          surface = tostring(diag.lastSurface),
+        })
+      end
+      return layout
+    end
+
+    layout = TomLayout.compute(width, height, theme, state.currentView)
+    diag.renderPath = "tom_full"
     rootUi.drawBackdrop(layout.root or rect(1, 1, width, height))
 
     if layout.tooSmall then
@@ -420,7 +599,6 @@ function M.build(api)
       return layout
     end
 
-    local model = runtimeModel(theme)
     local warning = model.warnings[1] or "NONE"
     local warningTone = warning == "NONE" and theme.palette.info or theme.palette.warning
     local headerLeft = "FUSION SUPERVISOR"
@@ -458,11 +636,23 @@ function M.build(api)
       and type(surface) == "table"
       and type(surface.createWindow) == "function"
       and theme.density ~= "small"
+    diag.windowAllowed = useWindows == true
+    diag.windowUsed = false
+    diag.lastRenderType = useWindows and "TOM_WINDOWS" or "TOM_DIRECT"
+    logDebug("Tom render path", {
+      source = tostring(source),
+      width = tostring(width),
+      height = tostring(height),
+      createWindow = tostring(useWindows),
+      renderType = tostring(diag.lastRenderType),
+      redraw = tostring(diag.redrawCount),
+    })
 
     local function drawArea(bounds, drawFn)
       if useWindows and bounds.w >= 14 and bounds.h >= 6 then
         local okWin, win = pcall(surface.createWindow, bounds.x, bounds.y, bounds.w, bounds.h)
         if okWin and type(win) == "table" then
+          diag.windowUsed = true
           local prev = term.current()
           term.redirect(win)
           local localUi = TomComponents.new({

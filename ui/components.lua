@@ -385,13 +385,23 @@ function M.buildButtons(ctx, layout)
     local injAvailable = state.injectionWritable == true
     local quitAction = type(actions.quitProgram) == "function" and actions.quitProgram or actions.stopRequested
 
-    addGridRow({
+    local items = {
       { id = "refreshNow", label = "REFRESH", bg = C.btnAction, action = actions.refreshNow },
       { id = "manualPulse", label = "LASER PULSE", bg = C.warn, action = actions.fireLaser },
       { id = "manualInjDown", label = "INJ -", bg = injAvailable and C.panelMid or C.inactive, action = function() actions.adjustInjectionRate(-1) end, disabled = not injAvailable },
       { id = "manualInjUp", label = "INJ +", bg = injAvailable and C.btnAction or C.inactive, action = function() actions.adjustInjectionRate(1) end, disabled = not injAvailable },
       { id = "quit", label = "QUIT", bg = C.bad, action = quitAction },
-    }, 2, 1)
+    }
+    if type(actions.toggleTomDiagnostic) == "function" then
+      items[#items + 1] = {
+        id = "tomDiag",
+        label = state.tomUiDiagnosticMode and "UI DIAG ON" or "UI DIAG OFF",
+        bg = state.tomUiDiagnosticMode and C.ok or C.panelMid,
+        action = actions.toggleTomDiagnostic,
+      }
+    end
+
+    addGridRow(items, 2, 1)
 
     return
   end

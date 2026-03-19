@@ -8,4 +8,16 @@
 
 local CoreApp = require("core.app")
 
-CoreApp.run()
+local args = { ... }
+local options = {
+  tomsDebug = false,
+}
+
+for _, raw in ipairs(args) do
+  local arg = string.lower(tostring(raw or ""))
+  if arg == "--toms-debug" or arg == "--tom-debug" then
+    options.tomsDebug = true
+  end
+end
+
+CoreApp.run(options)

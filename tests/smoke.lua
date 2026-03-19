@@ -138,6 +138,7 @@ local modules = {
   "responsive_render.lua",
   "toms_layout_engine.lua",
   "toms_footer_controls.lua",
+  "toms_diagnostic_mode.lua",
   "toms_fusion_panel.lua",
 }
 
