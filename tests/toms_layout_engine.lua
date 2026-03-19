@@ -82,8 +82,8 @@ function M.run(ctx)
         fail(178, "Missing controls.buttonBounds for " .. tostring(item.w) .. "x" .. tostring(item.h))
         return
       end
-      if not inside(layout.columns.right, controls.buttonBounds) then
-        fail(179, "Button bounds outside right column for " .. tostring(item.w) .. "x" .. tostring(item.h))
+      if not inside(layout.footer, controls.buttonBounds) then
+        fail(179, "Button bounds outside footer for " .. tostring(item.w) .. "x" .. tostring(item.h))
         return
       end
     end

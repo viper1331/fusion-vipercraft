@@ -39,6 +39,7 @@ function M.run(ctx)
     "tests/reactor_diagram_render.lua",
     "tests/responsive_render.lua",
     "tests/toms_layout_engine.lua",
+    "tests/toms_footer_controls.lua",
     "tests/toms_fusion_panel.lua",
     "ui/chrome.lua",
     "ui/views.lua",

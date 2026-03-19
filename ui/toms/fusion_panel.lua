@@ -83,6 +83,7 @@ function M.build(api)
   local state = assert(api.state, "state is required")
   local hw = assert(api.hw, "hw is required")
   local C = assert(api.C, "C is required")
+  local CFG = type(api.CFG) == "table" and api.CFG or {}
   local log = type(api.log) == "table" and api.log or {}
 
   local function logWarn(message, meta)
@@ -124,6 +125,21 @@ function M.build(api)
     return "idle"
   end
 
+  local function globalStatus()
+    local blockers = type(state.ignitionBlockers) == "table" and state.ignitionBlockers or {}
+    local warnings = type(state.safetyWarnings) == "table" and state.safetyWarnings or {}
+    if #blockers > 0 then
+      return "BLOCKED", C.bad
+    end
+    if state.ignition then
+      return "RUNNING", C.ok
+    end
+    if #warnings > 0 then
+      return "WARNING", C.warn
+    end
+    return "READY", C.info
+  end
+
   local function formatTemperature(value, decimals)
     if type(api.formatTemperature) == "function" then
       return tostring(api.formatTemperature(value, { compact = true, decimals = decimals or 1 }))
@@ -160,6 +176,7 @@ function M.build(api)
       activeLasers = 0
     end
 
+    local statusText, statusTone = globalStatus()
     return {
       phase = phaseText(),
       phaseTone = phaseTone(),
@@ -168,6 +185,9 @@ function M.build(api)
       events = events,
       blockers = blockers,
       reactorState = reactorVisualState(),
+      statusText = statusText,
+      statusTone = statusTone,
+      ignition = state.ignition == true,
       injectionRate = math.floor(asNumber(state.injectionRate, 0)),
       plasmaTemp = formatTemperature(state.plasmaTemp, 1),
       caseTemp = formatTemperature(state.caseTemp, 1),
@@ -190,10 +210,12 @@ function M.build(api)
       energyMax = formatEnergy(state.energyMax),
       lastAction = asText(state.lastAction, "NONE"),
       monitorName = asText(hw.monitorName, "terminal"),
+      backendName = asText(hw.monitorBackend, "cc_monitor"),
       tOpen = state.tOpen == true,
       dtOpen = state.dtOpen == true,
       dOpen = state.dOpen == true,
       hohlraum = state.hohlraumPresent and "PRESENT" or "MISSING",
+      allowControl = CFG.allowControl == true,
     }
   end
 
@@ -210,195 +232,154 @@ function M.build(api)
       center = layout.legacy.center,
       right = layout.legacy.right,
       stack = layout.stacked and true or nil,
+      tomFooterControls = true,
+      tomDensity = theme.density,
     }
   end
 
-  local function drawStatusColumn(ui, layout, theme, model)
-    local statusPanel = layout.left.status
-    local safetyPanel = layout.left.safety
-    local eventsPanel = layout.left.events
-
-    ui.drawPanel(statusPanel, "FUSION SUPERVISOR", {
+  local function drawReactorPanel(ui, bounds, theme, model)
+    ui.drawPanel(bounds, "REACTOR", {
       bg = theme.palette.panelBg,
       border = theme.palette.border,
       headerBg = theme.palette.panelHeader,
       headerText = theme.palette.textPrimary,
     })
+    ui.drawStatusBadge(bounds, 0, model.statusText, model.statusTone)
+    ui.drawLabelValue(bounds, 2, "Core", state.reactorFormed and "FORMED" or "UNFORMED", state.reactorFormed and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 3, "Injection", tostring(model.injectionRate) .. " mB/t", state.injectionWritable and theme.palette.info or theme.palette.textMuted, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 4, "Fuel Mode", model.fuelMode, theme.palette.info, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 5, "Fuel Flow", model.fuelFlow, theme.palette.info, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 6, "Hohlraum", model.hohlraum, state.hohlraumPresent and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
+  end
 
-    local statusRows = {
-      { "Phase", model.phase, model.phaseTone },
-      { "State", state.ignition and "RUNNING" or "BLOCKED", state.ignition and theme.palette.ok or theme.palette.warning },
-      { "Core", state.reactorFormed and "FORMED" or "UNFORMED", state.reactorFormed and theme.palette.ok or theme.palette.warning },
-      { "Inject", tostring(model.injectionRate) .. " mB/t", state.injectionWritable and theme.palette.info or theme.palette.textMuted },
-      { "Fuel", model.fuelMode, theme.palette.info },
-      { "Flow", model.fuelFlow, theme.palette.info },
-      { "Hohlraum", model.hohlraum, state.hohlraumPresent and theme.palette.ok or theme.palette.warning },
-    }
-    local cap = math.max(2, statusPanel.h - 4)
-    for i = 1, math.min(cap, #statusRows) do
-      local row = statusRows[i]
-      ui.drawLabelValue(statusPanel, i - 1, row[1], row[2], row[3], theme.palette.textMuted)
-    end
-
-    ui.drawPanel(safetyPanel, "IGNITION CHECK", {
+  local function drawTemperaturePanel(ui, bounds, theme, model)
+    ui.drawPanel(bounds, "TEMPERATURES", {
       bg = theme.palette.panelBg,
       border = theme.palette.warning,
       headerBg = theme.palette.panelHeaderAlt,
       headerText = theme.palette.textPrimary,
     })
-    local safetyRows = {}
-    if #model.blockers == 0 then
-      safetyRows[1] = { "[OK]", "No blocker", theme.palette.ok }
-    else
-      for i = 1, #model.blockers do
-        safetyRows[#safetyRows + 1] = { "[NO]", model.blockers[i], theme.palette.critical }
-      end
-    end
-    if #model.warnings > 0 then
-      for i = 1, #model.warnings do
-        safetyRows[#safetyRows + 1] = { "-", model.warnings[i], theme.palette.warning }
-      end
-    end
-    local safetyCap = math.max(1, safetyPanel.h - 4)
-    for i = 1, math.min(safetyCap, #safetyRows) do
-      local row = safetyRows[i]
-      ui.drawLabelValue(safetyPanel, i - 1, row[1], row[2], row[3], theme.palette.textMuted)
-    end
+    ui.drawLabelValue(bounds, 0, "Plasma", model.plasmaTemp, theme.palette.warning, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 1, "Structure", model.caseTemp, theme.palette.critical, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 2, "Ignition", "300.0 C", theme.palette.info, theme.palette.textMuted)
+  end
 
-    ui.drawPanel(eventsPanel, "EVENT LOG", {
+  local function drawStatusPanel(ui, bounds, theme, model)
+    ui.drawPanel(bounds, "STATUS / DEBUG", {
       bg = theme.palette.panelBg,
       border = theme.palette.border,
       headerBg = theme.palette.panelHeaderAlt,
       headerText = theme.palette.textPrimary,
     })
-    local slots = math.max(1, eventsPanel.h - 4)
-    for i = 1, math.min(slots, #model.events) do
-      ui.drawLabelValue(eventsPanel, i - 1, tostring(i), asText(model.events[i], "..."), theme.palette.info, theme.palette.textMuted)
-    end
-    if #model.events == 0 then
-      ui.drawLabelValue(eventsPanel, 0, "-", "No runtime event", theme.palette.textMuted, theme.palette.textMuted)
+    local row = 0
+    ui.drawLabelValue(bounds, row, "Phase", model.phase, model.phaseTone, theme.palette.textMuted)
+    row = row + 1
+    ui.drawLabelValue(bounds, row, "Output", model.monitorName, theme.palette.info, theme.palette.textMuted)
+    row = row + 1
+    ui.drawLabelValue(bounds, row, "Backend", model.backendName, theme.palette.info, theme.palette.textMuted)
+    row = row + 1
+    ui.drawLabelValue(bounds, row, "Control", model.allowControl and "ENABLED" or "LOCKED", model.allowControl and theme.palette.warning or theme.palette.ok, theme.palette.textMuted)
+    row = row + 1
+    ui.drawLabelValue(bounds, row, "Action", model.lastAction, theme.palette.textPrimary, theme.palette.textMuted)
+    row = row + 1
+
+    if #model.blockers > 0 then
+      for i = 1, math.min(#model.blockers, math.max(1, bounds.h - (row + 4))) do
+        ui.drawLabelValue(bounds, row, "[NO]", model.blockers[i], theme.palette.critical, theme.palette.textMuted)
+        row = row + 1
+      end
+    elseif #model.warnings > 0 then
+      for i = 1, math.min(#model.warnings, math.max(1, bounds.h - (row + 4))) do
+        ui.drawLabelValue(bounds, row, "[!]", model.warnings[i], theme.palette.warning, theme.palette.textMuted)
+        row = row + 1
+      end
+    else
+      ui.drawLabelValue(bounds, row, "[OK]", "No active warning", theme.palette.ok, theme.palette.textMuted)
     end
   end
 
-  local function drawCenterColumn(ui, layout, theme, model)
-    local headlinePanel = layout.center.headline
-    local laserPanel = layout.center.laser
-    local corePanel = layout.center.core
-    local runtimePanel = layout.center.runtime
-
-    ui.drawPanel(headlinePanel, "FUSION CHAMBER", {
-      bg = theme.palette.panelBg,
-      border = theme.palette.borderStrong,
-      headerBg = theme.palette.panelHeader,
-      headerText = theme.palette.textPrimary,
-    })
-    ui.drawStatusBadge(headlinePanel, 0, state.reactorFormed and "CORE FORMED" or "CORE UNFORMED", state.reactorFormed and theme.palette.ok or theme.palette.warning)
-    ui.drawLabelValue(headlinePanel, 2, "Plasma", model.plasmaTemp, theme.palette.warning, theme.palette.textMuted)
-    ui.drawLabelValue(headlinePanel, 3, "Struct", model.caseTemp, theme.palette.critical, theme.palette.textMuted)
-
-    ui.drawPanel(laserPanel, "LASER ARRAY", {
+  local function drawLaserPanel(ui, bounds, theme, model)
+    ui.drawPanel(bounds, "LASER / POWER", {
       bg = theme.palette.panelBg,
       border = theme.palette.ok,
       headerBg = theme.palette.panelHeaderAlt,
       headerText = theme.palette.textPrimary,
     })
-    local laserInner = inset(laserPanel, 1, 1, 1, 1)
-    ui.drawLaserStack(laserInner, {
+    local inner = inset(bounds, 1, 1, 1, 1)
+    ui.drawLaserStack(inner, {
       count = model.laserCount,
       activeCount = model.laserActiveCount,
       pct = model.laserPct,
       state = model.laserState,
       tone = model.laserTone,
+      charging = model.laserCharging,
     })
-
-    ui.drawPanel(corePanel, "REACTOR CORE", {
-      bg = theme.palette.panelBg,
-      border = theme.palette.borderStrong,
-      headerBg = theme.palette.panelHeaderAlt,
-      headerText = theme.palette.textPrimary,
-    })
-    local coreInner = inset(corePanel, 1, 1, 1, 1)
-    ui.drawReactorCore(coreInner, {
-      tick = state.tick or 0,
-      reactorState = model.reactorState,
-      laserActive = model.laserActive,
-      laserCharging = model.laserCharging,
-      laserLabel = "LAS " .. tostring(model.laserPct) .. "%",
-      tOpen = model.tOpen,
-      dtOpen = model.dtOpen,
-      dOpen = model.dOpen,
-    })
-
-    ui.drawPanel(runtimePanel, "RUNTIME METRICS", {
-      bg = theme.palette.panelBg,
-      border = theme.palette.border,
-      headerBg = theme.palette.panelHeaderAlt,
-      headerText = theme.palette.textPrimary,
-    })
-    local laserRatio = clamp(asNumber(state.laserPct, 0) / 100, 0, 1)
-    local gridRatio = clamp(asNumber(state.energyPct, 0) / 100, 0, 1)
-    ui.drawHorizontalBar(runtimePanel, 0, laserRatio, theme.palette.ok, theme.palette.panelBgRaised, "LAS " .. tostring(model.laserPct) .. "%")
-    ui.drawHorizontalBar(runtimePanel, 1, gridRatio, theme.palette.energy, theme.palette.panelBgRaised, "GRID " .. (model.energyKnown and string.format("%3.0f%%", model.energyPct) or "N/A"))
-    ui.drawLabelValue(runtimePanel, 3, "Laser E", model.laserEnergy, theme.palette.info, theme.palette.textMuted)
-    ui.drawLabelValue(runtimePanel, 4, "Laser Max", model.laserMax, theme.palette.info, theme.palette.textMuted)
-    ui.drawLabelValue(runtimePanel, 5, "Laser Need", model.laserNeed, theme.palette.warning, theme.palette.textMuted)
-    if theme.density ~= "small" then
-      ui.drawLabelValue(runtimePanel, 6, "Production", model.passiveGeneration, theme.palette.info, theme.palette.textMuted)
-      ui.drawLabelValue(runtimePanel, 7, "Steam", model.steamProduction, theme.palette.info, theme.palette.textMuted)
-    end
   end
 
-  local function drawRightColumn(ui, layout, theme, legacyLayout, model)
-    local navPanel = layout.right.nav
-    local actionPanel = layout.right.actions
-    local ioPanel = layout.right.io
-
-    ui.drawPanel(navPanel, "CONTROL", {
-      bg = theme.palette.panelBg,
-      border = theme.palette.border,
-      headerBg = theme.palette.panelHeader,
-      headerText = theme.palette.textPrimary,
-    })
-    ui.drawStatusBadge(navPanel, 0, "SUP", theme.palette.info)
-    ui.drawLabelValue(navPanel, 2, "Master", state.autoMaster and "AUTO" or "MANUAL", state.autoMaster and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
-    ui.drawLabelValue(navPanel, 3, "Fuel", state.fusionAuto and "AUTO" or "MANUAL", state.fusionAuto and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
-    ui.drawLabelValue(navPanel, 4, "Charge", state.chargeAuto and "AUTO" or "MANUAL", state.chargeAuto and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
-
-    ui.drawPanel(actionPanel, "ACTIONS", {
+  local function drawRuntimePanel(ui, bounds, theme, model)
+    ui.drawPanel(bounds, "RUNTIME", {
       bg = theme.palette.panelBg,
       border = theme.palette.border,
       headerBg = theme.palette.panelHeaderAlt,
       headerText = theme.palette.textPrimary,
     })
-    ui.drawLabelValue(actionPanel, 0, "Control", (api.CFG and api.CFG.allowControl) and "ENABLED" or "LOCKED", (api.CFG and api.CFG.allowControl) and theme.palette.warning or theme.palette.ok, theme.palette.textMuted)
-    ui.drawLabelValue(actionPanel, 1, "Injection", tostring(model.injectionRate) .. " mB/t", theme.palette.info, theme.palette.textMuted)
-    ui.drawLabelValue(actionPanel, 2, "Laser", model.laserState, model.laserTone, theme.palette.textMuted)
 
-    local buttonBounds = inset(layout.controls.buttonBounds, 0, 0, 0, 0)
-    state.controlBounds = {
-      x = buttonBounds.x,
-      y = buttonBounds.y,
-      w = buttonBounds.w,
-      h = buttonBounds.h,
-    }
-    if type(api.buildButtons) == "function" and type(api.drawButtons) == "function" then
-      api.buildButtons(legacyLayout)
-      api.drawButtons(api.getCurrentInputSource and api.getCurrentInputSource() or "monitor")
-    end
+    local laserRatio = clamp(asNumber(state.laserPct, 0) / 100, 0, 1)
+    local gridRatio = clamp(asNumber(state.energyPct, 0) / 100, 0, 1)
+    ui.drawHorizontalBar(bounds, 0, laserRatio, theme.palette.ok, theme.palette.panelBgRaised, "LAS CHARGE")
+    ui.drawHorizontalBar(bounds, 1, gridRatio, theme.palette.energy, theme.palette.panelBgRaised, "GRID LEVEL")
+    ui.drawLabelValue(bounds, 3, "Laser Energy", model.laserEnergy, theme.palette.info, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 4, "Laser Max", model.laserMax, theme.palette.info, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 5, "Need", model.laserNeed, theme.palette.warning, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 6, "Production", model.passiveGeneration, theme.palette.info, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 7, "Steam", model.steamProduction, theme.palette.info, theme.palette.textMuted)
+  end
 
-    ui.drawPanel(ioPanel, "REAL I/O", {
+  local function drawIoPanel(ui, bounds, theme, model)
+    ui.drawPanel(bounds, "REAL I/O", {
       bg = theme.palette.panelBg,
       border = theme.palette.border,
       headerBg = theme.palette.panelHeaderAlt,
       headerText = theme.palette.textPrimary,
     })
     if type(api.drawIoPanel) == "function" and state.currentView ~= "setup" then
-      local ioInner = inset(ioPanel, 1, 1, 1, 1)
+      local ioInner = inset(bounds, 1, 1, 1, 1)
       api.drawIoPanel(ioInner)
-    else
-      ui.drawLabelValue(ioPanel, 0, "Monitor", model.monitorName, theme.palette.info, theme.palette.textMuted)
-      ui.drawLabelValue(ioPanel, 1, "Output", asText(api.getCurrentInputSource and api.getCurrentInputSource() or "monitor", "monitor"), theme.palette.info, theme.palette.textMuted)
+      return
     end
+    ui.drawLabelValue(bounds, 0, "Monitor", model.monitorName, theme.palette.info, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 1, "Backend", model.backendName, theme.palette.info, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 2, "Output", asText(api.getCurrentInputSource and api.getCurrentInputSource() or "monitor", "monitor"), theme.palette.info, theme.palette.textMuted)
+  end
+
+  local function drawEventsPanel(ui, bounds, theme, model)
+    ui.drawPanel(bounds, "EVENT LOG", {
+      bg = theme.palette.panelBg,
+      border = theme.palette.border,
+      headerBg = theme.palette.panelHeaderAlt,
+      headerText = theme.palette.textPrimary,
+    })
+    local slots = math.max(1, bounds.h - 4)
+    if #model.events == 0 then
+      ui.drawLabelValue(bounds, 0, "-", "No runtime event", theme.palette.textMuted, theme.palette.textMuted)
+      return
+    end
+    for i = 1, math.min(slots, #model.events) do
+      ui.drawLabelValue(bounds, i - 1, tostring(i), asText(model.events[i], "..."), theme.palette.info, theme.palette.textMuted)
+    end
+  end
+
+  local function drawControlSummary(ui, bounds, theme, model)
+    ui.drawPanel(bounds, "CONTROL MODE", {
+      bg = theme.palette.panelBg,
+      border = theme.palette.border,
+      headerBg = theme.palette.panelHeaderAlt,
+      headerText = theme.palette.textPrimary,
+    })
+    ui.drawLabelValue(bounds, 0, "Master", state.autoMaster and "AUTO" or "MANUAL", state.autoMaster and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 1, "Fusion", state.fusionAuto and "AUTO" or "MANUAL", state.fusionAuto and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 2, "Charge", state.chargeAuto and "AUTO" or "MANUAL", state.chargeAuto and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 3, "Laser", model.laserState, model.laserTone, theme.palette.textMuted)
   end
 
   local function drawLegacyView(view, legacyLayout)
@@ -444,24 +425,23 @@ function M.build(api)
     local warningTone = warning == "NONE" and theme.palette.info or theme.palette.warning
     local headerLeft = "FUSION SUPERVISOR"
     local headerCenter = model.phase
-    local headerRight = "INFO " .. asText(warning, "NONE")
+    local headerRight = model.statusText .. " | " .. asText(warning, "NONE")
+
     local footerSegments = {
       { text = "ACT " .. model.lastAction, tone = theme.palette.textMuted },
-      { text = "VIEW " .. string.upper(asText(state.currentView, "SUP")), tone = theme.palette.info },
-      { text = "PHASE " .. model.phase, tone = model.phaseTone },
-      { text = "LAS " .. model.laserState, tone = model.laserTone },
+      { text = "LAS " .. model.laserState .. " " .. tostring(model.laserPct) .. "%", tone = model.laserTone },
       { text = "GRID " .. (model.energyKnown and string.format("%3.0f%%", model.energyPct) or "N/A"), tone = theme.palette.energy },
-      { text = "OUT " .. model.monitorName, tone = theme.palette.info },
+      { text = "MON " .. model.monitorName, tone = theme.palette.info },
     }
     local legacyLayout = buildLegacyLayout(layout, theme)
 
     rootUi.drawHeader(layout.header, headerLeft, headerCenter, headerRight, model.phaseTone, warningTone)
-    rootUi.drawFooter(layout.footer, footerSegments)
+    rootUi.drawFooter(layout.controls.statusBounds or layout.footer, footerSegments)
 
     if state.choosingMonitor and type(api.drawMonitorSelection) == "function" then
       api.drawMonitorSelection(legacyLayout)
       rootUi.drawHeader(layout.header, headerLeft, headerCenter, headerRight, model.phaseTone, warningTone)
-      rootUi.drawFooter(layout.footer, footerSegments)
+      rootUi.drawFooter(layout.controls.statusBounds or layout.footer, footerSegments)
       return layout
     end
 
@@ -469,7 +449,7 @@ function M.build(api)
     if view ~= "supervision" and view ~= "manual" and view ~= "induction" then
       if drawLegacyView(view, legacyLayout) then
         rootUi.drawHeader(layout.header, headerLeft, headerCenter, headerRight, model.phaseTone, warningTone)
-        rootUi.drawFooter(layout.footer, footerSegments)
+        rootUi.drawFooter(layout.controls.statusBounds or layout.footer, footerSegments)
         return layout
       end
     end
@@ -480,7 +460,7 @@ function M.build(api)
       and theme.density ~= "small"
 
     local function drawArea(bounds, drawFn)
-      if useWindows and bounds.w >= 12 and bounds.h >= 6 then
+      if useWindows and bounds.w >= 14 and bounds.h >= 6 then
         local okWin, win = pcall(surface.createWindow, bounds.x, bounds.y, bounds.w, bounds.h)
         if okWin and type(win) == "table" then
           local prev = term.current()
@@ -510,29 +490,85 @@ function M.build(api)
     drawArea(layout.columns.left, function(ui, localBounds)
       local localLayout = {
         left = splitVertical(inset(localBounds, 1, 1, 1, 1), {
-          { key = "status", weight = 4 },
-          { key = "safety", weight = 3 },
-          { key = "events", weight = 4 },
+          { key = "reactor", weight = 4 },
+          { key = "temperatures", weight = 3 },
+          { key = "status", weight = 5 },
         }, theme.spacing.sectionGap),
       }
-      drawStatusColumn(ui, localLayout, theme, model)
+      drawReactorPanel(ui, localLayout.left.reactor, theme, model)
+      drawTemperaturePanel(ui, localLayout.left.temperatures, theme, model)
+      drawStatusPanel(ui, localLayout.left.status, theme, model)
     end)
 
     drawArea(layout.columns.center, function(ui, localBounds)
       local localLayout = {
         center = splitVertical(inset(localBounds, 1, 1, 1, 1), {
-          { key = "headline", weight = 2 },
-          { key = "laser", weight = 3 },
-          { key = "core", weight = 8 },
+          { key = "laser", weight = 4 },
+          { key = "core", weight = 10 },
           { key = "runtime", weight = 4 },
         }, theme.spacing.sectionGap),
       }
-      drawCenterColumn(ui, localLayout, theme, model)
+      drawLaserPanel(ui, localLayout.center.laser, theme, model)
+      ui.drawPanel(localLayout.center.core, "REACTOR CORE", {
+        bg = theme.palette.panelBg,
+        border = theme.palette.borderStrong,
+        headerBg = theme.palette.panelHeaderAlt,
+        headerText = theme.palette.textPrimary,
+      })
+      local coreInner = inset(localLayout.center.core, 1, 1, 1, 1)
+      ui.drawReactorCore(coreInner, {
+        tick = state.tick or 0,
+        reactorState = model.reactorState,
+        ignition = model.ignition,
+        laserActive = model.laserActive,
+        laserCharging = model.laserCharging,
+        laserLabel = "LAS " .. tostring(model.laserPct) .. "%",
+        plasmaTemp = model.plasmaTemp,
+        caseTemp = model.caseTemp,
+        tOpen = model.tOpen,
+        dtOpen = model.dtOpen,
+        dOpen = model.dOpen,
+      })
+      drawRuntimePanel(ui, localLayout.center.runtime, theme, model)
     end)
 
-    drawRightColumn(rootUi, layout, theme, legacyLayout, model)
+    drawArea(layout.columns.right, function(ui, localBounds)
+      local localLayout = {
+        right = splitVertical(inset(localBounds, 1, 1, 1, 1), {
+          { key = "io", weight = 5 },
+          { key = "events", weight = 4 },
+          { key = "debug", weight = 3 },
+        }, theme.spacing.sectionGap),
+      }
+      drawIoPanel(ui, localLayout.right.io, theme, model)
+      drawEventsPanel(ui, localLayout.right.events, theme, model)
+      drawControlSummary(ui, localLayout.right.debug, theme, model)
+    end)
+
+    local controlsBounds = layout.controls.buttonBounds
+    rootUi.drawPanel(controlsBounds, "CONTROLS", {
+      bg = theme.palette.panelBg,
+      border = theme.palette.border,
+      headerBg = theme.palette.panelHeaderAlt,
+      headerText = theme.palette.textPrimary,
+    })
+
+    local controlsInner = inset(controlsBounds, 1, 1, 1, 1)
+    local controlsOffsetY = (controlsInner.h >= 2) and 1 or 0
+    state.controlBounds = {
+      x = controlsInner.x,
+      y = controlsInner.y + controlsOffsetY,
+      w = controlsInner.w,
+      h = math.max(1, controlsInner.h - controlsOffsetY),
+    }
+
+    if type(api.buildButtons) == "function" and type(api.drawButtons) == "function" then
+      api.buildButtons(legacyLayout)
+      api.drawButtons(api.getCurrentInputSource and api.getCurrentInputSource() or "monitor")
+    end
+
     rootUi.drawHeader(layout.header, headerLeft, headerCenter, headerRight, model.phaseTone, warningTone)
-    rootUi.drawFooter(layout.footer, footerSegments)
+    rootUi.drawFooter(layout.controls.statusBounds or layout.footer, footerSegments)
     return layout
   end
 

@@ -47,10 +47,10 @@ local function abbreviate(text, maxLen)
 end
 
 local function detectDensity(width, height)
-  if width < 92 or height < 30 then
+  if width < 96 or height < 32 then
     return "small"
   end
-  if width >= 150 and height >= 46 then
+  if width >= 156 and height >= 48 then
     return "large"
   end
   return "medium"
@@ -61,21 +61,21 @@ function M.build(width, height)
   local h = math.max(1, asInt(height, 1))
   local density = detectDensity(w, h)
 
-  local baseScale = clamp(math.min(w / 136, h / 42), 0.75, 2.0)
+  local baseScale = clamp(math.min(w / 140, h / 44), 0.72, 2.0)
   if density == "small" then
-    baseScale = clamp(baseScale, 0.75, 0.95)
+    baseScale = clamp(baseScale, 0.72, 0.92)
   elseif density == "large" then
-    baseScale = clamp(baseScale, 1.15, 2.0)
+    baseScale = clamp(baseScale, 1.10, 2.0)
   end
 
   local unit = math.max(1, asInt(baseScale, 1))
   local outerMargin = math.max(1, asInt(baseScale * 1.0, 1))
-  local panelPadding = math.max(1, asInt(baseScale * 0.9, 1))
-  local panelGap = math.max(1, asInt(baseScale * 1.2, 1))
-  local sectionGap = math.max(1, asInt(baseScale * 1.0, 1))
+  local panelPadding = math.max(1, asInt(baseScale * 0.85, 1))
+  local panelGap = math.max(1, asInt(baseScale * 1.1, 1))
+  local sectionGap = math.max(1, asInt(baseScale * 0.9, 1))
 
   local headerHeight = (density == "large") and 3 or 2
-  local footerHeight = (density == "small") and 1 or 2
+  local footerHeight = (density == "small") and 5 or ((density == "large") and 7 or 6)
   local buttonHeight = (density == "small") and 2 or 3
   local gaugeThickness = (density == "large") and 2 or 1
   local badgeHeight = (density == "small") and 1 or 2

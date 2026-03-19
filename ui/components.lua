@@ -294,6 +294,108 @@ function M.buildButtons(ctx, layout)
     return
   end
 
+  if layout.tomFooterControls then
+    local bounds = type(state.controlBounds) == "table" and state.controlBounds or nil
+    local ctrl = layout.right or layout.left or { x = 1, y = 1, w = layout.width or 20, h = 4 }
+    local bx = bounds and bounds.x or (ctrl.x + 1)
+    local bw = bounds and math.max(12, bounds.w) or math.max(14, ctrl.w - 2)
+    local y = bounds and bounds.y or (ctrl.y + 1)
+    local maxY = bounds and (bounds.y + bounds.h - 1) or (layout.bottom - 1)
+    local gapY = 1
+
+    local function addGridRow(items, rowH, gapX)
+      if #items == 0 then return end
+      rowH = math.max(2, rowH or 2)
+      gapX = gapX or 1
+
+      local function minButtonWidth(item)
+        local label = tostring(item.label or "")
+        return math.max(3, #label + 2)
+      end
+
+      local index = 1
+      while index <= #items do
+        if y + rowH - 1 > maxY then return end
+
+        local rowItems = {}
+        local cursor = index
+        local used = 0
+        while cursor <= #items do
+          local item = items[cursor]
+          local wMin = minButtonWidth(item)
+          local nextUsed = used + ((#rowItems > 0) and gapX or 0) + wMin
+          if #rowItems > 0 and nextUsed > bw then
+            break
+          end
+          rowItems[#rowItems + 1] = item
+          used = nextUsed
+          cursor = cursor + 1
+          if used >= bw then break end
+        end
+
+        if #rowItems == 0 then
+          rowItems[1] = items[index]
+          cursor = index + 1
+        end
+
+        local minWidths = {}
+        local minTotal = 0
+        for i, item in ipairs(rowItems) do
+          local wMin = minButtonWidth(item)
+          minWidths[i] = wMin
+          minTotal = minTotal + wMin
+        end
+
+        local totalGap = gapX * (#rowItems - 1)
+        local rowWidth = minTotal + totalGap
+        local extra = math.max(0, bw - rowWidth)
+        local x = bx + math.max(0, math.floor((bw - math.min(rowWidth, bw)) / 2))
+
+        if rowWidth > bw and #rowItems == 1 then
+          minWidths[1] = bw
+          totalGap = 0
+          extra = 0
+          x = bx
+        end
+
+        for i, item in ipairs(rowItems) do
+          local stretch = 0
+          if extra > 0 then
+            local slots = #rowItems - i + 1
+            stretch = math.floor(extra / slots)
+            extra = extra - stretch
+          end
+          local wBtn = minWidths[i] + stretch
+          if i == #rowItems then
+            wBtn = math.max(minWidths[i], (bx + bw) - x)
+          end
+          addButton(item.id, x, y, wBtn, rowH, item.label, item.bg, item.fg, item.action, {
+            hitPadX = 0,
+            hitPadY = 0,
+            disabled = item.disabled and true or false,
+          })
+          x = x + wBtn + gapX
+        end
+
+        y = y + rowH + gapY
+        index = cursor
+      end
+    end
+
+    local injAvailable = state.injectionWritable == true
+    local quitAction = type(actions.quitProgram) == "function" and actions.quitProgram or actions.stopRequested
+
+    addGridRow({
+      { id = "refreshNow", label = "REFRESH", bg = C.btnAction, action = actions.refreshNow },
+      { id = "manualPulse", label = "LASER PULSE", bg = C.warn, action = actions.fireLaser },
+      { id = "manualInjDown", label = "INJ -", bg = injAvailable and C.panelMid or C.inactive, action = function() actions.adjustInjectionRate(-1) end, disabled = not injAvailable },
+      { id = "manualInjUp", label = "INJ +", bg = injAvailable and C.btnAction or C.inactive, action = function() actions.adjustInjectionRate(1) end, disabled = not injAvailable },
+      { id = "quit", label = "QUIT", bg = C.bad, action = quitAction },
+    }, 2, 1)
+
+    return
+  end
+
   local ctrl = layout.right or layout.left
   local bounds = type(state.controlBounds) == "table" and state.controlBounds or nil
   local bx = bounds and bounds.x or (ctrl.x + 2)

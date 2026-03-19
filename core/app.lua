@@ -2603,6 +2603,11 @@ function M.run()
         state.lastAction = "Restart requested"
         pushEvent("Restart requested")
       end,
+      quitProgram = function()
+        state.running = false
+        state.lastAction = "Quit requested"
+        pushEvent("Quit requested")
+      end,
       toggleDebugHitboxes = function()
         state.debugHitboxes = not state.debugHitboxes
         state.lastAction = state.debugHitboxes and "Hitbox debug ON" or "Hitbox debug OFF"

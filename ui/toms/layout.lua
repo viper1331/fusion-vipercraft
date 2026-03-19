@@ -146,7 +146,7 @@ end
 function M.compute(width, height, theme, currentView)
   local w = math.max(1, asInt(width, 1))
   local h = math.max(1, asInt(height, 1))
-  local minW, minH = 42, 18
+  local minW, minH = 52, 24
 
   if w < minW or h < minH then
     return {
@@ -164,16 +164,16 @@ function M.compute(width, height, theme, currentView)
   local root = rect(1, 1, w, h)
 
   local headerH = clamp(math.max(1, asInt(sizes.headerHeight, 2)), 1, math.max(1, h - 2))
-  local footerH = clamp(math.max(1, asInt(sizes.footerHeight, 1)), 1, math.max(1, h - headerH - 1))
+  local footerH = clamp(math.max(3, asInt(sizes.footerHeight, 5)), 3, math.max(3, h - headerH - 2))
   local header = rect(1, 1, w, headerH)
   local footer = rect(1, h - footerH + 1, w, footerH)
   if footer.y <= header.y2 then
-    footer = rect(1, header.y2 + 1, w, 1)
+    footer = rect(1, header.y2 + 1, w, 3)
   end
 
   local content = rect(1, header.y2 + 1, w, math.max(1, footer.y - (header.y2 + 1)))
   local contentInner = inset(content, spacing.outerMargin, spacing.outerMargin, spacing.outerMargin, spacing.outerMargin)
-  local isSmallStack = theme.density == "small" and (contentInner.w < 112 or contentInner.h < 34)
+  local isSmallStack = theme.density == "small" and (contentInner.w < 112 or contentInner.h < 36)
 
   local columns
   local stacked = false
@@ -181,14 +181,14 @@ function M.compute(width, height, theme, currentView)
     stacked = true
     columns = splitVertical(contentInner, {
       { key = "left", min = 4, weight = 5 },
-      { key = "center", min = 6, weight = 8 },
-      { key = "right", min = 4, weight = 6 },
+      { key = "center", min = 6, weight = 7 },
+      { key = "right", min = 4, weight = 5 },
     }, spacing.panelGap)
   else
     columns = splitHorizontal(contentInner, {
-      { key = "left", min = (theme.density == "large") and 28 or 22, weight = 24 },
-      { key = "center", min = (theme.density == "large") and 62 or 44, weight = 52 },
-      { key = "right", min = (theme.density == "large") and 28 or 22, weight = 24 },
+      { key = "left", min = (theme.density == "large") and 30 or 24, weight = 28 },
+      { key = "center", min = (theme.density == "large") and 66 or 50, weight = 46 },
+      { key = "right", min = (theme.density == "large") and 30 or 24, weight = 26 },
     }, spacing.panelGap)
   end
 
@@ -197,25 +197,28 @@ function M.compute(width, height, theme, currentView)
   local rightInner = inset(columns.right, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding)
 
   local leftPanels = splitVertical(leftInner, {
-    { key = "status", min = 4, weight = 4 },
-    { key = "safety", min = 3, weight = 3 },
-    { key = "events", min = 4, weight = 4 },
+    { key = "reactor", min = 4, weight = 4 },
+    { key = "temperatures", min = 3, weight = 3 },
+    { key = "status", min = 4, weight = 5 },
   }, spacing.sectionGap)
 
   local centerPanels = splitVertical(centerInner, {
-    { key = "headline", min = 2, weight = 2 },
-    { key = "laser", min = 3, weight = 3 },
-    { key = "core", min = 6, weight = 8 },
-    { key = "runtime", min = 3, weight = 4 },
+    { key = "laser", min = 4, weight = 4 },
+    { key = "core", min = 8, weight = 10 },
+    { key = "runtime", min = 4, weight = 4 },
   }, spacing.sectionGap)
 
   local rightPanels = splitVertical(rightInner, {
-    { key = "nav", min = 3, weight = 3 },
-    { key = "actions", min = 5, weight = 6 },
-    { key = "io", min = 4, weight = 4 },
+    { key = "io", min = 4, weight = 5 },
+    { key = "events", min = 4, weight = 4 },
+    { key = "debug", min = 3, weight = 3 },
   }, spacing.sectionGap)
 
-  local buttonBounds = inset(rightPanels.actions, 1, 2, 1, 1)
+  local footerInner = inset(footer, spacing.outerMargin, 1, spacing.outerMargin, 1)
+  local statusBounds = rect(footerInner.x, footerInner.y, footerInner.w, 1)
+  local controlsTop = math.min(footerInner.y2, statusBounds.y2 + 1)
+  local controlsHeight = math.max(1, footerInner.y2 - controlsTop + 1)
+  local buttonBounds = rect(footerInner.x, controlsTop, footerInner.w, controlsHeight)
   local legacyMode = stacked and "compact" or ((theme.density == "large") and "large" or "standard")
 
   return {
@@ -234,10 +237,10 @@ function M.compute(width, height, theme, currentView)
     center = centerPanels,
     right = rightPanels,
     controls = {
-      navBounds = rightPanels.nav,
-      actionBounds = rightPanels.actions,
+      statusBounds = statusBounds,
       buttonBounds = buttonBounds,
       ioBounds = rightPanels.io,
+      footerBounds = footerInner,
     },
     legacy = {
       mode = legacyMode,
