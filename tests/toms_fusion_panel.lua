@@ -35,7 +35,6 @@ function M.run(ctx)
   local counters = {
     buildButtons = 0,
     drawButtons = 0,
-    drawIo = 0,
     legacy = 0,
     monitorSelection = 0,
   }
@@ -173,12 +172,6 @@ function M.run(ctx)
     getCurrentInputSource = function()
       return "monitor"
     end,
-    drawIoPanel = function(bounds)
-      counters.drawIo = counters.drawIo + 1
-      if type(bounds) ~= "table" or (bounds.w or 0) <= 0 then
-        error("Invalid IO bounds")
-      end
-    end,
     drawMonitorSelection = function()
       counters.monitorSelection = counters.monitorSelection + 1
     end,
@@ -223,20 +216,16 @@ function M.run(ctx)
     fail(183, "Renderer did not build/draw control buttons")
     return
   end
-  if counters.drawIo <= 0 then
-    fail(184, "Renderer did not draw IO panel")
-    return
-  end
   if counters.legacy <= 0 then
-    fail(185, "Renderer did not route legacy views")
+    fail(184, "Renderer did not route legacy views")
     return
   end
   if counters.monitorSelection <= 0 then
-    fail(186, "Renderer did not route monitor selection view")
+    fail(185, "Renderer did not route monitor selection view")
     return
   end
   if type(state.controlBounds) ~= "table" then
-    fail(187, "Renderer did not define control bounds")
+    fail(186, "Renderer did not define control bounds")
     return
   end
 

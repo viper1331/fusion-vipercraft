@@ -249,6 +249,8 @@ function M.build(api)
     end
 
     local statusText, statusTone = globalStatus()
+    local laserRatio = clamp(asNumber(state.laserPct, 0) / 100, 0, 1)
+    local gridRatio = clamp(asNumber(state.energyPct, 0) / 100, 0, 1)
     return {
       phase = phaseText(),
       phaseTone = phaseTone(),
@@ -259,6 +261,7 @@ function M.build(api)
       reactorState = reactorVisualState(),
       statusText = statusText,
       statusTone = statusTone,
+      active = state.ignition == true,
       ignition = state.ignition == true,
       injectionRate = math.floor(asNumber(state.injectionRate, 0)),
       plasmaTemp = formatTemperature(state.plasmaTemp, 1),
@@ -269,6 +272,7 @@ function M.build(api)
       fuelMode = asText(type(api.getRuntimeFuelMode) == "function" and api.getRuntimeFuelMode() or "N/A", "N/A"),
       laserState = asText(state.laserStatusText or state.laserState, "ABS"),
       laserPct = clamp(math.floor(asNumber(state.laserPct, 0) + 0.5), 0, 999),
+      laserRatio = laserRatio,
       laserEnergy = formatEnergy(state.laserEnergy),
       laserMax = formatEnergy(state.laserMax),
       laserNeed = formatEnergy(state.laserThresholdRaw),
@@ -277,6 +281,7 @@ function M.build(api)
       laserCharging = state.laserChargeOn == true,
       laserActive = state.laserLineOn == true,
       energyPct = clamp(asNumber(state.energyPct, 0), 0, 100),
+      energyRatio = gridRatio,
       energyKnown = state.energyKnown == true,
       energyStored = formatEnergy(state.energyStored),
       energyMax = formatEnergy(state.energyMax),
@@ -465,20 +470,31 @@ function M.build(api)
           local blocksH = tonumber(gpu.blocksH) or 0
           local pxW = tonumber(gpu.pixelsW) or 0
           local pxH = tonumber(gpu.pixelsH) or 0
-          local scaleX = (blocksW > 0) and math.floor((pxW / blocksW) + 0.5) or 0
-          local scaleY = (blocksH > 0) and math.floor((pxH / blocksH) + 0.5) or 0
-          local scaleText = (scaleX > 0 and scaleY > 0) and (tostring(scaleX) .. "x" .. tostring(scaleY)) or tostring(gpu.targetSize or "N/A")
+          local wrappedW = tonumber(gpu.wrappedW) or 0
+          local wrappedH = tonumber(gpu.wrappedH) or 0
+          local gridW = tonumber(gpu.gridW) or 0
+          local gridH = tonumber(gpu.gridH) or 0
+          local scaleX = tonumber(gpu.scaleX) or 0
+          local scaleY = tonumber(gpu.scaleY) or 0
+          local scaleText = "N/A"
+          if scaleX > 0 and scaleY > 0 then
+            scaleText = tostring(scaleX) .. "x" .. tostring(scaleY)
+          elseif tonumber(gpu.targetSize) and tonumber(gpu.targetSize) > 0 then
+            scaleText = tostring(tonumber(gpu.targetSize))
+          end
           lines[#lines + 1] = string.format("  #%d name=%s", index, tostring(gpu.name or "unknown"))
-          lines[#lines + 1] = string.format("     pixels=%dx%d blocks=%dx%d scale=%s area=%s",
+          lines[#lines + 1] = string.format("     native=%dx%d wrapped=%dx%d area=%s",
             pxW,
             pxH,
+            wrappedW,
+            wrappedH,
+            tostring(gpu.runtimeArea or 0))
+          lines[#lines + 1] = string.format("     blocks=%dx%d scale=%s grid=%dx%d backend=%s",
             blocksW,
             blocksH,
             scaleText,
-            tostring(gpu.runtimeArea or 0))
-          lines[#lines + 1] = string.format("     wrapped=%dx%d backend=%s",
-            tonumber(gpu.wrappedW) or blocksW,
-            tonumber(gpu.wrappedH) or blocksH,
+            gridW,
+            gridH,
             tostring(gpu.backend or "toms_gpu"))
           lines[#lines + 1] = string.format("     setSize tried=%s applied=%s mode=%s",
             tostring(gpu.setSizeTried == true),
@@ -843,16 +859,19 @@ function M.build(api)
   local function drawReactorPanel(ui, bounds, theme, model)
     ui.drawPanel(bounds, "REACTOR", {
       bg = theme.palette.panelBg,
-      border = theme.palette.border,
+      border = theme.palette.borderStrong,
       headerBg = theme.palette.panelHeader,
       headerText = theme.palette.textPrimary,
     })
-    ui.drawStatusBadge(bounds, 0, model.statusText, model.statusTone)
-    ui.drawLabelValue(bounds, 2, "Core", state.reactorFormed and "FORMED" or "UNFORMED", state.reactorFormed and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
-    ui.drawLabelValue(bounds, 3, "Injection", tostring(model.injectionRate) .. " mB/t", state.injectionWritable and theme.palette.info or theme.palette.textMuted, theme.palette.textMuted)
-    ui.drawLabelValue(bounds, 4, "Fuel Mode", model.fuelMode, theme.palette.info, theme.palette.textMuted)
-    ui.drawLabelValue(bounds, 5, "Fuel Flow", model.fuelFlow, theme.palette.info, theme.palette.textMuted)
-    ui.drawLabelValue(bounds, 6, "Hohlraum", model.hohlraum, state.hohlraumPresent and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
+    ui.drawStatusBadge(bounds, 0, model.active and "ACTIVE" or "IDLE", model.active and theme.palette.ok or theme.palette.warning)
+    ui.drawLabelValue(bounds, 2, "Ignited", model.ignition and "YES" or "NO", model.ignition and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 3, "Core", state.reactorFormed and "FORMED" or "UNFORMED", state.reactorFormed and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 4, "Injection", tostring(model.injectionRate) .. " mB/t", state.injectionWritable and theme.palette.info or theme.palette.textMuted, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 5, "Passive", model.passiveGeneration, theme.palette.info, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 6, "Steam", model.steamProduction, theme.palette.info, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 7, "Fuel", model.fuelFlow, theme.palette.info, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 8, "Mode", model.fuelMode, theme.palette.info, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 9, "Hohlraum", model.hohlraum, state.hohlraumPresent and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
   end
 
   local function drawTemperaturePanel(ui, bounds, theme, model)
@@ -863,42 +882,11 @@ function M.build(api)
       headerText = theme.palette.textPrimary,
     })
     ui.drawLabelValue(bounds, 0, "Plasma", model.plasmaTemp, theme.palette.warning, theme.palette.textMuted)
-    ui.drawLabelValue(bounds, 1, "Structure", model.caseTemp, theme.palette.critical, theme.palette.textMuted)
-    ui.drawLabelValue(bounds, 2, "Ignition", "300.0 C", theme.palette.info, theme.palette.textMuted)
-  end
-
-  local function drawStatusPanel(ui, bounds, theme, model)
-    ui.drawPanel(bounds, "STATUS / DEBUG", {
-      bg = theme.palette.panelBg,
-      border = theme.palette.border,
-      headerBg = theme.palette.panelHeaderAlt,
-      headerText = theme.palette.textPrimary,
-    })
-    local row = 0
-    ui.drawLabelValue(bounds, row, "Phase", model.phase, model.phaseTone, theme.palette.textMuted)
-    row = row + 1
-    ui.drawLabelValue(bounds, row, "Output", model.monitorName, theme.palette.info, theme.palette.textMuted)
-    row = row + 1
-    ui.drawLabelValue(bounds, row, "Backend", model.backendName, theme.palette.info, theme.palette.textMuted)
-    row = row + 1
-    ui.drawLabelValue(bounds, row, "Control", model.allowControl and "ENABLED" or "LOCKED", model.allowControl and theme.palette.warning or theme.palette.ok, theme.palette.textMuted)
-    row = row + 1
-    ui.drawLabelValue(bounds, row, "Action", model.lastAction, theme.palette.textPrimary, theme.palette.textMuted)
-    row = row + 1
-
-    if #model.blockers > 0 then
-      for i = 1, math.min(#model.blockers, math.max(1, bounds.h - (row + 4))) do
-        ui.drawLabelValue(bounds, row, "[NO]", model.blockers[i], theme.palette.critical, theme.palette.textMuted)
-        row = row + 1
-      end
-    elseif #model.warnings > 0 then
-      for i = 1, math.min(#model.warnings, math.max(1, bounds.h - (row + 4))) do
-        ui.drawLabelValue(bounds, row, "[!]", model.warnings[i], theme.palette.warning, theme.palette.textMuted)
-        row = row + 1
-      end
-    else
-      ui.drawLabelValue(bounds, row, "[OK]", "No active warning", theme.palette.ok, theme.palette.textMuted)
-    end
+    ui.drawLabelValue(bounds, 1, "Case", model.caseTemp, theme.palette.critical, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 2, "Target", "300.0 C", theme.palette.info, theme.palette.textMuted)
+    local tempState = model.ignition and "RUNNING" or (model.blockers[1] and "BLOCKED" or "STANDBY")
+    local tempTone = model.ignition and theme.palette.ok or (model.blockers[1] and theme.palette.critical or theme.palette.warning)
+    ui.drawStatusBadge(bounds, 4, tempState, tempTone)
   end
 
   local function drawLaserPanel(ui, bounds, theme, model)
@@ -917,72 +905,55 @@ function M.build(api)
       tone = model.laserTone,
       charging = model.laserCharging,
     })
+    ui.drawGauge(bounds, 6, model.laserRatio, {
+      fg = model.laserTone,
+      bg = theme.palette.panelBgRaised,
+      label = "LAS " .. tostring(model.laserPct) .. "%",
+      thickness = theme.sizes.gaugeThickness,
+    })
+    ui.drawGauge(bounds, 8, model.energyKnown and model.energyRatio or 0, {
+      fg = theme.palette.energy,
+      bg = theme.palette.panelBgRaised,
+      label = model.energyKnown and ("GRID " .. string.format("%.0f%%", model.energyPct)) or "GRID N/A",
+      thickness = theme.sizes.gaugeThickness,
+    })
+    ui.drawLabelValue(bounds, 10, "Current", model.laserEnergy, theme.palette.info, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 11, "Capacity", model.laserMax, theme.palette.info, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 12, "Need", model.laserNeed, theme.palette.warning, theme.palette.textMuted)
   end
 
-  local function drawRuntimePanel(ui, bounds, theme, model)
-    ui.drawPanel(bounds, "RUNTIME", {
+  local function drawStatusPanel(ui, bounds, theme, model)
+    ui.drawPanel(bounds, "STATUS / DEBUG", {
       bg = theme.palette.panelBg,
       border = theme.palette.border,
       headerBg = theme.palette.panelHeaderAlt,
       headerText = theme.palette.textPrimary,
     })
-
-    local laserRatio = clamp(asNumber(state.laserPct, 0) / 100, 0, 1)
-    local gridRatio = clamp(asNumber(state.energyPct, 0) / 100, 0, 1)
-    ui.drawHorizontalBar(bounds, 0, laserRatio, theme.palette.ok, theme.palette.panelBgRaised, "LAS CHARGE")
-    ui.drawHorizontalBar(bounds, 1, gridRatio, theme.palette.energy, theme.palette.panelBgRaised, "GRID LEVEL")
-    ui.drawLabelValue(bounds, 3, "Laser Energy", model.laserEnergy, theme.palette.info, theme.palette.textMuted)
-    ui.drawLabelValue(bounds, 4, "Laser Max", model.laserMax, theme.palette.info, theme.palette.textMuted)
-    ui.drawLabelValue(bounds, 5, "Need", model.laserNeed, theme.palette.warning, theme.palette.textMuted)
-    ui.drawLabelValue(bounds, 6, "Production", model.passiveGeneration, theme.palette.info, theme.palette.textMuted)
-    ui.drawLabelValue(bounds, 7, "Steam", model.steamProduction, theme.palette.info, theme.palette.textMuted)
-  end
-
-  local function drawIoPanel(ui, bounds, theme, model)
-    ui.drawPanel(bounds, "REAL I/O", {
-      bg = theme.palette.panelBg,
-      border = theme.palette.border,
-      headerBg = theme.palette.panelHeaderAlt,
-      headerText = theme.palette.textPrimary,
-    })
-    if type(api.drawIoPanel) == "function" and state.currentView ~= "setup" then
-      local ioInner = inset(bounds, 1, 1, 1, 1)
-      api.drawIoPanel(ioInner)
-      return
+    ui.drawLabelValue(bounds, 0, "Global", model.statusText, model.statusTone, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 1, "Phase", model.phase, model.phaseTone, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 2, "Backend", model.backendName, theme.palette.info, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 3, "Display", model.monitorName, theme.palette.info, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 4, "Control", model.allowControl and "UNLOCKED" or "LOCKED", model.allowControl and theme.palette.warning or theme.palette.ok, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 5, "Action", model.lastAction, theme.palette.textPrimary, theme.palette.textMuted)
+    local statusLabel = "No blocking reason"
+    local statusTone = theme.palette.ok
+    if #model.blockers > 0 then
+      statusLabel = model.blockers[1]
+      statusTone = theme.palette.critical
+    elseif #model.warnings > 0 then
+      statusLabel = model.warnings[1]
+      statusTone = theme.palette.warning
     end
-    ui.drawLabelValue(bounds, 0, "Monitor", model.monitorName, theme.palette.info, theme.palette.textMuted)
-    ui.drawLabelValue(bounds, 1, "Backend", model.backendName, theme.palette.info, theme.palette.textMuted)
-    ui.drawLabelValue(bounds, 2, "Output", asText(api.getCurrentInputSource and api.getCurrentInputSource() or "monitor", "monitor"), theme.palette.info, theme.palette.textMuted)
-  end
+    ui.drawLabelValue(bounds, 7, "Reason", statusLabel, statusTone, theme.palette.textMuted)
 
-  local function drawEventsPanel(ui, bounds, theme, model)
-    ui.drawPanel(bounds, "EVENT LOG", {
-      bg = theme.palette.panelBg,
-      border = theme.palette.border,
-      headerBg = theme.palette.panelHeaderAlt,
-      headerText = theme.palette.textPrimary,
-    })
-    local slots = math.max(1, bounds.h - 4)
-    if #model.events == 0 then
-      ui.drawLabelValue(bounds, 0, "-", "No runtime event", theme.palette.textMuted, theme.palette.textMuted)
-      return
+    local slots = math.max(0, bounds.h - 14)
+    local eventRows = math.min(slots, 3, #model.events)
+    if eventRows > 0 then
+      ui.drawSectionTitle(bounds, 9, "Recent events", theme.palette.info)
+      for i = 1, eventRows do
+        ui.drawLabelValue(bounds, 9 + i, tostring(i), asText(model.events[i], "..."), theme.palette.textMuted, theme.palette.textMuted)
+      end
     end
-    for i = 1, math.min(slots, #model.events) do
-      ui.drawLabelValue(bounds, i - 1, tostring(i), asText(model.events[i], "..."), theme.palette.info, theme.palette.textMuted)
-    end
-  end
-
-  local function drawControlSummary(ui, bounds, theme, model)
-    ui.drawPanel(bounds, "CONTROL MODE", {
-      bg = theme.palette.panelBg,
-      border = theme.palette.border,
-      headerBg = theme.palette.panelHeaderAlt,
-      headerText = theme.palette.textPrimary,
-    })
-    ui.drawLabelValue(bounds, 0, "Master", state.autoMaster and "AUTO" or "MANUAL", state.autoMaster and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
-    ui.drawLabelValue(bounds, 1, "Fusion", state.fusionAuto and "AUTO" or "MANUAL", state.fusionAuto and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
-    ui.drawLabelValue(bounds, 2, "Charge", state.chargeAuto and "AUTO" or "MANUAL", state.chargeAuto and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
-    ui.drawLabelValue(bounds, 3, "Laser", model.laserState, model.laserTone, theme.palette.textMuted)
   end
 
   local function computeDiagnosticLayout(width, height, theme)
@@ -1351,63 +1322,56 @@ function M.build(api)
       drawFn(rootUi, bounds)
     end
 
-    drawArea(layout.columns.left, function(ui, localBounds)
-      local localLayout = {
-        left = splitVertical(inset(localBounds, 1, 1, 1, 1), {
-          { key = "reactor", weight = 4 },
-          { key = "temperatures", weight = 3 },
-          { key = "status", weight = 5 },
-        }, theme.spacing.sectionGap),
-      }
-      drawReactorPanel(ui, localLayout.left.reactor, theme, model)
-      drawTemperaturePanel(ui, localLayout.left.temperatures, theme, model)
-      drawStatusPanel(ui, localLayout.left.status, theme, model)
-    end)
+    local panels = layout.panels or {}
 
-    drawArea(layout.columns.center, function(ui, localBounds)
-      local localLayout = {
-        center = splitVertical(inset(localBounds, 1, 1, 1, 1), {
-          { key = "laser", weight = 4 },
-          { key = "core", weight = 10 },
-          { key = "runtime", weight = 4 },
-        }, theme.spacing.sectionGap),
-      }
-      drawLaserPanel(ui, localLayout.center.laser, theme, model)
-      ui.drawPanel(localLayout.center.core, "REACTOR CORE", {
-        bg = theme.palette.panelBg,
-        border = theme.palette.borderStrong,
-        headerBg = theme.palette.panelHeaderAlt,
-        headerText = theme.palette.textPrimary,
-      })
-      local coreInner = inset(localLayout.center.core, 1, 1, 1, 1)
-      ui.drawReactorCore(coreInner, {
-        tick = state.tick or 0,
-        reactorState = model.reactorState,
-        ignition = model.ignition,
-        laserActive = model.laserActive,
-        laserCharging = model.laserCharging,
-        laserLabel = "LAS " .. tostring(model.laserPct) .. "%",
-        plasmaTemp = model.plasmaTemp,
-        caseTemp = model.caseTemp,
-        tOpen = model.tOpen,
-        dtOpen = model.dtOpen,
-        dOpen = model.dOpen,
-      })
-      drawRuntimePanel(ui, localLayout.center.runtime, theme, model)
-    end)
+    if type(panels.reactor) == "table" then
+      drawArea(panels.reactor, function(ui, localBounds)
+        drawReactorPanel(ui, localBounds, theme, model)
+      end)
+    end
 
-    drawArea(layout.columns.right, function(ui, localBounds)
-      local localLayout = {
-        right = splitVertical(inset(localBounds, 1, 1, 1, 1), {
-          { key = "io", weight = 5 },
-          { key = "events", weight = 4 },
-          { key = "debug", weight = 3 },
-        }, theme.spacing.sectionGap),
-      }
-      drawIoPanel(ui, localLayout.right.io, theme, model)
-      drawEventsPanel(ui, localLayout.right.events, theme, model)
-      drawControlSummary(ui, localLayout.right.debug, theme, model)
-    end)
+    if type(panels.temperatures) == "table" then
+      drawArea(panels.temperatures, function(ui, localBounds)
+        drawTemperaturePanel(ui, localBounds, theme, model)
+      end)
+    end
+
+    if type(panels.laser) == "table" then
+      drawArea(panels.laser, function(ui, localBounds)
+        drawLaserPanel(ui, localBounds, theme, model)
+      end)
+    end
+
+    if type(panels.status) == "table" then
+      drawArea(panels.status, function(ui, localBounds)
+        drawStatusPanel(ui, localBounds, theme, model)
+      end)
+    end
+
+    if type(panels.core) == "table" then
+      drawArea(panels.core, function(ui, localBounds)
+        ui.drawPanel(localBounds, "REACTOR CORE", {
+          bg = theme.palette.panelBg,
+          border = theme.palette.borderStrong,
+          headerBg = theme.palette.panelHeaderAlt,
+          headerText = theme.palette.textPrimary,
+        })
+        local coreInner = inset(localBounds, 1, 1, 1, 1)
+        ui.drawReactorCore(coreInner, {
+          tick = state.tick or 0,
+          reactorState = model.reactorState,
+          ignition = model.ignition,
+          laserActive = model.laserActive,
+          laserCharging = model.laserCharging,
+          laserLabel = "LAS " .. tostring(model.laserPct) .. "%",
+          plasmaTemp = model.plasmaTemp,
+          caseTemp = model.caseTemp,
+          tOpen = model.tOpen,
+          dtOpen = model.dtOpen,
+          dOpen = model.dOpen,
+        })
+      end)
+    end
 
     local controlsBounds = layout.controls.buttonBounds
     rootUi.drawPanel(controlsBounds, "CONTROLS", {
@@ -1429,6 +1393,18 @@ function M.build(api)
     if type(api.buildButtons) == "function" and type(api.drawButtons) == "function" then
       api.buildButtons(legacyLayout)
       api.drawButtons(api.getCurrentInputSource and api.getCurrentInputSource() or "monitor")
+    end
+
+    if controlsInner.h >= 2 then
+      rootUi.safeText(
+        controlsInner.x + 1,
+        controlsInner.y,
+        "ACTIONS: REFRESH | LASER PULSE | INJECTION | QUIT",
+        theme.palette.textMuted,
+        nil,
+        math.max(1, controlsInner.w - 2),
+        "left"
+      )
     end
 
     rootUi.drawHeader(layout.header, headerLeft, headerCenter, headerRight, model.phaseTone, warningTone)

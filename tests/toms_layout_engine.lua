@@ -35,9 +35,10 @@ function M.run(ctx)
 
   local cases = {
     { w = 36, h = 14, expectTooSmall = true },
-    { w = 74, h = 24, density = "small" },
-    { w = 122, h = 36, density = "medium" },
-    { w = 170, h = 52, density = "large" },
+    { w = 74, h = 24, expectTooSmall = true },
+    { w = 122, h = 36, density = "small" },
+    { w = 170, h = 52, density = "medium" },
+    { w = 320, h = 200, density = "large" },
   }
 
   for _, item in ipairs(cases) do

@@ -146,7 +146,7 @@ end
 function M.compute(width, height, theme, currentView)
   local w = math.max(1, asInt(width, 1))
   local h = math.max(1, asInt(height, 1))
-  local minW, minH = 52, 24
+  local minW, minH = 72, 32
 
   if w < minW or h < minH then
     return {
@@ -163,59 +163,74 @@ function M.compute(width, height, theme, currentView)
   local sizes = theme.sizes
   local root = rect(1, 1, w, h)
 
-  local headerH = clamp(math.max(1, asInt(sizes.headerHeight, 2)), 1, math.max(1, h - 2))
-  local footerH = clamp(math.max(3, asInt(sizes.footerHeight, 5)), 3, math.max(3, h - headerH - 2))
+  local headerH = clamp(math.max(2, asInt(sizes.headerHeight, 3)), 2, math.max(2, h - 8))
+  local footerH = clamp(math.max(4, asInt(sizes.footerHeight, 7)), 4, math.max(4, h - headerH - 6))
   local header = rect(1, 1, w, headerH)
   local footer = rect(1, h - footerH + 1, w, footerH)
   if footer.y <= header.y2 then
-    footer = rect(1, header.y2 + 1, w, 3)
+    footer = rect(1, header.y2 + 1, w, 4)
   end
 
   local content = rect(1, header.y2 + 1, w, math.max(1, footer.y - (header.y2 + 1)))
   local contentInner = inset(content, spacing.outerMargin, spacing.outerMargin, spacing.outerMargin, spacing.outerMargin)
-  local isSmallStack = theme.density == "small" and (contentInner.w < 112 or contentInner.h < 36)
+  local stacked = theme.density == "small" and (contentInner.w < 148 or contentInner.h < 92)
 
-  local columns
-  local stacked = false
-  if isSmallStack then
-    stacked = true
-    columns = splitVertical(contentInner, {
-      { key = "left", min = 4, weight = 5 },
-      { key = "center", min = 6, weight = 7 },
-      { key = "right", min = 4, weight = 5 },
+  local columns = {}
+  local panels = {}
+
+  if stacked then
+    local rows = splitVertical(contentInner, {
+      { key = "reactor", min = 6, weight = 4 },
+      { key = "temperatures", min = 4, weight = 3 },
+      { key = "laser", min = 6, weight = 4 },
+      { key = "core", min = 8, weight = 8 },
+      { key = "status", min = 4, weight = 4 },
     }, spacing.panelGap)
+
+    panels.reactor = rows.reactor
+    panels.temperatures = rows.temperatures
+    panels.laser = rows.laser
+    panels.core = rows.core
+    panels.status = rows.status
+
+    columns.left = rows.reactor
+    columns.center = rows.core
+    columns.right = rows.status
   else
     columns = splitHorizontal(contentInner, {
-      { key = "left", min = (theme.density == "large") and 30 or 24, weight = 28 },
-      { key = "center", min = (theme.density == "large") and 66 or 50, weight = 46 },
-      { key = "right", min = (theme.density == "large") and 30 or 24, weight = 26 },
+      { key = "left", min = (theme.density == "large") and 108 or 78, weight = 31 },
+      { key = "center", min = (theme.density == "large") and 152 or 110, weight = 39 },
+      { key = "right", min = (theme.density == "large") and 108 or 78, weight = 30 },
     }, spacing.panelGap)
+
+    local leftInner = inset(columns.left, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding)
+    local centerInner = inset(columns.center, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding)
+    local rightInner = inset(columns.right, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding)
+
+    local leftPanels = splitVertical(leftInner, {
+      { key = "reactor", min = 8, weight = 6 },
+      { key = "temperatures", min = 6, weight = 4 },
+    }, spacing.sectionGap)
+
+    local centerPanels = splitVertical(centerInner, {
+      { key = "core", min = 12, weight = 10 },
+    }, spacing.sectionGap)
+
+    local rightPanels = splitVertical(rightInner, {
+      { key = "laser", min = 8, weight = 5 },
+      { key = "status", min = 8, weight = 5 },
+    }, spacing.sectionGap)
+
+    panels.reactor = leftPanels.reactor
+    panels.temperatures = leftPanels.temperatures
+    panels.laser = rightPanels.laser
+    panels.status = rightPanels.status
+    panels.core = centerPanels.core
   end
 
-  local leftInner = inset(columns.left, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding)
-  local centerInner = inset(columns.center, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding)
-  local rightInner = inset(columns.right, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding)
-
-  local leftPanels = splitVertical(leftInner, {
-    { key = "reactor", min = 4, weight = 4 },
-    { key = "temperatures", min = 3, weight = 3 },
-    { key = "status", min = 4, weight = 5 },
-  }, spacing.sectionGap)
-
-  local centerPanels = splitVertical(centerInner, {
-    { key = "laser", min = 4, weight = 4 },
-    { key = "core", min = 8, weight = 10 },
-    { key = "runtime", min = 4, weight = 4 },
-  }, spacing.sectionGap)
-
-  local rightPanels = splitVertical(rightInner, {
-    { key = "io", min = 4, weight = 5 },
-    { key = "events", min = 4, weight = 4 },
-    { key = "debug", min = 3, weight = 3 },
-  }, spacing.sectionGap)
-
   local footerInner = inset(footer, spacing.outerMargin, 1, spacing.outerMargin, 1)
-  local statusBounds = rect(footerInner.x, footerInner.y, footerInner.w, 1)
+  local statusHeight = theme.nativeLike and math.max(1, math.min(footerInner.h - 1, math.floor(sizes.lineHeight * 0.75))) or 1
+  local statusBounds = rect(footerInner.x, footerInner.y, footerInner.w, statusHeight)
   local controlsTop = math.min(footerInner.y2, statusBounds.y2 + 1)
   local controlsHeight = math.max(1, footerInner.y2 - controlsTop + 1)
   local buttonBounds = rect(footerInner.x, controlsTop, footerInner.w, controlsHeight)
@@ -233,13 +248,26 @@ function M.compute(width, height, theme, currentView)
     content = content,
     footer = footer,
     columns = columns,
-    left = leftPanels,
-    center = centerPanels,
-    right = rightPanels,
+    panels = panels,
+    left = {
+      reactor = panels.reactor,
+      temperatures = panels.temperatures,
+      status = panels.status,
+    },
+    center = {
+      laser = panels.laser,
+      core = panels.core,
+      runtime = panels.status,
+    },
+    right = {
+      io = panels.laser,
+      events = panels.status,
+      debug = panels.status,
+    },
     controls = {
       statusBounds = statusBounds,
       buttonBounds = buttonBounds,
-      ioBounds = rightPanels.io,
+      ioBounds = panels.status,
       footerBounds = footerInner,
     },
     legacy = {

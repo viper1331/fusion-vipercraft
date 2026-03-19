@@ -1872,17 +1872,45 @@ function M.run(options)
     drawDiag.detectedTomGpus = {}
     for _, candidate in ipairs(candidates or {}) do
       local runtime = type(candidate.runtime) == "table" and candidate.runtime or {}
+      local targetSize = tonumber(runtime.targetSize) or 0
+      local pxW = tonumber(candidate.pxW) or 0
+      local pxH = tonumber(candidate.pxH) or 0
+      local gridW = tonumber(candidate.w) or 0
+      local gridH = tonumber(candidate.h) or 0
+      local blocksW = gridW
+      local blocksH = gridH
+      local scaleX = 0
+      local scaleY = 0
+      if pxW > 0 and pxH > 0 and targetSize > 0 then
+        blocksW = math.max(1, math.floor((pxW / targetSize) + 0.5))
+        blocksH = math.max(1, math.floor((pxH / targetSize) + 0.5))
+        scaleX = math.max(1, math.floor((pxW / blocksW) + 0.5))
+        scaleY = math.max(1, math.floor((pxH / blocksH) + 0.5))
+      elseif blocksW > 0 and blocksH > 0 and pxW > 0 and pxH > 0 then
+        scaleX = math.max(1, math.floor((pxW / blocksW) + 0.5))
+        scaleY = math.max(1, math.floor((pxH / blocksH) + 0.5))
+      end
+      local wrappedW = gridW
+      local wrappedH = gridH
+      if tostring(candidate.backend or "") == "toms_gpu" and pxW > 0 and pxH > 0 then
+        wrappedW = pxW
+        wrappedH = pxH
+      end
       local entry = {
         name = tostring(candidate.name or "unknown"),
         backend = tostring(candidate.backend or "unknown"),
-        blocksW = tonumber(candidate.w) or 0,
-        blocksH = tonumber(candidate.h) or 0,
-        wrappedW = tonumber(candidate.w) or 0,
-        wrappedH = tonumber(candidate.h) or 0,
-        pixelsW = tonumber(candidate.pxW) or 0,
-        pixelsH = tonumber(candidate.pxH) or 0,
+        blocksW = blocksW,
+        blocksH = blocksH,
+        wrappedW = wrappedW,
+        wrappedH = wrappedH,
+        gridW = gridW,
+        gridH = gridH,
+        pixelsW = pxW,
+        pixelsH = pxH,
         runtimeArea = tonumber(candidate.runtimeArea) or 0,
-        targetSize = tonumber(runtime.targetSize) or 0,
+        targetSize = targetSize,
+        scaleX = scaleX,
+        scaleY = scaleY,
         setSizeTried = runtime.setSizeTried == true,
         setSizeApplied = runtime.setSizeApplied == true,
         setSizeMode = tostring(runtime.setSizeMode or "none"),

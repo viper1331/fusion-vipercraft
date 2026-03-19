@@ -85,6 +85,10 @@ function M.new(options)
   local palette = type(theme.palette) == "table" and theme.palette or {}
   local spacing = type(theme.spacing) == "table" and theme.spacing or {}
   local sizes = type(theme.sizes) == "table" and theme.sizes or {}
+  local lineHeight = math.max(1, asInt(sizes.lineHeight, 1))
+  local rowStep = math.max(1, asInt(sizes.dataRowHeight or lineHeight, lineHeight))
+  local panelHeaderH = math.max(1, asInt(sizes.panelHeaderHeight, 1))
+  local rowPadding = math.max(0, asInt(spacing.rowPadding, 0))
   local textRules = type(theme.text) == "table" and theme.text or {}
   local truncate = type(textRules.truncate) == "function"
     and textRules.truncate
@@ -189,14 +193,17 @@ function M.new(options)
 
   local function drawBackdrop(bounds)
     local b = copyRect(bounds)
-    safeFilledRect(b.x, b.y, b.w, b.h, palette.bgRoot or colors.black)
-    local stride = (type(theme.density) == "string" and theme.density == "large") and 5 or 6
-    for y = b.y + 2, b.y2, stride do
-      safeFilledRect(b.x, y, b.w, 1, palette.bgBackdrop or colors.gray)
+    local bg = palette.bgRoot or colors.black
+    local grid = palette.bgBackdrop or colors.gray
+    safeFilledRect(b.x, b.y, b.w, b.h, bg)
+
+    local hStride = math.max(4, math.floor(rowStep * 1.5))
+    local vStride = math.max(10, math.floor(rowStep * 3.4))
+    for y = b.y + hStride, b.y2, hStride do
+      safeFilledRect(b.x, y, b.w, 1, grid)
     end
-    local verticalStride = (type(theme.density) == "string" and theme.density == "small") and 14 or 18
-    for x = b.x + 6, b.x2, verticalStride do
-      safeFilledRect(x, b.y, 1, b.h, palette.bgBackdrop or colors.gray)
+    for x = b.x + vStride, b.x2, vStride do
+      safeFilledRect(x, b.y, 1, b.h, grid)
     end
   end
 
@@ -209,7 +216,7 @@ function M.new(options)
     local headerText = cfg.headerText or palette.textPrimary or colors.white
     local shadow = cfg.shadow or palette.borderSoft or colors.gray
 
-    if b.w < 4 or b.h < 3 then
+    if b.w < 4 or b.h < (panelHeaderH + 2) then
       safeFilledRect(b.x, b.y, b.w, b.h, innerBg)
       return
     end
@@ -220,11 +227,11 @@ function M.new(options)
     safeFrame(b, border, innerBg)
 
     if title and b.w >= 8 then
-      local hh = math.max(1, asInt(sizes.panelHeaderHeight, 1))
+      local hh = math.min(panelHeaderH, math.max(1, b.h - 2))
       safeFilledRect(b.x + 1, b.y + 1, math.max(1, b.w - 2), hh, headerBg)
       safeText(
         b.x + 2,
-        b.y + 1,
+        b.y + 1 + math.floor((hh - 1) / 2),
         string.upper(tostring(title)),
         headerText,
         headerBg,
@@ -241,10 +248,11 @@ function M.new(options)
     local b = copyRect(bounds)
     if b.w < 6 then return end
     local bg = palette.panelHeaderAlt or palette.panelBgSoft or colors.gray
-    safeFilledRect(b.x + 1, b.y + 1, math.max(1, b.w - 2), 1, bg)
+    local hh = math.min(panelHeaderH, math.max(1, b.h - 2))
+    safeFilledRect(b.x + 1, b.y + 1, math.max(1, b.w - 2), hh, bg)
     safeText(
       b.x + 2,
-      b.y + 1,
+      b.y + 1 + math.floor((hh - 1) / 2),
       tostring(title or ""),
       tone or palette.textPrimary or colors.white,
       bg,
@@ -255,7 +263,8 @@ function M.new(options)
 
   local function rowY(bounds, rowIndex)
     local b = copyRect(bounds)
-    return b.y + 2 + math.max(0, asInt(rowIndex, 0))
+    local top = b.y + panelHeaderH + 1 + rowPadding
+    return top + (math.max(0, asInt(rowIndex, 0)) * rowStep)
   end
 
   local function drawSectionTitle(bounds, rowIndex, title, tone)
@@ -275,6 +284,7 @@ function M.new(options)
   local function drawLabelValue(bounds, rowIndex, label, value, valueTone, labelTone)
     local b = copyRect(bounds)
     local y = rowY(b, rowIndex)
+    if y > b.y2 then return end
     local usable = math.max(6, b.w - 4)
     local keyW = clamp(math.floor(usable * 0.44), 4, math.max(4, usable - 2))
     local valW = math.max(1, usable - keyW - 1)
@@ -301,8 +311,12 @@ function M.new(options)
   local function drawStatusBadge(bounds, rowIndex, textValue, tone)
     local b = copyRect(bounds)
     local y = rowY(b, rowIndex)
+    if y > b.y2 then return end
     local badgeW = math.max(4, b.w - 4)
     local badgeH = math.max(1, asInt(sizes.badgeHeight, 1))
+    if y + badgeH - 1 > b.y2 then
+      badgeH = math.max(1, b.y2 - y + 1)
+    end
     local bg = tone or palette.panelBgRaised or colors.gray
     safeFilledRect(b.x + 2, y, badgeW, badgeH, bg)
     safeText(
@@ -319,9 +333,13 @@ function M.new(options)
   local function drawGauge(bounds, rowIndex, ratio, opts)
     local b = copyRect(bounds)
     local y = rowY(b, rowIndex)
+    if y > b.y2 then return end
     local cfg = type(opts) == "table" and opts or {}
     local gaugeW = math.max(4, b.w - 4)
     local gaugeH = math.max(1, asInt(cfg.thickness, sizes.gaugeThickness or 1))
+    if y + gaugeH - 1 > b.y2 then
+      gaugeH = math.max(1, b.y2 - y + 1)
+    end
     local value = clamp(tonumber(ratio) or 0, 0, 1)
     local fillW = clamp(math.floor((value * gaugeW) + 0.5), 0, gaugeW)
     local bg = cfg.bg or palette.panelBgRaised or colors.gray
@@ -473,87 +491,92 @@ function M.new(options)
     local inner = inset(b, 1, 1, 1, 1)
     safeFilledRect(inner.x, inner.y, inner.w, inner.h, palette.panelBg or colors.black)
 
-    local cx = inner.x + math.floor(inner.w / 2)
-    local cy = inner.y + math.floor(inner.h / 2) + 1
-    local reactorW = clamp(math.floor(inner.w * 0.60), 18, math.max(18, inner.w - 4))
-    local reactorH = clamp(math.floor(inner.h * 0.62), 11, math.max(11, inner.h - 7))
-    local reactorX = clamp(cx - math.floor(reactorW / 2), inner.x + 1, inner.x2 - reactorW + 1)
-    local reactorY = clamp(cy - math.floor(reactorH / 2), inner.y + 4, inner.y2 - reactorH - 1)
+    local topPad = math.max(2, math.floor(lineHeight * 0.7))
+    local bottomPad = math.max(3, math.floor(lineHeight * 0.9))
+    local sidePad = math.max(2, math.floor(lineHeight * 0.5))
+    local reactorArea = inset(inner, sidePad, topPad, sidePad, bottomPad)
+    local cx = reactorArea.x + math.floor(reactorArea.w / 2)
+    local cy = reactorArea.y + math.floor(reactorArea.h / 2)
+
+    local reactorW = clamp(math.floor(reactorArea.w * 0.66), math.max(16, math.floor(reactorArea.w * 0.52)), math.max(18, reactorArea.w - 2))
+    local reactorH = clamp(math.floor(reactorArea.h * 0.60), math.max(10, math.floor(reactorArea.h * 0.48)), math.max(12, reactorArea.h - 2))
+    local reactorX = clamp(cx - math.floor(reactorW / 2), reactorArea.x, reactorArea.x2 - reactorW + 1)
+    local reactorY = clamp(cy - math.floor(reactorH / 2), reactorArea.y, reactorArea.y2 - reactorH + 1)
     local reactor = rect(reactorX, reactorY, reactorW, reactorH)
 
     local shellColor = palette.reactorShell or colors.lightBlue
     local shellEdge = palette.reactorShellDark or colors.blue
     safeFrame(reactor, shellEdge, shellColor)
-    if reactor.w > 8 and reactor.h > 6 then
-      safeFrame(inset(reactor, 2, 2, 2, 2), shellEdge, palette.panelBgSoft or colors.blue)
-    end
+    safeFrame(inset(reactor, 2, 2, 2, 2), shellEdge, palette.panelBgSoft or colors.blue)
 
-    local sideH = math.max(2, math.floor(reactor.h * 0.18))
-    safeFilledRect(reactor.x - 2, cy - 1, 2, sideH, shellEdge)
-    safeFilledRect(reactor.x2 + 1, cy - 1, 2, sideH, shellEdge)
-    safeFilledRect(reactor.x + math.floor(reactor.w * 0.38), reactor.y - 1, math.max(4, math.floor(reactor.w * 0.24)), 1, shellEdge)
+    local topCapW = clamp(math.floor(reactor.w * 0.24), 4, math.max(4, reactor.w - 4))
+    local topCapX = cx - math.floor(topCapW / 2)
+    safeFilledRect(topCapX, reactor.y - 1, topCapW, 1, shellEdge)
+    safeFilledRect(topCapX + 1, reactor.y - 2, math.max(2, topCapW - 2), 1, shellEdge)
 
-    local coreSize = clamp(math.floor(math.min(reactor.w, reactor.h) * 0.22), 4, 8)
+    local sidePortH = clamp(math.floor(reactor.h * 0.10), 1, 3)
+    safeFilledRect(reactor.x - 2, cy - 1, 2, sidePortH, shellEdge)
+    safeFilledRect(reactor.x2 + 1, cy - 1, 2, sidePortH, shellEdge)
+
+    local coreSize = clamp(math.floor(math.min(reactor.w, reactor.h) * 0.18), 4, 10)
     local core = rect(cx - math.floor(coreSize / 2), cy - math.floor(coreSize / 2), coreSize, coreSize)
-    local pulse = asInt((model and model.tick) or 0, 0) % 10
+    local pulse = asInt((model and model.tick) or 0, 0) % 12
     local coreColor = reactorStateTone(model)
-    if tostring((model and model.reactorState) or "") == "active" and pulse >= 5 then
+    if tostring((model and model.reactorState) or "") == "active" and pulse >= 6 then
       coreColor = palette.accent or colors.purple
-    elseif tostring((model and model.reactorState) or "") == "ready" and pulse >= 5 then
+    elseif tostring((model and model.reactorState) or "") == "ready" and pulse >= 6 then
       coreColor = palette.ok or colors.lime
     end
     safeFilledRect(core.x, core.y, core.w, core.h, coreColor)
     safeRect(core.x, core.y, core.w, core.h, palette.borderStrong or colors.cyan)
-    if core.w >= 4 and core.h >= 3 then
-      safeText(core.x, core.y + math.floor((core.h - 1) / 2), "[#]", palette.textPrimary or colors.white, nil, core.w, "center")
-    end
+    safeText(core.x, core.y + math.floor((core.h - 1) / 2), "CORE", palette.textPrimary or colors.white, nil, core.w, "center")
 
     local fieldY = cy
     local fieldColor = (model and model.ignition) and (palette.reactorCoreReady or colors.lime) or (palette.reactorFlowT or colors.green)
     safeFilledRect(reactor.x + 1, fieldY, reactor.w - 2, 1, fieldColor)
-    safeText(cx - 5, fieldY, "FIELD", palette.textPrimary or colors.white, nil, 10, "center")
 
     local leftInColor = flowTone((model and model.tOpen) == true, palette.reactorFlowT or colors.green)
     local dtInColor = flowTone((model and model.dtOpen) == true, palette.reactorFlowDT or colors.purple)
     local rightInColor = flowTone((model and model.dOpen) == true, palette.reactorFlowD or colors.red)
-    local leftX = reactor.x + math.floor(reactor.w * 0.22)
+    local leftX = reactor.x + math.floor(reactor.w * 0.24)
     local midX = cx
-    local rightX = reactor.x2 - math.floor(reactor.w * 0.22)
+    local rightX = reactor.x2 - math.floor(reactor.w * 0.24)
     local inletY = reactor.y2 + 2
+    local inletLen = math.max(2, math.floor(lineHeight * 0.9))
 
     drawPipe({
-      rect(leftX, inletY - 2, 1, 3),
+      rect(leftX, inletY - inletLen, 1, inletLen + 1),
       rect(leftX, cy + 1, math.max(1, midX - leftX), 1),
-      rect(midX - 1, cy + 1, 1, 2),
+      rect(midX - 1, cy + 1, 1, math.max(1, core.y2 - cy)),
     }, leftInColor)
     drawPipe({
-      rect(midX, inletY - 2, 1, 3),
-      rect(midX, cy + 1, 1, 2),
+      rect(midX, inletY - inletLen, 1, inletLen + 1),
+      rect(midX, cy + 1, 1, math.max(1, core.y2 - cy)),
     }, dtInColor)
     drawPipe({
-      rect(rightX, inletY - 2, 1, 3),
+      rect(rightX, inletY - inletLen, 1, inletLen + 1),
       rect(midX + 1, cy + 1, math.max(1, rightX - midX), 1),
-      rect(midX + 1, cy + 1, 1, 2),
+      rect(midX + 1, cy + 1, 1, math.max(1, core.y2 - cy)),
     }, rightInColor)
 
     safeText(leftX - 2, inletY + 1, "T", leftInColor, nil, 4, "left")
     safeText(midX - 2, inletY + 1, "DT", dtInColor, nil, 5, "center")
     safeText(rightX - 1, inletY + 1, "D", rightInColor, nil, 4, "right")
 
-    local beamTop = reactor.y - 4
-    local emitterW = 3
-    safeFilledRect(midX - 1, beamTop - 1, emitterW, 1, palette.panelBgRaised or colors.gray)
+    local emitterY = reactor.y - math.max(4, math.floor(lineHeight * 1.4))
+    safeFilledRect(midX - 2, emitterY, 4, 1, palette.panelBgRaised or colors.gray)
     local beamVisible = (model and model.laserActive) == true or (model and model.laserCharging) == true
     if beamVisible then
       local beamColor = (model and model.laserActive) and (palette.reactorLaser or colors.yellow)
         or (palette.reactorLaserCharge or colors.lightBlue)
-      local beamHeight = core.y - beamTop
+      local beamHeight = core.y - emitterY
       if beamHeight > 0 then
-        safeFilledRect(midX, beamTop, 1, beamHeight, beamColor)
+        local beamW = math.max(1, math.floor(lineHeight * 0.35))
+        safeFilledRect(midX - math.floor(beamW / 2), emitterY + 1, beamW, beamHeight, beamColor)
       end
-      safeText(midX - 5, beamTop - 1, tostring((model and model.laserLabel) or "LAS"), beamColor, nil, 11, "center")
+      safeText(midX - 8, emitterY - 1, tostring((model and model.laserLabel) or "LAS"), beamColor, nil, 16, "center")
     else
-      safeText(midX - 4, beamTop - 1, "LAS OFF", palette.textMuted or colors.gray, nil, 9, "center")
+      safeText(midX - 8, emitterY - 1, "LAS OFF", palette.textMuted or colors.gray, nil, 16, "center")
     end
 
     drawThermalMarkers(inner, reactor, core, model)
@@ -571,25 +594,26 @@ function M.new(options)
 
     safeFilledRect(inner.x, inner.y, inner.w, inner.h, palette.panelBg or colors.black)
 
-    local modulesW = clamp(math.floor(inner.w * 0.28), 5, math.max(5, inner.w - 18))
+    local modulesW = clamp(math.floor(inner.w * 0.22), 5, math.max(5, inner.w - 20))
     local infoX = inner.x + modulesW + 2
-    local infoW = math.max(8, inner.x2 - infoX + 1)
+    local infoW = math.max(10, inner.x2 - infoX + 1)
     local moduleX = inner.x + 1
 
+    local infoLine = math.max(1, math.floor(rowStep * 0.9))
     safeText(infoX, inner.y, "LASER ARRAY", palette.info or colors.cyan, nil, infoW, "left")
-    safeText(infoX, inner.y + 1, "Count", palette.textMuted or colors.lightGray, nil, 7, "left")
-    safeText(infoX + 8, inner.y + 1, tostring(count), palette.textPrimary or colors.white, nil, math.max(1, infoW - 8), "left")
-    safeText(infoX, inner.y + 2, "Ready", palette.textMuted or colors.lightGray, nil, 7, "left")
-    safeText(infoX + 8, inner.y + 2, tostring(activeCount) .. "/" .. tostring(count), palette.ok or colors.lime, nil, math.max(1, infoW - 8), "left")
-    safeText(infoX, inner.y + 3, "State", palette.textMuted or colors.lightGray, nil, 7, "left")
-    safeText(infoX + 8, inner.y + 3, stateText, statusColor, nil, math.max(1, infoW - 8), "left")
+    safeText(infoX, inner.y + infoLine, "Count", palette.textMuted or colors.lightGray, nil, 9, "left")
+    safeText(infoX + 10, inner.y + infoLine, tostring(count), palette.textPrimary or colors.white, nil, math.max(1, infoW - 10), "left")
+    safeText(infoX, inner.y + (infoLine * 2), "Ready", palette.textMuted or colors.lightGray, nil, 9, "left")
+    safeText(infoX + 10, inner.y + (infoLine * 2), tostring(activeCount) .. "/" .. tostring(count), palette.ok or colors.lime, nil, math.max(1, infoW - 10), "left")
+    safeText(infoX, inner.y + (infoLine * 3), "State", palette.textMuted or colors.lightGray, nil, 9, "left")
+    safeText(infoX + 10, inner.y + (infoLine * 3), stateText, statusColor, nil, math.max(1, infoW - 10), "left")
 
-    local modulesTop = inner.y + 1
+    local modulesTop = inner.y + math.max(1, math.floor(rowStep * 0.6))
     local modulesBottom = inner.y2 - 3
     local stackHeight = math.max(1, modulesBottom - modulesTop + 1)
-    local moduleGap = (count >= 6) and 0 or math.max(0, asInt(spacing.denseGap or 0, 0))
-    local moduleH = math.max(1, math.floor((stackHeight - ((count - 1) * moduleGap)) / count))
-    local moduleW = math.max(3, modulesW - 2)
+    local moduleGap = math.max(0, asInt(spacing.denseGap or 0, 0))
+    local moduleH = math.max(1, math.min(asInt(sizes.laserModuleHeight, 2), math.floor((stackHeight - ((count - 1) * moduleGap)) / count)))
+    local moduleW = math.max(3, math.min(asInt(sizes.laserModuleWidth, 3), modulesW - 2))
 
     for i = 1, count do
       local y = modulesTop + (i - 1) * (moduleH + moduleGap)
@@ -603,20 +627,24 @@ function M.new(options)
       end
     end
 
-    local gaugeW = math.max(8, infoW)
-    local gaugeY = inner.y2 - 2
-    safeText(infoX, gaugeY - 1, "Charge", palette.textMuted or colors.lightGray, nil, 7, "left")
-    safeFilledRect(infoX, gaugeY, gaugeW, 1, palette.panelBgRaised or colors.gray)
+    local gaugeW = math.max(10, infoW)
+    local gaugeY = inner.y2 - math.max(2, math.floor(lineHeight * 0.55))
+    local gaugeH = math.max(1, asInt(sizes.gaugeThickness, 1))
+    safeText(infoX, gaugeY - 1, "Charge", palette.textMuted or colors.lightGray, nil, 9, "left")
+    safeFilledRect(infoX, gaugeY, gaugeW, gaugeH, palette.panelBgRaised or colors.gray)
     local fillW = clamp(math.floor((pct / 100) * gaugeW + 0.5), 0, gaugeW)
     if fillW > 0 then
-      safeFilledRect(infoX, gaugeY, fillW, 1, statusColor)
+      safeFilledRect(infoX, gaugeY, fillW, gaugeH, statusColor)
     end
-    safeRect(infoX, gaugeY, gaugeW, 1, palette.borderSoft or colors.gray)
-    safeText(infoX, gaugeY, tostring(pct) .. "%", palette.textPrimary or colors.white, nil, gaugeW, "center")
+    safeRect(infoX, gaugeY, gaugeW, gaugeH, palette.borderSoft or colors.gray)
+    safeText(infoX, gaugeY + math.floor((gaugeH - 1) / 2), tostring(pct) .. "%", palette.textPrimary or colors.white, nil, gaugeW, "center")
 
     local cartoucheText = charging and "LAS CHG" or ("LAS " .. stateText)
-    safeFilledRect(infoX, inner.y2, gaugeW, 1, statusColor)
-    safeText(infoX, inner.y2, cartoucheText, palette.textPrimary or colors.white, statusColor, gaugeW, "center")
+    local cartoucheY = gaugeY + gaugeH + 1
+    if cartoucheY <= inner.y2 then
+      safeFilledRect(infoX, cartoucheY, gaugeW, 1, statusColor)
+      safeText(infoX, cartoucheY, cartoucheText, palette.textPrimary or colors.white, statusColor, gaugeW, "center")
+    end
   end
 
   local function drawHeader(bounds, leftText, centerText, rightText, centerTone, rightTone)
@@ -638,7 +666,7 @@ function M.new(options)
     local bg = palette.panelHeaderAlt or palette.panelBgSoft or colors.gray
     safeFilledRect(b.x, b.y, b.w, b.h, bg)
     safeFilledRect(b.x, b.y, b.w, 1, palette.borderStrong or colors.cyan)
-    local y = b.y
+    local y = b.y + math.floor((math.max(1, math.min(b.h, lineHeight)) - 1) / 2)
 
     local list = type(segments) == "table" and segments or {}
     if #list <= 0 then return end
