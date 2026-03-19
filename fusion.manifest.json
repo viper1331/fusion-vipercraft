@@ -1,5 +1,5 @@
 {
-    "version":  "2.4.47",
+    "version":  "2.4.48",
     "files":  [
                   "fusion.lua",
                   "fusion.version",
@@ -31,10 +31,10 @@
                   "ui/induction_diagram.lua",
                   "ui/reactor_diagram.lua",
                   "ui/theme.lua",
-                  "ui/tom_components.lua",
-                  "ui/tom_design.lua",
-                  "ui/tom_layout.lua",
-                  "ui/tom_renderer.lua",
+                  "ui/toms/components.lua",
+                  "ui/toms/fusion_panel.lua",
+                  "ui/toms/layout.lua",
+                  "ui/toms/theme.lua",
                   "ui/views.lua"
               ],
     "preserve":  [

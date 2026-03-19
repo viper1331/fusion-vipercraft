@@ -16,7 +16,7 @@ function M.run()
   local UIChrome = require("ui.chrome")
   local UIReactorDiagram = require("ui.reactor_diagram")
   local UIInductionDiagram = require("ui.induction_diagram")
-  local UITomRenderer = require("ui.tom_renderer")
+  local UITomFusionPanel = require("ui.toms.fusion_panel")
   local CoreConfig = require("core.config")
   local CoreEnergy = require("core.energy")
   local CoreTemperature = require("core.temperature")
@@ -2859,7 +2859,7 @@ function M.run()
     UIViews.drawSetupView(buildUIViewContext(), layout)
   end
 
-  local tomRenderer = UITomRenderer.build({
+  local tomRenderer = UITomFusionPanel.build({
     state = state,
     hw = hw,
     CFG = CFG,
