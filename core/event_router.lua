@@ -3,10 +3,16 @@
 
 local M = {}
 
-local function unpackMonitorCoords(hw, p1, p2, p3)
+local function unpackMonitorCoords(hw, p1, p2, p3, p4)
   if type(p1) == "string" then
     if hw.monitorName and p1 ~= hw.monitorName then
       return nil, nil
+    end
+    if type(p2) == "number" and type(p3) == "number" then
+      return tonumber(p2), tonumber(p3)
+    end
+    if type(p3) == "number" and type(p4) == "number" then
+      return tonumber(p3), tonumber(p4)
     end
     return tonumber(p2), tonumber(p3)
   end
@@ -100,7 +106,7 @@ local function handleMainChar(ch, api)
   end
 end
 
-function M.route(ev, p1, p2, p3, api)
+function M.route(ev, p1, p2, p3, p4, p5, api)
   local state = api.state
   local hw = api.hw
   local log = api.log or {}
@@ -127,9 +133,35 @@ function M.route(ev, p1, p2, p3, api)
 
   if ev == "monitor_touch" or ev == "tm_monitor_touch" then
     logDebug("Monitor touch event", { event = ev, backend = hw.monitorTouchEvent or "monitor_touch" })
-    local x, y = unpackMonitorCoords(hw, p1, p2, p3)
+    local x, y = unpackMonitorCoords(hw, p1, p2, p3, p4)
     x, y = normalizeMonitorCoords(hw, x, y)
     if x and y then
+      api.handleClick(x, y, "monitor")
+    end
+    return
+  end
+
+  if ev == "tm_monitor_mouse_click" then
+    local button, x, y = nil, nil, nil
+    if type(p1) == "string" then
+      if hw.monitorName and p1 ~= hw.monitorName then
+        return
+      end
+      button = tonumber(p2)
+      x = tonumber(p3)
+      y = tonumber(p4)
+    else
+      button = tonumber(p1)
+      x = tonumber(p2)
+      y = tonumber(p3)
+    end
+    logDebug("TM monitor mouse click", {
+      event = ev,
+      button = tostring(button or 0),
+      backend = hw.monitorTouchEvent or "monitor_touch",
+    })
+    x, y = normalizeMonitorCoords(hw, x, y)
+    if (button == nil or button == 1) and x and y then
       api.handleClick(x, y, "monitor")
     end
     return

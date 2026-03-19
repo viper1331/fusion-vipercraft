@@ -71,6 +71,40 @@ local function loadDisplayBackend()
     detectCandidate = function(name, obj, getTypeOf)
       if not obj then return nil end
       local ptype = type(getTypeOf) == "function" and tostring(getTypeOf(name) or "") or ""
+      local function includes(haystack, needle)
+        return tostring(haystack or ""):lower():find(tostring(needle or ""):lower(), 1, true) ~= nil
+      end
+      local hasTomDraw = type(obj.drawText) == "function" or type(obj.drawString) == "function" or type(obj.drawChar) == "function"
+      local hasTomFill = type(obj.fillRect) == "function" or type(obj.filledRectangle) == "function" or type(obj.fill) == "function"
+      local hasTomSize = type(obj.getResolution) == "function"
+        or type(obj.getSize) == "function"
+        or (type(obj.getWidth) == "function" and type(obj.getHeight) == "function")
+      local tomHint = includes(ptype, "tm_") or includes(ptype, "tom") or includes(ptype, "gpu") or includes(name, "tm_")
+      if hasTomDraw and hasTomFill and hasTomSize and tomHint then
+        local w, h = 0, 0
+        if type(obj.getResolution) == "function" then
+          local ok, pxW, pxH = pcall(obj.getResolution)
+          if ok then
+            w = tonumber(pxW) or w
+            h = tonumber(pxH) or h
+          end
+        elseif type(obj.getSize) == "function" then
+          local ok, sw, sh = pcall(obj.getSize)
+          if ok then
+            w = tonumber(sw) or w
+            h = tonumber(sh) or h
+          end
+        end
+        return {
+          name = name,
+          obj = obj,
+          kind = "toms_gpu",
+          touchEvent = "tm_monitor_touch",
+          w = w,
+          h = h,
+          runtimeArea = math.max(0, math.floor((tonumber(w) or 0) * (tonumber(h) or 0))),
+        }
+      end
       if ptype == "monitor" then
         local w, h = 0, 0
         if type(obj.getSize) == "function" then
@@ -87,6 +121,7 @@ local function loadDisplayBackend()
           touchEvent = "monitor_touch",
           w = w,
           h = h,
+          runtimeArea = math.max(0, math.floor((tonumber(w) or 0) * (tonumber(h) or 0))),
         }
       end
       return nil
@@ -98,6 +133,15 @@ local DisplayBackend = loadDisplayBackend()
 
 local M = {}
 local lastScanSignature = nil
+
+local FALLBACK_DIRECTIONAL_ALIASES = {
+  top = true,
+  bottom = true,
+  left = true,
+  right = true,
+  front = true,
+  back = true,
+}
 
 local function logDebug(logger, message, meta)
   if type(logger) == "table" and type(logger.debug) == "function" then
@@ -121,6 +165,20 @@ local function contains(haystack, needle)
   return tostring(haystack or ""):lower():find(tostring(needle or ""):lower(), 1, true) ~= nil
 end
 
+local function isDirectionalAlias(name)
+  if type(DisplayBackend.isDirectionalAlias) == "function" then
+    return DisplayBackend.isDirectionalAlias(name)
+  end
+  return FALLBACK_DIRECTIONAL_ALIASES[string.lower(tostring(name or ""))] == true
+end
+
+local function isNamedTomGpu(name)
+  local low = string.lower(tostring(name or ""))
+  return contains(low, "tm_gpu")
+    or contains(low, "tom_gpu")
+    or contains(low, "tm_display")
+end
+
 local function getSortedPeripheralNames(peripheralApi)
   local names = peripheralApi.getNames() or {}
   table.sort(names)
@@ -138,7 +196,12 @@ local function methodCount(obj, methods)
   return count
 end
 
-function M.getMonitorCandidates(peripheralApi, getTypeOf, safePeripheral, logger)
+function M.getMonitorCandidates(peripheralApi, getTypeOf, safePeripheral, logger, options)
+  options = type(options) == "table" and options or {}
+  local prepareRuntime = options.prepareRuntime ~= false
+  local tomTargetSize = tonumber(options.tomTargetSize or options.targetSize or 64) or 64
+  local monitorScale = tonumber(options.monitorScale or 1) or 1
+
   local monitors = {}
   local diagnostics = {
     scanned = 0,
@@ -154,9 +217,15 @@ function M.getMonitorCandidates(peripheralApi, getTypeOf, safePeripheral, logger
     local obj = safePeripheral(name)
     if obj then
       local ptype = type(getTypeOf) == "function" and tostring(getTypeOf(name) or "") or ""
-      local candidate, rejectReason = DisplayBackend.detectCandidate(name, obj, getTypeOf)
+      local candidate, rejectReason = DisplayBackend.detectCandidate(name, obj, getTypeOf, {
+        prepareRuntime = prepareRuntime,
+        tomTargetSize = tomTargetSize,
+        monitorScale = monitorScale,
+      })
       if candidate then
         local backend = candidate.kind or "cc_monitor"
+        local runtimeArea = tonumber(candidate.runtimeArea)
+          or (tonumber(candidate.w) or 0) * (tonumber(candidate.h) or 0)
         table.insert(monitors, {
           name = name,
           obj = obj,
@@ -164,6 +233,10 @@ function M.getMonitorCandidates(peripheralApi, getTypeOf, safePeripheral, logger
           h = candidate.h or 0,
           backend = backend,
           touchEvent = candidate.touchEvent or "monitor_touch",
+          runtimeArea = math.max(0, math.floor(runtimeArea or 0)),
+          pxW = tonumber(candidate.pxW) or 0,
+          pxH = tonumber(candidate.pxH) or 0,
+          runtime = candidate.runtime,
         })
         if backend == "toms_gpu" then
           diagnostics.tomCandidates = diagnostics.tomCandidates + 1
@@ -172,6 +245,8 @@ function M.getMonitorCandidates(peripheralApi, getTypeOf, safePeripheral, logger
             type = ptype,
             width = tostring(candidate.w or 0),
             height = tostring(candidate.h or 0),
+            px = tostring(candidate.pxW or 0) .. "x" .. tostring(candidate.pxH or 0),
+            area = tostring(runtimeArea or 0),
           })
         else
           diagnostics.ccCandidates = diagnostics.ccCandidates + 1
@@ -194,6 +269,25 @@ function M.getMonitorCandidates(peripheralApi, getTypeOf, safePeripheral, logger
       end
     end
   end
+
+  local hasNamedTom = false
+  for _, item in ipairs(monitors) do
+    if item.backend == "toms_gpu" and isNamedTomGpu(item.name) then
+      hasNamedTom = true
+      break
+    end
+  end
+  if hasNamedTom then
+    local filtered = {}
+    for _, item in ipairs(monitors) do
+      local dropAlias = item.backend == "toms_gpu" and isDirectionalAlias(item.name) and not isNamedTomGpu(item.name)
+      if not dropAlias then
+        filtered[#filtered + 1] = item
+      end
+    end
+    monitors = filtered
+  end
+
   local backendPriority = {
     toms_gpu = 1,
     cc_monitor = 2,
@@ -204,7 +298,15 @@ function M.getMonitorCandidates(peripheralApi, getTypeOf, safePeripheral, logger
     if pa ~= pb then
       return pa < pb
     end
-    return a.name < b.name
+    if (a.runtimeArea or 0) ~= (b.runtimeArea or 0) then
+      return (a.runtimeArea or 0) > (b.runtimeArea or 0)
+    end
+    local areaA = (tonumber(a.w) or 0) * (tonumber(a.h) or 0)
+    local areaB = (tonumber(b.w) or 0) * (tonumber(b.h) or 0)
+    if areaA ~= areaB then
+      return areaA > areaB
+    end
+    return tostring(a.name or "") < tostring(b.name or "")
   end)
 
   local reasonParts = {}
@@ -229,6 +331,7 @@ function M.getMonitorCandidates(peripheralApi, getTypeOf, safePeripheral, logger
     logDebug(logger, "Display backend diagnostics", {
       tomRejected = tostring(diagnostics.tomRejected),
       reasons = table.concat(reasonParts, ","),
+      filteredDirectionalAliases = hasNamedTom and "1" or "0",
     })
   end
 
@@ -381,12 +484,42 @@ function M.scanPeripherals(peripheralApi, hw, cfg, safePeripheral, getTypeOf, co
 
   hw.relays = {}
   hw.blockReaders = {}
+  hw.keyboard = nil
+  hw.keyboardName = nil
+  local bestKeyboardScore = nil
   for _, name in ipairs(getSortedPeripheralNames(peripheralApi)) do
-    local ptype = getTypeOf(name)
-    if ptype == "redstone_relay" then
-      hw.relays[name] = safePeripheral(name)
-    elseif ptype == "block_reader" or contains(name, "block_reader") then
-      table.insert(hw.blockReaders, { name = name, obj = safePeripheral(name), role = "unknown", data = nil })
+    local ptype = tostring(getTypeOf(name) or "")
+    local obj = safePeripheral(name)
+
+    local isRelay = ptype == "redstone_relay"
+      or contains(ptype, "redstone_relay")
+      or contains(ptype, "relay")
+      or contains(name, "redstone_relay")
+      or contains(name, "relay")
+      or M.hasMethods(obj, { "setOutput", "setAnalogOutput", "setAnalogueOutput", "getOutput", "getAnalogInput" }, 1)
+    if isRelay then
+      hw.relays[name] = obj
+    end
+
+    local isReader = ptype == "block_reader"
+      or contains(ptype, "block_reader")
+      or contains(name, "block_reader")
+      or contains(ptype, "reader")
+      or M.hasMethods(obj, { "getBlockData", "getBlockName", "listMethods" }, 1)
+    if isReader then
+      table.insert(hw.blockReaders, { name = name, obj = obj, role = "unknown", data = nil })
+    end
+
+    local keyboardScore = nil
+    if contains(ptype, "keyboard") or contains(name, "keyboard") then
+      keyboardScore = 10
+    elseif M.hasMethods(obj, { "setFireNativeEvents", "getHeldKeys", "isKeyDown", "getLastKey" }, 1) then
+      keyboardScore = 5
+    end
+    if keyboardScore and (bestKeyboardScore == nil or keyboardScore > bestKeyboardScore or (keyboardScore == bestKeyboardScore and name < (hw.keyboardName or "~"))) then
+      bestKeyboardScore = keyboardScore
+      hw.keyboard = obj
+      hw.keyboardName = name
     end
   end
 
@@ -401,6 +534,7 @@ function M.scanPeripherals(peripheralApi, hw, cfg, safePeripheral, getTypeOf, co
     hw.inductionName or "none",
     tostring(relayCount),
     tostring(#(hw.blockReaders or {})),
+    hw.keyboardName or "none",
   }, "|")
 
   if signature ~= lastScanSignature then
@@ -413,6 +547,7 @@ function M.scanPeripherals(peripheralApi, hw, cfg, safePeripheral, getTypeOf, co
       induction = hw.inductionName or "none",
       relays = tostring(relayCount),
       readers = tostring(#(hw.blockReaders or {})),
+      keyboard = hw.keyboardName or "none",
     })
   end
 end

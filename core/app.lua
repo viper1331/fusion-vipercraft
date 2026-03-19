@@ -1842,7 +1842,11 @@ function M.run()
   local lastDisplayDiagnostics = nil
 
   local function getMonitorCandidates()
-    local candidates, diagnostics = IoDevices.getMonitorCandidates(peripheral, getTypeOf, safePeripheral, logger)
+    local candidates, diagnostics = IoDevices.getMonitorCandidates(peripheral, getTypeOf, safePeripheral, logger, {
+      prepareRuntime = true,
+      tomTargetSize = 64,
+      monitorScale = CFG.monitorScale,
+    })
     lastDisplayDiagnostics = diagnostics
     logger.debug("Display candidates scanned", {
       count = #candidates,
@@ -1970,6 +1974,7 @@ function M.run()
     local chosen, selectionMeta = chooseMonitorAuto()
     hw.monitor = chosen and chosen.obj or nil
     hw.monitorName = chosen and chosen.name or nil
+    hw.monitorScale = CFG.monitorScale
     if type(IoMonitor.setupMonitor) ~= "function" then
       logger.error("IoMonitor.setupMonitor unavailable")
       return false

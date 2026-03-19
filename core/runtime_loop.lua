@@ -40,13 +40,13 @@ function M.run(api)
     end
 
     local timer = os.startTimer(CFG.refreshDelay)
-    local ev, p1, p2, p3 = os.pullEvent()
+    local ev, p1, p2, p3, p4, p5 = os.pullEvent()
 
     if ev == "timer" and p1 == timer then
       -- Tick normal: rien a faire, la boucle reprend.
     else
       logDebug("Runtime event", { event = ev })
-      local okRoute, errRoute = pcall(EventRouter.route, ev, p1, p2, p3, api)
+      local okRoute, errRoute = pcall(EventRouter.route, ev, p1, p2, p3, p4, p5, api)
       if not okRoute then
         logError("EventRouter.route failed", errRoute, { event = ev })
         error(errRoute, 0)

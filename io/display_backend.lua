@@ -26,6 +26,15 @@ for k, v in pairs(colors) do
   end
 end
 
+local DIRECTIONAL_ALIASES = {
+  top = true,
+  bottom = true,
+  left = true,
+  right = true,
+  front = true,
+  back = true,
+}
+
 local function methodCount(obj, methods)
   if not obj then return 0 end
   local count = 0
@@ -39,6 +48,10 @@ end
 
 local function contains(haystack, needle)
   return tostring(haystack or ""):lower():find(tostring(needle or ""):lower(), 1, true) ~= nil
+end
+
+local function isDirectionalAlias(name)
+  return DIRECTIONAL_ALIASES[string.lower(tostring(name or ""))] == true
 end
 
 local function looksLikeTomTypeHint(ptype, name)
@@ -124,6 +137,67 @@ local function readTomResolution(obj)
   return nil, nil
 end
 
+local function refreshTomSize(obj)
+  if not obj or type(obj.refreshSize) ~= "function" then
+    return false
+  end
+  local ok = pcall(obj.refreshSize)
+  return ok
+end
+
+local function trySetTomTargetSize(obj, target)
+  if not obj or type(obj.setSize) ~= "function" then
+    return false, "missing_method"
+  end
+  local n = tonumber(target)
+  if not n then
+    return false, "invalid_target"
+  end
+  n = math.max(1, math.floor(n + 0.5))
+
+  if pcall(obj.setSize, n) then
+    return true, "setSize(n)"
+  end
+  if pcall(obj.setSize, n, n) then
+    return true, "setSize(n,n)"
+  end
+  return false, "setSize_failed"
+end
+
+local function probeTomRuntime(obj, opts)
+  opts = type(opts) == "table" and opts or {}
+  local runtime = {
+    refreshBefore = false,
+    refreshAfterSet = false,
+    setSizeTried = false,
+    setSizeApplied = false,
+    setSizeMode = "none",
+    targetSize = tonumber(opts.tomTargetSize or opts.targetSize or 64) or 64,
+  }
+
+  runtime.refreshBefore = refreshTomSize(obj)
+  local preW, preH = readTomResolution(obj)
+  runtime.prePxW, runtime.prePxH = preW, preH
+
+  if opts.prepareRuntime and runtime.targetSize > 0 then
+    runtime.setSizeTried = true
+    local setOk, mode = trySetTomTargetSize(obj, runtime.targetSize)
+    runtime.setSizeApplied = setOk
+    runtime.setSizeMode = mode or "unknown"
+  end
+
+  runtime.refreshAfterSet = refreshTomSize(obj)
+  local pxW, pxH = readTomResolution(obj)
+  if not (pxW and pxH) then
+    pxW, pxH = preW, preH
+  end
+
+  runtime.pxW = tonumber(pxW) or 0
+  runtime.pxH = tonumber(pxH) or 0
+  runtime.areaPx = math.max(0, math.floor(runtime.pxW * runtime.pxH))
+  return runtime
+end
+
 local function sanitizeTomScale(scaleValue)
   local n = tonumber(scaleValue)
   if not n then return 1 end
@@ -192,8 +266,9 @@ local function looksLikeTermDisplay(ptype, obj)
     or score >= 7
 end
 
-function M.detectCandidate(name, obj, getTypeOf)
+function M.detectCandidate(name, obj, getTypeOf, opts)
   if not obj then return nil end
+  opts = type(opts) == "table" and opts or {}
   local ptype = ""
   if type(getTypeOf) == "function" then
     ptype = tostring(getTypeOf(name) or "")
@@ -203,8 +278,13 @@ function M.detectCandidate(name, obj, getTypeOf)
   end
 
   if looksLikeTomGpu(ptype, name, obj) then
-    local scale = 1
-    local pxW, pxH = readTomResolution(obj)
+    local runtime = probeTomRuntime(obj, {
+      prepareRuntime = not not opts.prepareRuntime,
+      targetSize = opts.tomTargetSize or opts.targetSize or 64,
+    })
+    local scale = sanitizeTomScale(opts.monitorScale or 1)
+    local pxW = runtime.pxW > 0 and runtime.pxW or nil
+    local pxH = runtime.pxH > 0 and runtime.pxH or nil
     local charW = math.max(2, math.floor((6 * scale) + 0.5))
     local charH = math.max(3, math.floor((9 * scale) + 0.5))
     local w = pxW and math.max(1, math.floor(pxW / charW)) or 0
@@ -216,6 +296,10 @@ function M.detectCandidate(name, obj, getTypeOf)
       touchEvent = "tm_monitor_touch",
       w = w,
       h = h,
+      pxW = pxW or 0,
+      pxH = pxH or 0,
+      runtimeArea = runtime.areaPx or (w * h),
+      runtime = runtime,
     }, nil
   end
 
@@ -229,6 +313,7 @@ function M.detectCandidate(name, obj, getTypeOf)
       touchEvent = touchEvent,
       w = w,
       h = h,
+      runtimeArea = math.max(0, math.floor(w * h)),
     }, nil
   end
 
@@ -241,9 +326,16 @@ function M.detectCandidate(name, obj, getTypeOf)
   return nil, "not_display"
 end
 
-local function buildTomTermSurface(gpu, cfg)
+local function buildTomTermSurface(gpu, cfg, runtimeInfo)
   local scale = sanitizeTomScale(cfg and cfg.monitorScale)
-  local pxW, pxH = readTomResolution(gpu)
+  runtimeInfo = type(runtimeInfo) == "table" and runtimeInfo or nil
+  local pxW = runtimeInfo and tonumber(runtimeInfo.pxW) or nil
+  local pxH = runtimeInfo and tonumber(runtimeInfo.pxH) or nil
+  if not (pxW and pxH and pxW > 0 and pxH > 0) then
+    pxW, pxH = readTomResolution(gpu)
+  end
+  pxW = tonumber(pxW) or 0
+  pxH = tonumber(pxH) or 0
 
   local function detectTextMetrics()
     local defaultCharW = math.max(2, math.floor((6 * scale) + 0.5))
@@ -359,24 +451,56 @@ local function buildTomTermSurface(gpu, cfg)
     return math.max(1, #tostring(text or ""))
   end
 
+  local cursorX, cursorY = 1, 1
+  local textColor, bgColor = colors.white, colors.black
+  local cursorBlink = false
+
   local function drawFill(x, y, w, h, color)
-    local x2 = x + math.max(0, w - 1)
-    local y2 = y + math.max(0, h - 1)
+    local x1 = math.floor(tonumber(x) or 1)
+    local y1 = math.floor(tonumber(y) or 1)
+    local ww = math.max(0, math.floor(tonumber(w) or 0))
+    local hh = math.max(0, math.floor(tonumber(h) or 0))
+    if ww <= 0 or hh <= 0 then
+      return
+    end
+    local x2 = x1 + ww - 1
+    local y2 = y1 + hh - 1
+    if pxW > 0 and pxH > 0 then
+      if x1 > pxW or y1 > pxH or x2 < 1 or y2 < 1 then
+        return
+      end
+      x1 = clamp(1, x1, pxW)
+      y1 = clamp(1, y1, pxH)
+      x2 = clamp(1, x2, pxW)
+      y2 = clamp(1, y2, pxH)
+      ww = math.max(0, (x2 - x1) + 1)
+      hh = math.max(0, (y2 - y1) + 1)
+      if ww <= 0 or hh <= 0 then
+        return
+      end
+    end
     if callGpuVariants("filledRectangle", {
-      { x, y, w, h, color },
-      { x, y, x2, y2, color },
+      { x1, y1, ww, hh, color },
+      { x1, y1, x2, y2, color },
     }) then return end
     if callGpuVariants("fillRect", {
-      { x, y, w, h, color },
-      { x, y, x2, y2, color },
+      { x1, y1, ww, hh, color },
+      { x1, y1, x2, y2, color },
     }) then return end
-    if x == 1 and y == 1 and pxW and pxH and w >= pxW and h >= pxH then
+    if x1 == 1 and y1 == 1 and pxW > 0 and pxH > 0 and ww >= pxW and hh >= pxH then
       if callGpu("fill", color) then return end
     end
   end
 
   local function drawGlyph(x, y, char, color)
     if char == " " then return end
+    local gx = math.floor(tonumber(x) or 1)
+    local gy = math.floor(tonumber(y) or 1)
+    if pxW > 0 and pxH > 0 then
+      if gx < 1 or gx > pxW or gy < 1 or gy > pxH then
+        return
+      end
+    end
     local rgbColor = argbToRgb(color)
     local fgIndex = textColor
 
@@ -393,49 +517,45 @@ local function buildTomTermSurface(gpu, cfg)
     })
 
     if callGpuVariants("drawText", {
-      { x, y, char, color, -1, scale },
-      { x, y, char, rgbColor, -1, scale },
-      { char, x, y, color, -1, scale },
-      { char, x, y, rgbColor, -1, scale },
-      { x, y, color, char, -1, scale },
-      { x, y, rgbColor, char, -1, scale },
-      { char, x, y, color },
-      { char, x, y, rgbColor },
-      { x, y, char, color },
-      { x, y, char, rgbColor },
-      { x, y, color, char },
-      { x, y, rgbColor, char },
-      { x, y, char },
-      { char, x, y },
+      { gx, gy, char, color, -1, scale },
+      { gx, gy, char, rgbColor, -1, scale },
+      { char, gx, gy, color, -1, scale },
+      { char, gx, gy, rgbColor, -1, scale },
+      { gx, gy, color, char, -1, scale },
+      { gx, gy, rgbColor, char, -1, scale },
+      { char, gx, gy, color },
+      { char, gx, gy, rgbColor },
+      { gx, gy, char, color },
+      { gx, gy, char, rgbColor },
+      { gx, gy, color, char },
+      { gx, gy, rgbColor, char },
+      { gx, gy, char },
+      { char, gx, gy },
     }) then return end
     if callGpuVariants("drawString", {
-      { x, y, char, color },
-      { x, y, char, rgbColor },
-      { char, x, y, color },
-      { char, x, y, rgbColor },
-      { x, y, color, char },
-      { x, y, rgbColor, char },
-      { x, y, char },
-      { char, x, y },
+      { gx, gy, char, color },
+      { gx, gy, char, rgbColor },
+      { char, gx, gy, color },
+      { char, gx, gy, rgbColor },
+      { gx, gy, color, char },
+      { gx, gy, rgbColor, char },
+      { gx, gy, char },
+      { char, gx, gy },
     }) then return end
     callGpuVariants("drawChar", {
-      { x, y, string.byte(char), color, -1, scale },
-      { x, y, char, color, -1, scale },
-      { x, y, char, rgbColor, -1, scale },
-      { string.byte(char), x, y, color },
-      { char, x, y, color },
-      { char, x, y, rgbColor },
-      { x, y, string.byte(char), color },
-      { x, y, char, color },
-      { x, y, char, rgbColor },
-      { x, y, char },
-      { char, x, y },
+      { gx, gy, string.byte(char), color, -1, scale },
+      { gx, gy, char, color, -1, scale },
+      { gx, gy, char, rgbColor, -1, scale },
+      { string.byte(char), gx, gy, color },
+      { char, gx, gy, color },
+      { char, gx, gy, rgbColor },
+      { gx, gy, string.byte(char), color },
+      { gx, gy, char, color },
+      { gx, gy, char, rgbColor },
+      { gx, gy, char },
+      { char, gx, gy },
     })
   end
-
-  local cursorX, cursorY = 1, 1
-  local textColor, bgColor = colors.white, colors.black
-  local cursorBlink = false
 
   local bufferA = {}
   local bufferB = {}
@@ -632,6 +752,219 @@ local function buildTomTermSurface(gpu, cfg)
     return tx, ty
   end
 
+  local function makeWindow(parent, ox, oy, ww, hh)
+    local win = {}
+    local winW = math.max(1, math.floor(tonumber(ww) or 1))
+    local winH = math.max(1, math.floor(tonumber(hh) or 1))
+    local baseX = math.floor(tonumber(ox) or 1)
+    local baseY = math.floor(tonumber(oy) or 1)
+    local winCursorX, winCursorY = 1, 1
+    local winTextColor = colors.white
+    local winBgColor = colors.black
+    local winBlink = false
+
+    local function mapToParent(x, y)
+      local px = baseX + x - 1
+      local py = baseY + y - 1
+      return px, py
+    end
+
+    function win.getSize()
+      return winW, winH
+    end
+
+    function win.setCursorPos(x, y)
+      winCursorX = math.floor(tonumber(x) or winCursorX)
+      winCursorY = math.floor(tonumber(y) or winCursorY)
+    end
+
+    function win.getCursorPos()
+      return winCursorX, winCursorY
+    end
+
+    function win.setCursorBlink(enabled)
+      winBlink = not not enabled
+    end
+
+    function win.getCursorBlink()
+      return winBlink
+    end
+
+    function win.setTextColor(color)
+      winTextColor = tonumber(color) or winTextColor
+    end
+    win.setTextColour = win.setTextColor
+
+    function win.getTextColor()
+      return winTextColor
+    end
+    win.getTextColour = win.getTextColor
+
+    function win.setBackgroundColor(color)
+      winBgColor = tonumber(color) or winBgColor
+    end
+    win.setBackgroundColour = win.setBackgroundColor
+
+    function win.getBackgroundColor()
+      return winBgColor
+    end
+    win.getBackgroundColour = win.getBackgroundColor
+
+    function win.write(value)
+      local text = tostring(value or "")
+      local x = winCursorX
+      local y = winCursorY
+      if y < 1 or y > winH then return end
+      if x < 1 then
+        local cut = 1 - x
+        if cut >= #text then return end
+        text = text:sub(cut + 1)
+        x = 1
+      end
+      if x > winW then return end
+      if (x + #text - 1) > winW then
+        text = text:sub(1, (winW - x) + 1)
+      end
+      local px, py = mapToParent(x, y)
+      parent.setCursorPos(px, py)
+      parent.setTextColor(winTextColor)
+      parent.setBackgroundColor(winBgColor)
+      parent.write(text)
+      winCursorX = winCursorX + #text
+    end
+
+    function win.blit(text, fg, bg)
+      text = tostring(text or "")
+      fg = tostring(fg or "")
+      bg = tostring(bg or "")
+      local n = math.min(#text, #fg, #bg)
+      if n <= 0 then return end
+      local x = winCursorX
+      local y = winCursorY
+      if y < 1 or y > winH then return end
+      if x < 1 then
+        local cut = 1 - x
+        if cut >= n then return end
+        text = text:sub(cut + 1, n)
+        fg = fg:sub(cut + 1, n)
+        bg = bg:sub(cut + 1, n)
+        n = #text
+        x = 1
+      else
+        text = text:sub(1, n)
+        fg = fg:sub(1, n)
+        bg = bg:sub(1, n)
+      end
+      if x > winW then return end
+      if (x + #text - 1) > winW then
+        local keep = (winW - x) + 1
+        text = text:sub(1, keep)
+        fg = fg:sub(1, keep)
+        bg = bg:sub(1, keep)
+      end
+      local px, py = mapToParent(x, y)
+      parent.setCursorPos(px, py)
+      parent.blit(text, fg, bg)
+      winCursorX = winCursorX + #text
+    end
+
+    function win.clear()
+      local blank = string.rep(" ", winW)
+      local fg = string.rep(colors.toBlit(winTextColor), winW)
+      local bb = string.rep(colors.toBlit(winBgColor), winW)
+      for row = 1, winH do
+        local px, py = mapToParent(1, row)
+        parent.setCursorPos(px, py)
+        parent.blit(blank, fg, bb)
+      end
+    end
+
+    function win.clearLine()
+      if winCursorY < 1 or winCursorY > winH then return end
+      local px, py = mapToParent(1, winCursorY)
+      parent.setCursorPos(px, py)
+      parent.setTextColor(winTextColor)
+      parent.setBackgroundColor(winBgColor)
+      parent.write(string.rep(" ", winW))
+    end
+
+    function win.scroll(lines)
+      lines = math.floor(tonumber(lines) or 0)
+      if lines == 0 then return end
+      if math.abs(lines) >= winH then
+        win.clear()
+        return
+      end
+      local emptyLine = string.rep(" ", winW)
+      local fillBg = string.rep(colors.toBlit(winBgColor), winW)
+      local fillFg = string.rep(colors.toBlit(winTextColor), winW)
+      if lines > 0 then
+        for row = 1, winH do
+          local src = row + lines
+          local dstPx, dstPy = mapToParent(1, row)
+          parent.setCursorPos(dstPx, dstPy)
+          if src <= winH then
+            local srcPx, srcPy = mapToParent(1, src)
+            parent.setCursorPos(srcPx, srcPy)
+            -- Best effort: redraw blank then rely on next frame full redraw.
+            parent.setCursorPos(dstPx, dstPy)
+            parent.blit(emptyLine, fillFg, fillBg)
+          else
+            parent.blit(emptyLine, fillFg, fillBg)
+          end
+        end
+      else
+        win.clear()
+      end
+    end
+
+    function win.isColor()
+      return true
+    end
+    win.isColour = win.isColor
+
+    win.getPaletteColor = parent.getPaletteColor
+    win.getPaletteColour = parent.getPaletteColour
+    win.setPaletteColor = parent.setPaletteColor
+    win.setPaletteColour = parent.setPaletteColour
+
+    function win.setTextScale()
+      -- No-op for sub windows.
+    end
+
+    function win.mapPixel(x, y)
+      local px = baseX + (math.floor(tonumber(x) or 1) - 1)
+      local py = baseY + (math.floor(tonumber(y) or 1) - 1)
+      local tx, ty = parent.mapPixel(px, py)
+      return tx - baseX + 1, ty - baseY + 1
+    end
+
+    function win.flush()
+      if type(parent.flush) == "function" then
+        parent.flush()
+      end
+    end
+    win.sync = win.flush
+
+    function win.createWindow(x, y, w, h)
+      local subX = baseX + math.max(0, math.floor(tonumber(x) or 1) - 1)
+      local subY = baseY + math.max(0, math.floor(tonumber(y) or 1) - 1)
+      return makeWindow(parent, subX, subY, w, h)
+    end
+
+    return win
+  end
+
+  function surface.createWindow(x, y, w, h)
+    local ox = clamp(1, math.floor(tonumber(x) or 1), width)
+    local oy = clamp(1, math.floor(tonumber(y) or 1), height)
+    local maxW = (width - ox) + 1
+    local maxH = (height - oy) + 1
+    local ww = clamp(1, math.floor(tonumber(w) or maxW), maxW)
+    local hh = clamp(1, math.floor(tonumber(h) or maxH), maxH)
+    return makeWindow(surface, ox, oy, ww, hh)
+  end
+
   function surface.flush()
     local changed = false
     for y = 1, height do
@@ -657,8 +990,17 @@ local function buildTomTermSurface(gpu, cfg)
     kind = "toms_gpu",
     touchEvent = "tm_monitor_touch",
     mapPixel = surface.mapPixel,
+    createWindow = surface.createWindow,
     width = width,
     height = height,
+    pixelWidth = pxW,
+    pixelHeight = pxH,
+    area = math.max(0, math.floor(width * height)),
+    runtimeArea = runtimeInfo and runtimeInfo.areaPx or math.max(0, math.floor(pxW * pxH)),
+    setSizeTried = runtimeInfo and runtimeInfo.setSizeTried or false,
+    setSizeApplied = runtimeInfo and runtimeInfo.setSizeApplied or false,
+    setSizeMode = runtimeInfo and runtimeInfo.setSizeMode or "none",
+    targetSize = runtimeInfo and runtimeInfo.targetSize or nil,
     charW = charW,
     charH = charH,
   }
@@ -670,16 +1012,31 @@ function M.createSurface(candidate, cfg)
   end
 
   if candidate.kind == "toms_gpu" then
-    return buildTomTermSurface(candidate.obj, cfg)
+    local runtimeInfo = candidate.runtime
+    local finalProbe = probeTomRuntime(candidate.obj, {
+      prepareRuntime = true,
+      targetSize = (cfg and cfg.tomTargetSize) or 64,
+    })
+    if type(finalProbe) == "table" then
+      runtimeInfo = finalProbe
+    end
+    return buildTomTermSurface(candidate.obj, cfg, runtimeInfo)
   end
 
   return candidate.obj, {
     kind = candidate.kind or "cc_monitor",
     touchEvent = candidate.touchEvent or "monitor_touch",
     mapPixel = nil,
+    createWindow = nil,
     width = candidate.w,
     height = candidate.h,
+    area = math.max(0, math.floor((tonumber(candidate.w) or 0) * (tonumber(candidate.h) or 0))),
+    runtimeArea = tonumber(candidate.runtimeArea) or 0,
   }
+end
+
+function M.isDirectionalAlias(name)
+  return isDirectionalAlias(name)
 end
 
 return M

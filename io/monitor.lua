@@ -120,6 +120,10 @@ local function normalizeCandidateShape(candidate, fallbackName, fallbackObj)
     touchEvent = candidate.touchEvent or "monitor_touch",
     w = candidate.w,
     h = candidate.h,
+    pxW = candidate.pxW,
+    pxH = candidate.pxH,
+    runtimeArea = candidate.runtimeArea,
+    runtime = candidate.runtime,
   }
 end
 
@@ -130,7 +134,11 @@ local function resolveMonitorCandidate(hw, provided, getTypeOf)
   if not hw.monitor then
     return nil
   end
-  local detected = DisplayBackend.detectCandidate(hw.monitorName, hw.monitor, getTypeOf)
+  local detected = DisplayBackend.detectCandidate(hw.monitorName, hw.monitor, getTypeOf, {
+    prepareRuntime = true,
+    tomTargetSize = 64,
+    monitorScale = (type(hw) == "table" and type(hw.monitorScale) == "number") and hw.monitorScale or nil,
+  })
   return normalizeCandidateShape(detected, hw.monitorName, hw.monitor)
 end
 
@@ -141,6 +149,7 @@ function M.setupMonitor(nativeTerm, hw, CFG, C, chosenCandidate, getTypeOf, logg
   hw.monitorBackend = "terminal"
   hw.monitorTouchEvent = "monitor_touch"
   hw.monitorTouchMapper = nil
+  hw.monitorWindows = nil
 
   if type(term) == "table" and type(term.redirect) == "function" then
     pcall(term.redirect, nativeTerm)
@@ -161,6 +170,15 @@ function M.setupMonitor(nativeTerm, hw, CFG, C, chosenCandidate, getTypeOf, logg
     hw.monitorBackend = (meta and meta.kind) or candidate.kind or "cc_monitor"
     hw.monitorTouchEvent = (meta and meta.touchEvent) or candidate.touchEvent or "monitor_touch"
     hw.monitorTouchMapper = meta and meta.mapPixel or nil
+    local createWindow = type(hw.displaySurface) == "table" and hw.displaySurface.createWindow
+      or (meta and meta.createWindow)
+    if type(createWindow) == "function" then
+      hw.monitorWindows = {
+        create = function(x, y, w, h)
+          return createWindow(x, y, w, h)
+        end
+      }
+    end
 
     if candidate.kind and hw.monitorBackend and candidate.kind ~= hw.monitorBackend then
       logWarn(logger, "Display backend downgraded", {
@@ -195,6 +213,11 @@ function M.setupMonitor(nativeTerm, hw, CFG, C, chosenCandidate, getTypeOf, logg
           backend = hw.monitorBackend or "unknown",
           width = tostring(w or 0),
           height = tostring(h or 0),
+          px = tostring((meta and meta.pixelWidth) or (candidate.pxW or 0)) .. "x" .. tostring((meta and meta.pixelHeight) or (candidate.pxH or 0)),
+          area = tostring((meta and meta.runtimeArea) or (candidate.runtimeArea) or 0),
+          setSizeTried = tostring((meta and meta.setSizeTried) and 1 or 0),
+          setSizeApplied = tostring((meta and meta.setSizeApplied) and 1 or 0),
+          setSizeMode = tostring((meta and meta.setSizeMode) or "none"),
         })
       end
     end
@@ -207,6 +230,7 @@ function M.setupMonitor(nativeTerm, hw, CFG, C, chosenCandidate, getTypeOf, logg
       backend = hw.monitorBackend or "unknown",
       touch = hw.monitorTouchEvent or "monitor_touch",
       output = outputMode,
+      area = tostring((meta and meta.runtimeArea) or (candidate.runtimeArea) or 0),
     })
   else
     logWarn(logger, "Monitor backend disabled: no monitor peripheral")

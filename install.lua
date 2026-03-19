@@ -45,10 +45,30 @@ local DisplayBackend = loadDisplayBackend()
 local state
 
 local SIDES = { "top", "bottom", "left", "right", "front", "back" }
+local DIRECTIONAL_ALIAS = {
+  top = true,
+  bottom = true,
+  left = true,
+  right = true,
+  front = true,
+  back = true,
+}
 
 local function contains(str, sub)
   return type(str) == "string" and type(sub) == "string"
     and string.find(string.lower(str), string.lower(sub), 1, true) ~= nil
+end
+
+local function isDirectionalAlias(name)
+  if type(DisplayBackend.isDirectionalAlias) == "function" then
+    return DisplayBackend.isDirectionalAlias(name)
+  end
+  return DIRECTIONAL_ALIAS[string.lower(tostring(name or ""))] == true
+end
+
+local function isNamedTomGpu(name)
+  local low = string.lower(tostring(name or ""))
+  return contains(low, "tm_gpu") or contains(low, "tom_gpu") or contains(low, "tm_display")
 end
 
 local function getTypeOf(name)
@@ -78,7 +98,11 @@ end
 
 local function normalizeDisplayCandidate(name, obj)
   if not obj then return nil end
-  local candidate = DisplayBackend.detectCandidate(name, obj, getTypeOf)
+  local candidate = DisplayBackend.detectCandidate(name, obj, getTypeOf, {
+    prepareRuntime = true,
+    tomTargetSize = 64,
+    monitorScale = (type(state) == "table" and tonumber(state.monitorScale)) or 0.5,
+  })
   if not candidate then return nil end
 
   local width = tonumber(candidate.w) or 0
@@ -93,6 +117,7 @@ local function normalizeDisplayCandidate(name, obj)
 
   local backend = tostring(candidate.kind or "cc_monitor")
   local touchEvent = tostring(candidate.touchEvent or "monitor_touch")
+  local runtimeArea = tonumber(candidate.runtimeArea) or (math.max(0, width) * math.max(0, height))
   return {
     name = name,
     obj = obj,
@@ -100,6 +125,9 @@ local function normalizeDisplayCandidate(name, obj)
     touchEvent = touchEvent,
     w = math.max(0, math.floor(width)),
     h = math.max(0, math.floor(height)),
+    runtimeArea = math.max(0, math.floor(runtimeArea)),
+    pxW = tonumber(candidate.pxW) or 0,
+    pxH = tonumber(candidate.pxH) or 0,
   }
 end
 
@@ -167,11 +195,56 @@ local function gatherPeripherals()
     toms_gpu = 1,
     cc_monitor = 2,
   }
+
+  local hasNamedTom = false
+  for _, candidate in ipairs(devices.displayCandidates) do
+    if candidate.backend == "toms_gpu" and isNamedTomGpu(candidate.name) then
+      hasNamedTom = true
+      break
+    end
+  end
+  if hasNamedTom then
+    local filtered = {}
+    for _, candidate in ipairs(devices.displayCandidates) do
+      local dropAlias = candidate.backend == "toms_gpu"
+        and isDirectionalAlias(candidate.name)
+        and not isNamedTomGpu(candidate.name)
+      if not dropAlias then
+        filtered[#filtered + 1] = candidate
+      end
+    end
+    devices.displayCandidates = filtered
+    devices.displayByName = {}
+    devices.displays = {}
+    devices.monitors = {}
+    devices.displayBackends = { cc_monitor = 0, toms_gpu = 0, other = 0 }
+    for _, candidate in ipairs(devices.displayCandidates) do
+      devices.displayByName[candidate.name] = candidate
+      devices.displays[#devices.displays + 1] = candidate.name
+      devices.monitors[#devices.monitors + 1] = candidate.name
+      if candidate.backend == "toms_gpu" then
+        devices.displayBackends.toms_gpu = devices.displayBackends.toms_gpu + 1
+      elseif candidate.backend == "cc_monitor" then
+        devices.displayBackends.cc_monitor = devices.displayBackends.cc_monitor + 1
+      else
+        devices.displayBackends.other = devices.displayBackends.other + 1
+      end
+    end
+  end
+
   table.sort(devices.displayCandidates, function(a, b)
     local pa = backendPriority[a.backend] or 99
     local pb = backendPriority[b.backend] or 99
     if pa ~= pb then return pa < pb end
-    return a.name < b.name
+    if (a.runtimeArea or 0) ~= (b.runtimeArea or 0) then
+      return (a.runtimeArea or 0) > (b.runtimeArea or 0)
+    end
+    local aArea = (tonumber(a.w) or 0) * (tonumber(a.h) or 0)
+    local bArea = (tonumber(b.w) or 0) * (tonumber(b.h) or 0)
+    if aArea ~= bArea then
+      return aArea > bArea
+    end
+    return tostring(a.name or "") < tostring(b.name or "")
   end)
   table.sort(devices.readers)
   table.sort(devices.relays)
