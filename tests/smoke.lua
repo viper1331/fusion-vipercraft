@@ -136,6 +136,8 @@ local modules = {
   "install_display_dtfuel_config.lua",
   "reactor_diagram_render.lua",
   "responsive_render.lua",
+  "tom_layout_engine.lua",
+  "tom_renderer_engine.lua",
 }
 
 local baseCtx = {

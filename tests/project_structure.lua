@@ -38,10 +38,16 @@ function M.run(ctx)
     "tests/install_display_dtfuel_config.lua",
     "tests/reactor_diagram_render.lua",
     "tests/responsive_render.lua",
+    "tests/tom_layout_engine.lua",
+    "tests/tom_renderer_engine.lua",
     "ui/chrome.lua",
     "ui/views.lua",
     "ui/components.lua",
     "ui/induction_diagram.lua",
+    "ui/tom_design.lua",
+    "ui/tom_layout.lua",
+    "ui/tom_components.lua",
+    "ui/tom_renderer.lua",
   }
 
   for _, dir in ipairs(requiredDirs) do

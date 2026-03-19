@@ -16,6 +16,7 @@ function M.run()
   local UIChrome = require("ui.chrome")
   local UIReactorDiagram = require("ui.reactor_diagram")
   local UIInductionDiagram = require("ui.induction_diagram")
+  local UITomRenderer = require("ui.tom_renderer")
   local CoreConfig = require("core.config")
   local CoreEnergy = require("core.energy")
   local CoreTemperature = require("core.temperature")
@@ -2858,6 +2859,37 @@ function M.run()
     UIViews.drawSetupView(buildUIViewContext(), layout)
   end
 
+  local tomRenderer = UITomRenderer.build({
+    state = state,
+    hw = hw,
+    CFG = CFG,
+    C = C,
+    writeAt = writeAt,
+    fillArea = fillArea,
+    shortText = shortText,
+    formatTemperature = formatTemperature,
+    formatEnergy = formatEnergy,
+    formatEnergyPerTick = formatEnergyPerTick,
+    reactorPhase = reactorPhase,
+    phaseColor = phaseColor,
+    getRuntimeFuelMode = getRuntimeFuelMode,
+    isRuntimeFuelOk = isRuntimeFuelOk,
+    buildButtons = buildButtons,
+    drawButtons = drawButtons,
+    getCurrentInputSource = getCurrentInputSource,
+    drawReactorDiagram = drawReactorDiagram,
+    drawInductionDiagram = drawInductionDiagram,
+    drawMonitorSelection = drawMonitorSelection,
+    drawDiagnosticView = drawDiagnosticView,
+    drawUpdateView = drawUpdateView,
+    drawConfigView = drawConfigView,
+    drawSetupView = drawSetupView,
+    drawIoPanel = function(bounds)
+      UIComponents.drawIoPanel(buildUIViewContext(), bounds.x, bounds.y, bounds.w, bounds.h)
+    end,
+    log = logger,
+  })
+
   local function drawUI()
     local function drawSurface(source, surface)
       term.redirect(surface)
@@ -2872,42 +2904,51 @@ function M.run()
       state.controlBounds = nil
 
       local tw, th = term.getSize()
-      local layout = computeLayout(tw, th)
+      local rendered = false
 
-      term.setBackgroundColor(C.bg)
-      term.setTextColor(C.text)
-      term.clear()
-
-      if layout.tooSmall then
-        centerText(math.max(2, math.floor(th / 2) - 1), "Ecran trop petit", C.bad, C.bg)
-        centerText(math.max(3, math.floor(th / 2)), "Minimum recommande: " .. layout.minW .. "x" .. layout.minH, C.warn, C.bg)
-        return
+      if variant == "tom" and tomRenderer and type(tomRenderer.render) == "function" then
+        local okTom, errTom = pcall(tomRenderer.render, source, surface, tw, th)
+        if okTom then
+          rendered = true
+        else
+          logger.error("Tom renderer failed", { err = tostring(errTom) })
+        end
       end
 
-      if state.choosingMonitor then
-        drawMonitorSelection(layout)
-        return
+      if not rendered then
+        local layout = computeLayout(tw, th)
+
+        term.setBackgroundColor(C.bg)
+        term.setTextColor(C.text)
+        term.clear()
+
+        if layout.tooSmall then
+          centerText(math.max(2, math.floor(th / 2) - 1), "Ecran trop petit", C.bad, C.bg)
+          centerText(math.max(3, math.floor(th / 2)), "Minimum recommande: " .. layout.minW .. "x" .. layout.minH, C.warn, C.bg)
+        elseif state.choosingMonitor then
+          drawMonitorSelection(layout)
+        else
+          drawHeader("FUSION SUPERVISOR", state.status)
+
+          if state.currentView == "diagnostic" then
+            drawDiagnosticView(layout)
+          elseif state.currentView == "manual" then
+            drawManualView(layout)
+          elseif state.currentView == "induction" then
+            drawInductionView(layout)
+          elseif state.currentView == "update" then
+            drawUpdateView(layout)
+          elseif state.currentView == "config" then
+            drawConfigView(layout)
+          elseif state.currentView == "setup" then
+            drawSetupView(layout)
+          else
+            drawSupervisionView(layout)
+          end
+
+          drawFooter(layout)
+        end
       end
-
-      drawHeader("FUSION SUPERVISOR", state.status)
-
-      if state.currentView == "diagnostic" then
-        drawDiagnosticView(layout)
-      elseif state.currentView == "manual" then
-        drawManualView(layout)
-      elseif state.currentView == "induction" then
-        drawInductionView(layout)
-      elseif state.currentView == "update" then
-        drawUpdateView(layout)
-      elseif state.currentView == "config" then
-        drawConfigView(layout)
-      elseif state.currentView == "setup" then
-        drawSetupView(layout)
-      else
-        drawSupervisionView(layout)
-      end
-
-      drawFooter(layout)
 
       if type(surface.flush) == "function" then
         pcall(surface.flush)
