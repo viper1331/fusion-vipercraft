@@ -1,6 +1,6 @@
 # PLANS.md
 
-## ExecPlan — Refonte complète de l'interface Tom's Peripherals fusion
+## ExecPlan — Refonte UI Tom's Peripherals sur backend natif validé
 
 ### Statut
 
@@ -8,25 +8,62 @@ Plan actif.
 
 ### Décision
 
-La refonte de l’interface Tom’s Peripherals doit être faite en s’appuyant explicitement sur la base technique déjà validée.
-La logique runtime existante n’est pas à jeter.
-La refonte doit porter principalement sur :
+La refonte de l’interface Tom’s Peripherals doit désormais être menée sur une base technique validée :
 
-- l’architecture UI,
-- le design system,
-- le layout,
-- les composants,
-- la composition visuelle finale.
+- le backend Tom natif est fonctionnel ;
+- la sélection automatique de backend terrain doit être conservée ;
+- la coexistence entre interface classique et interface Tom doit être maintenue ;
+- la refonte doit maintenant porter principalement sur la qualité visuelle, la structure UI, le design system, le layout, les composants et la composition finale.
 
-### Base technique de référence à conserver
+### Nouveau diagnostic validé
 
-Le système actuellement validé sert de socle technique.
+Les derniers diagnostics ont confirmé que :
+
+- le bon GPU Tom est détecté ;
+- le backend `toms_gpu` / `toms_native` est opérationnel ;
+- le runtime source natif Tom est correctement utilisé ;
+- les dimensions runtime natives sont correctement conservées ;
+- le mode debug Tom utilise le même pipeline natif que la production ;
+- le gros problème de wrapper monitor parasite est résolu.
+
+En conséquence :
+
+- il ne faut plus refaire l’architecture backend Tom ;
+- il ne faut plus rebasculer vers une abstraction monitor pour l’UI Tom ;
+- la priorité est maintenant la refonte visuelle et structurelle de l’interface Tom sur cette base saine ;
+- seule une correction ciblée des métriques/logs incohérents reste autorisée côté backend/debug.
+
+---
+
+## Contraintes non négociables
+
+- Ne pas casser la coexistence entre interface classique et interface Tom.
+- Ne pas supprimer le support des moniteurs classiques.
+- Ne pas supprimer le support natif Tom’s GPU.
+- Le programme doit continuer à s’adapter automatiquement au terrain :
+  - UI classique si terrain classique,
+  - UI Tom native si GPU Tom valide.
+- Ne pas repartir d’une nouvelle logique runtime.
+- Ne pas toucher au pipeline natif Tom validé, sauf pour corriger des logs/métriques debug incorrects.
+- Ne pas perdre la permissivité actuelle.
+- Ne pas hardcoder un seul setup matériel.
+- Ne pas réintroduire de coordonnées magiques non protégées.
+- Ne pas produire une “jolie interface” fragile.
+- Ne pas casser l’installateur.
+- Ne pas casser le système d’update par manifeste.
+
+---
+
+## Base technique de référence à conserver
+
+Le système validé sert de socle technique.
 Il doit être conservé, réutilisé ou extrait proprement dans des modules plus clairs.
 
-Éléments à conserver ou réutiliser autant que possible :
+### Détection et sélection backend
+
+Conserver ou réutiliser autant que possible :
 
 #### Détection périphériques
-
 - `getNames()`
 - `getMethods()`
 - `methodSet()`
@@ -41,44 +78,51 @@ Il doit être conservé, réutilisé ou extrait proprement dans des modules plus
 - `findRsports()`
 - `findByExistingNames()`
 
-#### Initialisation GPU
+#### Sélection de backend terrain
+Le programme doit continuer à distinguer au minimum :
+- `classic_monitor`
+- `toms_native`
+- `terminal_fallback` si nécessaire
 
+### Initialisation GPU Tom native
+
+Conserver la séquence validée :
 - wrap GPU
 - `refreshSize()`
 - `pcall(gpu.setSize, 64)`
 - `refreshSize()`
 - `getSize()`
 
-#### Lecture des données
-
+### Lecture des données
 - `hasMethod()`
 - `tryCall()`
 - `fmt()`
 - `clamp()`
 - lecture permissive des méthodes fusion / laser
 
-#### Sécurités runtime
-
+### Sécurités runtime
 - `allow_control = false` par défaut
 - `pulseLaser()`
 - `changeInjection()`
 - aucun crash si méthode absente
 
-#### Sécurités graphiques
-
+### Sécurités graphiques
 - `clipText()`
 - `safeFilledRect()`
 - `safeRect()`
 - `safeText()`
 
-#### Interactions
-
+### Interactions
 - boutons
 - `handleClick()`
 - `tm_monitor_touch`
 - `tm_monitor_mouse_click`
 - boucle timer + redraw
 - raccourcis clavier utiles
+
+### Debug Tom
+Le mode debug Tom doit rester sur le même chemin natif que la prod Tom.
+Il ne doit pas rebasculer vers un wrapper monitor.
 
 ---
 
@@ -93,7 +137,8 @@ Produire une nouvelle interface Tom’s :
 - adaptive,
 - robuste,
 - professionnelle,
-- belle quelle que soit la taille réelle du GPU.
+- belle quelle que soit la taille réelle du GPU natif,
+- immédiatement compréhensible comme un panneau de supervision.
 
 Le style visé est :
 
@@ -104,28 +149,16 @@ Le style visé est :
 
 ---
 
-## Contraintes
-
-- Ne pas repartir d’une nouvelle logique runtime.
-- Ne pas perdre la permissivité actuelle.
-- Ne pas hardcoder un seul setup matériel.
-- Ne pas réintroduire de coordonnées magiques non protégées.
-- Ne pas produire une “jolie interface” fragile.
-- Ne pas casser l’installateur.
-- Ne pas casser le système d’update par manifeste.
-
----
-
 ## Architecture cible
 
-La couche UI Tom’s doit être restructurée en composants clairs.
+La couche UI Tom’s doit rester structurée en composants clairs.
 
 Architecture souhaitée, à adapter au style du repo si nécessaire :
 
 - `ui/toms/theme.lua`
 - `ui/toms/layout.lua`
 - `ui/toms/components.lua`
-- `ui/toms/fusion_screen.lua`
+- `ui/toms/fusion_panel.lua`
 
 Ou toute structure équivalente respectant la séparation suivante :
 
@@ -135,47 +168,64 @@ Ou toute structure équivalente respectant la séparation suivante :
 4. écran final
 5. orchestration / branchement runtime
 
+Important :
+- conserver cette modularité ;
+- ne pas revenir à un gros fichier de rendu monolithique ;
+- ne pas refaire le backend de surface si celui-ci est déjà validé.
+
 ---
 
 ## Phases d’exécution
 
-### Phase 1 — Inspection du dépôt
+### Phase 1 — Validation des invariants backend
+
+Avant tout travail visuel :
+
+- vérifier que le backend Tom natif reste inchangé ;
+- vérifier que l’UI classique reste disponible ;
+- vérifier que la sélection automatique terrain reste disponible ;
+- vérifier que le debug Tom continue à utiliser le même wrapper natif que la prod Tom.
+
+À ce stade :
+- ne pas réécrire le backend ;
+- seulement corriger d’éventuelles incohérences de logging.
+
+### Phase 2 — Correction des logs et métriques debug
+
+Corriger les incohérences restantes dans le debug, notamment :
+
+- valeurs `blocks`
+- valeurs `wrapped`
+- valeurs `scale`
+- ou toute métrique mal étiquetée qui ne reflète pas correctement la réalité native du GPU
+
+Objectif :
+avoir un fichier debug fiable, cohérent, lisible, et utilisable pour les prochains diagnostics.
+
+### Phase 3 — Inspection UI actuelle
 
 Identifier précisément :
 
-- le point d’entrée principal,
-- les fichiers UI Tom’s actuels,
-- les helpers déjà présents,
-- les modules réutilisables dans `core/`, `io/`, `ui/`,
-- les chemins impactés par le manifeste et l’installation.
+- les fichiers UI Tom actuels ;
+- les helpers déjà présents ;
+- les modules réutilisables dans `core/`, `io/`, `ui/` ;
+- ce qui est déjà bon visuellement ;
+- ce qui est placeholder ;
+- ce qui doit être remplacé dans la composition.
 
 Décider ce qui est :
-
 - conservé,
-- extrait,
-- remplacé,
+- amélioré,
+- refactoré,
 - supprimé.
 
-### Phase 2 — Extraction de la base technique
+### Phase 4 — Consolidation du design system
 
-À partir du système validé :
-
-- isoler proprement la logique périphériques/runtime,
-- éviter la duplication,
-- garder un point d’orchestration clair,
-- séparer la logique technique de la logique visuelle.
-
-Objectif :
-avoir une base stable sur laquelle brancher la nouvelle UI.
-
-### Phase 3 — Création du design system
-
-Créer une couche de style centralisée.
+Créer ou améliorer une couche de style centralisée.
 
 Prévoir au minimum :
 
 #### Palette
-
 - info blue
 - ok green
 - warning orange
@@ -188,7 +238,6 @@ Prévoir au minimum :
 - accent colors
 
 #### Échelle d’espacement
-
 - outer margin
 - panel padding
 - panel gap
@@ -196,7 +245,6 @@ Prévoir au minimum :
 - line spacing
 
 #### Échelle de taille
-
 - title height
 - subtitle height
 - row height
@@ -205,7 +253,6 @@ Prévoir au minimum :
 - badge height
 
 #### Règles de texte
-
 - clipping
 - truncation
 - alignment
@@ -213,9 +260,9 @@ Prévoir au minimum :
 
 Toutes les tailles doivent être dérivées d’une échelle UI calculée depuis `W` et `H`.
 
-### Phase 4 — Création du layout engine
+### Phase 5 — Refonte du layout engine
 
-Construire un moteur de layout calculé depuis la taille runtime réelle.
+Construire un moteur de layout calculé depuis la taille runtime réelle native.
 
 Structure recommandée :
 
@@ -240,12 +287,12 @@ Prévoir 3 niveaux de densité :
 - large density
 
 Important :
-ce n’est pas 3 interfaces différentes.
+ce ne sont pas 3 interfaces différentes.
 C’est la même identité visuelle, avec plus ou moins de richesse selon la place disponible.
 
-### Phase 5 — Création des composants UI
+### Phase 6 — Refonte des composants UI
 
-Créer des composants cohérents et réutilisables.
+Créer ou améliorer des composants cohérents et réutilisables.
 
 Au minimum :
 
@@ -265,32 +312,33 @@ Au minimum :
 
 Règles :
 
-- jamais de dessin hors zone,
-- clipping/truncation obligatoire,
-- style homogène,
-- réutilisables sur plusieurs tailles.
+- jamais de dessin hors zone ;
+- clipping/truncation obligatoire ;
+- style homogène ;
+- réutilisables sur plusieurs tailles ;
+- aucune barre ou zone sans signification.
 
-### Phase 6 — Nouvelle composition de l’écran
+### Phase 7 — Nouvelle composition de l’écran Tom
 
-Composer le nouvel écran fusion à partir :
+Composer le nouvel écran fusion Tom à partir :
 
-- du layout engine,
-- des composants,
-- des données runtime,
+- du layout engine ;
+- des composants ;
+- des données runtime ;
 - de la base technique existante.
 
 Sections attendues :
 
 #### Header
 - titre global
-- nom GPU
+- backend / GPU actif
 - état système global
 
 #### Reactor summary
 - active / ignited
 - injection
 - passive generation
-- steam
+- steam ou `N/A`
 - fuel si disponible
 
 #### Temperatures
@@ -302,7 +350,7 @@ Sections attendues :
 - energy
 - max
 - ratio
-- état prêt / non prêt si pertinent
+- état prêt / non prêt
 
 #### Reactor core
 - représentation stylisée du réacteur
@@ -310,10 +358,17 @@ Sections attendues :
 - adaptable
 - visuellement utile
 - pas un placeholder
+- états visuels possibles :
+  - idle
+  - active
+  - ready
+  - warning
+  - blocked si pertinent
 
 #### Status / Debug
-- erreur en cours
-- périphériques réellement utilisés
+- erreur en cours ou raison du blocage
+- backend utilisé
+- wrapper utilisé
 - méthodes matchées si utile
 - mode contrôle
 
@@ -324,50 +379,56 @@ Sections attendues :
 - Injection +
 - Quit
 
-### Phase 7 — Utilisation éventuelle des windows Tom’s
+### Phase 8 — Usage éventuel des windows Tom’s
 
 Utiliser `createWindow(...)` seulement si cela améliore clairement :
 
-- la structure,
-- la lisibilité,
-- la modularité,
+- la structure ;
+- la lisibilité ;
+- la modularité ;
 - le rendu.
 
 Règles :
 
-- nombre raisonnable de windows,
-- pas de gaspillage VRAM,
-- fond root GPU conservé,
-- ordre de sync explicite.
+- nombre raisonnable de windows ;
+- pas de gaspillage VRAM ;
+- fond root GPU conservé ;
+- ordre de sync explicite ;
+- aucune régression sur le rendu natif.
 
-### Phase 8 — Finalisation visuelle
+Si les windows n’apportent rien visuellement ou compliquent l’UI, préférer un rendu root GPU bien structuré.
+
+### Phase 9 — Finalisation visuelle
 
 L’interface finale ne doit plus ressembler :
 
-- ni à une accumulation de rectangles,
-- ni à un prototype,
-- ni à un layout placeholder.
+- ni à une accumulation de rectangles ;
+- ni à un prototype ;
+- ni à un layout placeholder ;
+- ni à une maquette abstraite.
 
 Attendus :
 
-- hiérarchie visuelle claire,
-- panneaux équilibrés,
-- espacement régulier,
-- titres lisibles,
-- valeurs bien alignées,
-- jauges identifiables,
-- centre réacteur valorisé,
+- hiérarchie visuelle claire ;
+- panneaux équilibrés ;
+- espacement régulier ;
+- titres lisibles ;
+- valeurs bien alignées ;
+- jauges identifiables ;
+- centre réacteur valorisé ;
+- footer de contrôle clair ;
 - style sobre et professionnel.
 
-### Phase 9 — Nettoyage
+### Phase 10 — Nettoyage
 
-Une fois la nouvelle UI en place :
+Une fois la nouvelle UI Tom en place :
 
-- retirer l’ancienne couche UI Tom’s devenue obsolète,
-- éviter les doubles chemins de rendu,
-- laisser un code maintenable.
+- retirer l’ancienne couche visuelle Tom devenue obsolète ;
+- éviter les doubles chemins de rendu Tom inutiles ;
+- laisser un code maintenable ;
+- conserver séparément l’UI classique.
 
-### Phase 10 — Intégration dépôt
+### Phase 11 — Intégration dépôt
 
 Mettre à jour si nécessaire :
 
@@ -381,18 +442,18 @@ S’assurer qu’aucun fichier runtime nécessaire n’est oublié.
 
 ## Données critiques toujours visibles
 
-Quelle que soit la taille, l’UI doit toujours afficher :
+Quelle que soit la taille, l’UI Tom doit toujours afficher :
 
-- état réacteur,
-- injection,
-- plasma temp,
-- case temp,
-- énergie laser,
+- état réacteur ;
+- injection ;
+- plasma temp ;
+- case temp ;
+- énergie laser ;
 - statut global / erreur.
 
 Si une donnée manque :
 
-- afficher `N/A` proprement,
+- afficher `N/A` proprement ;
 - ne jamais laisser une zone vide sans explication.
 
 ---
@@ -410,10 +471,23 @@ Compatibilité à préserver :
 
 Les boutons doivent rester :
 
-- visibles,
-- bien espacés,
-- lisibles,
+- visibles ;
+- bien espacés ;
+- lisibles ;
 - exploitables quelle que soit la taille.
+
+---
+
+## Compatibilité terrain obligatoire
+
+Le programme doit continuer à supporter :
+
+- l’interface classique pour les terrains en moniteur classique ;
+- l’interface Tom native pour les terrains en GPU Tom.
+
+Le choix doit continuer à se faire automatiquement selon la détection réelle du terrain.
+
+La refonte UI Tom ne doit en aucun cas casser cette adaptation terrain.
 
 ---
 
@@ -421,18 +495,23 @@ Les boutons doivent rester :
 
 La refonte est considérée terminée seulement si :
 
-1. la base technique validée est conservée comme socle ;
-2. la couche UI actuelle a bien été remplacée ;
-3. l’interface est visuellement propre et professionnelle ;
-4. l’interface reste belle sur petit, moyen et grand écran ;
-5. aucune erreur graphique hors bornes n’est possible ;
-6. les données critiques restent visibles ;
-7. le réacteur central a un vrai rôle visuel ;
-8. les contrôles restent utilisables ;
-9. la détection périphérique reste permissive ;
-10. `fusion.version` a été incrémenté ;
-11. `fusion.manifest.json` a été synchronisé ;
-12. `install.lua` reste compatible.
+1. le backend Tom natif validé est préservé ;
+2. l’UI classique reste disponible ;
+3. l’UI Tom reste disponible ;
+4. la sélection automatique terrain reste fonctionnelle ;
+5. la couche UI Tom actuelle a été réellement améliorée ;
+6. l’interface Tom est visuellement propre et professionnelle ;
+7. l’interface Tom reste belle sur petit, moyen et grand écran natif ;
+8. aucune erreur graphique hors bornes n’est possible ;
+9. les données critiques restent visibles ;
+10. le réacteur central a un vrai rôle visuel ;
+11. les contrôles restent utilisables ;
+12. la détection périphérique reste permissive ;
+13. le debug Tom reste sur le pipeline natif ;
+14. le logging debug Tom est cohérent et fiable ;
+15. `fusion.version` a été incrémenté ;
+16. `fusion.manifest.json` a été synchronisé ;
+17. `install.lua` reste compatible.
 
 ---
 
@@ -441,12 +520,16 @@ La refonte est considérée terminée seulement si :
 1. liste exacte des fichiers modifiés ;
 2. liste exacte des fichiers créés ;
 3. résumé clair en français ;
-4. explication de ce qui a été conservé depuis la base validée ;
-5. explication de ce qui a été refondu ;
-6. description du design system ;
-7. description du layout engine ;
-8. description des composants créés ;
-9. description des états visuels du reactor core ;
-10. description du comportement small / medium / large density ;
-11. confirmation que la refonte repose bien sur le système validé ;
-12. tests manuels recommandés en jeu.
+4. explication de ce qui a été conservé côté backend/runtime ;
+5. explication de ce qui a été corrigé dans les logs debug ;
+6. explication de ce qui a été refondu côté UI Tom ;
+7. description du design system ;
+8. description du layout engine ;
+9. description des composants créés ou améliorés ;
+10. description des états visuels du reactor core ;
+11. description du comportement small / medium / large density ;
+12. confirmation que l’UI classique reste disponible ;
+13. confirmation que l’UI Tom reste disponible ;
+14. confirmation que la sélection automatique terrain reste fonctionnelle ;
+15. confirmation que la refonte UI Tom repose bien sur le backend natif validé ;
+16. tests manuels recommandés en jeu.
