@@ -1066,8 +1066,14 @@ local function buildTomNativeSurface(gpu, cfg, runtimeInfo, opts)
     if type(fn) ~= "function" then
       return false
     end
-    local ok = pcall(fn, ...)
-    return ok
+    local ok, result = pcall(fn, ...)
+    if not ok then
+      return false
+    end
+    if result == false then
+      return false
+    end
+    return true
   end
 
   local function callGpuVariants(methodName, variants)
@@ -1139,17 +1145,20 @@ local function buildTomNativeSurface(gpu, cfg, runtimeInfo, opts)
     if yy < 1 or yy > pxH then return end
     local color = tonumber(argbColor) or DEFAULT_PALETTE.white
     local rgb = argbToRgb(color)
+    -- Prefer validated 4-arg signatures first (from fusion_panel_v2 runtime base).
     if callGpuVariants("drawText", {
-      { xx, yy, raw, color, -1, scale },
-      { xx, yy, raw, rgb, -1, scale },
-      { raw, xx, yy, color, -1, scale },
-      { raw, xx, yy, rgb, -1, scale },
-      { xx, yy, color, raw },
-      { xx, yy, rgb, raw },
       { xx, yy, raw, color },
       { xx, yy, raw, rgb },
       { raw, xx, yy, color },
       { raw, xx, yy, rgb },
+      { xx, yy, color, raw },
+      { xx, yy, rgb, raw },
+      { xx - 1, yy - 1, raw, color },
+      { xx - 1, yy - 1, raw, rgb },
+      { xx, yy, raw, color, -1, scale },
+      { xx, yy, raw, rgb, -1, scale },
+      { raw, xx, yy, color, -1, scale },
+      { raw, xx, yy, rgb, -1, scale },
       { xx, yy, raw },
       { raw, xx, yy },
     }) then return end

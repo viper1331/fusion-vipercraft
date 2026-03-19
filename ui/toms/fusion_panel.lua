@@ -331,6 +331,15 @@ function M.build(api)
     if type(diag.debugBypass) ~= "table" then
       diag.debugBypass = {}
     end
+    diag.textDrawCallCount = tonumber(diag.textDrawCallCount) or 0
+    diag.textDrawExecutedCount = tonumber(diag.textDrawExecutedCount) or 0
+    diag.textDrawClippedCount = tonumber(diag.textDrawClippedCount) or 0
+    if type(diag.textDrawSamples) ~= "table" then
+      diag.textDrawSamples = {}
+    end
+    if type(diag.drawPipeline) ~= "table" then
+      diag.drawPipeline = {}
+    end
     local debugTarget = getDebugFileTarget()
     diag.debugFilePath = debugTarget.displayPath
     diag.debugFileResolvedPath = debugTarget.writeFile
@@ -458,6 +467,20 @@ function M.build(api)
       addLine(lines, "Sync count", tostring(diag.syncCount or 0))
       addLine(lines, "Last sync method", tostring(diag.lastSyncMethod or "N/A"))
       addLine(lines, "Fallback after Tom", diag.fallbackAfterTom and "yes" or "no")
+      addLine(lines, "Text draw calls", tostring(diag.textDrawCallCount or 0))
+      addLine(lines, "Text draw executed", tostring(diag.textDrawExecutedCount or 0))
+      addLine(lines, "Text draw clipped", tostring(diag.textDrawClippedCount or 0))
+      lines[#lines + 1] = ""
+
+      lines[#lines + 1] = "[DRAW PIPELINE]"
+      local pipeline = type(diag.drawPipeline) == "table" and diag.drawPipeline or {}
+      if #pipeline == 0 then
+        lines[#lines + 1] = "  - none"
+      else
+        for i = 1, #pipeline do
+          lines[#lines + 1] = string.format("  %02d. %s", i, tostring(pipeline[i] or ""))
+        end
+      end
       lines[#lines + 1] = ""
 
       lines[#lines + 1] = "[DETECTED TOM GPUS]"
@@ -566,6 +589,31 @@ function M.build(api)
       addLine(lines, "debug wrapper parity", tostring(surfaceCtx.wrapperType or ""):find("toms_native", 1, true) and "true" or "false")
       lines[#lines + 1] = ""
 
+      lines[#lines + 1] = "[TEXT DRAW SAMPLES]"
+      local samples = type(diag.textDrawSamples) == "table" and diag.textDrawSamples or {}
+      if #samples == 0 then
+        lines[#lines + 1] = "  - no samples"
+      else
+        for i = 1, math.min(10, #samples) do
+          local sample = samples[i]
+          if type(sample) == "table" then
+            lines[#lines + 1] = string.format(
+              "  #%d req='%s' final='%s' pos=%d,%d color=%s clipped=%s executed=%s method=%s",
+              i,
+              tostring(sample.requested or ""),
+              tostring(sample.finalText or ""),
+              tonumber(sample.x) or 0,
+              tonumber(sample.y) or 0,
+              tostring(sample.color or "N/A"),
+              tostring(sample.clipped == true),
+              tostring(sample.executed == true),
+              tostring(sample.method or "none")
+            )
+          end
+        end
+      end
+      lines[#lines + 1] = ""
+
       lines[#lines + 1] = "[LAST FRAME SUMMARY]"
       addLine(lines, "status", tostring(model.statusText or "N/A"))
       addLine(lines, "phase", tostring(model.phase or "N/A"))
@@ -620,16 +668,27 @@ function M.build(api)
       info = 0xFF66CCFF,
     }
 
+    if type(diag) == "table" then
+      diag.textDrawCallCount = 0
+      diag.textDrawExecutedCount = 0
+      diag.textDrawClippedCount = 0
+      diag.textDrawSamples = {}
+    end
+
     local function callSafe(methodName, ...)
       local fn = type(surface) == "table" and surface[methodName] or nil
       if type(fn) ~= "function" then
         return false
       end
-      local ok, err = pcall(fn, ...)
+      local ok, result = pcall(fn, ...)
       if not ok then
-        pushDiagError(diag, "native_" .. tostring(methodName) .. "_failed:" .. tostring(err))
+        pushDiagError(diag, "native_" .. tostring(methodName) .. "_failed:" .. tostring(result))
+        return false
       end
-      return ok
+      if result == false then
+        return false
+      end
+      return true
     end
 
     local function callVariants(methodName, variants)
@@ -685,11 +744,51 @@ function M.build(api)
     end
 
     local function drawText(x, y, text, color, bgColor)
-      local xx = math.floor(tonumber(x) or 1)
+      local reqX = math.floor(tonumber(x) or 1)
       local yy = math.floor(tonumber(y) or 1)
-      local raw = tostring(text or "")
+      local xx = reqX
+      local requested = tostring(text or "")
+      local raw = requested
+      local clipped = false
+      local executed = false
+      local methodUsed = "none"
       if raw == "" then return end
       if yy < 1 or yy > h then return end
+      if type(diag) == "table" then
+        diag.textDrawCallCount = (tonumber(diag.textDrawCallCount) or 0) + 1
+      end
+
+      if xx < 1 then
+        local cut = 1 - xx
+        if cut >= #raw then
+          if type(diag) == "table" then
+            diag.textDrawClippedCount = (tonumber(diag.textDrawClippedCount) or 0) + 1
+          end
+          return
+        end
+        raw = raw:sub(cut + 1)
+        xx = 1
+        clipped = true
+      end
+      if xx > w then
+        if type(diag) == "table" then
+          diag.textDrawClippedCount = (tonumber(diag.textDrawClippedCount) or 0) + 1
+        end
+        return
+      end
+
+      local maxChars = math.max(0, (w - xx) + 1)
+      if #raw > maxChars then
+        raw = raw:sub(1, maxChars)
+        clipped = true
+      end
+      if raw == "" then
+        if type(diag) == "table" then
+          diag.textDrawClippedCount = (tonumber(diag.textDrawClippedCount) or 0) + 1
+        end
+        return
+      end
+
       local textWidth = #raw
       if type(surface) == "table" and type(surface.getTextLength) == "function" then
         local okLen, len = pcall(surface.getTextLength, raw)
@@ -705,13 +804,50 @@ function M.build(api)
         { raw, xx, yy, color },
         { xx, yy, raw },
         { raw, xx, yy },
-      }) then return end
-      callVariants("drawString", {
-        { xx, yy, raw, color },
-        { raw, xx, yy, color },
-        { xx, yy, raw },
-        { raw, xx, yy },
-      })
+      }) then
+        executed = true
+        methodUsed = "drawText"
+      else
+        executed = callVariants("drawString", {
+          { xx, yy, raw, color },
+          { raw, xx, yy, color },
+          { xx, yy, raw },
+          { raw, xx, yy },
+        })
+        if executed then
+          methodUsed = "drawString"
+        end
+      end
+
+      if type(diag) == "table" then
+        if clipped then
+          diag.textDrawClippedCount = (tonumber(diag.textDrawClippedCount) or 0) + 1
+        end
+        if executed then
+          diag.textDrawExecutedCount = (tonumber(diag.textDrawExecutedCount) or 0) + 1
+        end
+        local samples = type(diag.textDrawSamples) == "table" and diag.textDrawSamples or {}
+        if #samples < 24 then
+          local c = tonumber(color) or 0
+          if c < 0 then
+            c = 0x100000000 + c
+          end
+          samples[#samples + 1] = {
+            requested = requested,
+            finalText = raw,
+            x = reqX,
+            y = yy,
+            color = string.format("0x%08X", math.floor(c)),
+            clipped = clipped,
+            executed = executed,
+            method = methodUsed,
+          }
+          diag.textDrawSamples = samples
+        end
+      end
+      if not executed then
+        pushDiagError(diag, "native_text_not_drawn x=" .. tostring(reqX) .. " y=" .. tostring(yy) .. " text=" .. tostring(requested))
+      end
     end
 
     local function sync()
@@ -800,16 +936,32 @@ function M.build(api)
     local canvas = makeTomNativeCanvas(surface, width, height, diag)
     local p = canvas.palette
     local layout = computeNativeDiagnosticLayout(canvas.w, canvas.h, theme)
+    if type(diag) == "table" then
+      diag.drawPipeline = {}
+    end
+    local function mark(stage)
+      if type(diag) ~= "table" then return end
+      local list = type(diag.drawPipeline) == "table" and diag.drawPipeline or {}
+      if #list < 32 then
+        list[#list + 1] = tostring(stage or "")
+      end
+      diag.drawPipeline = list
+    end
 
+    mark("01 background_fill")
     canvas.fillRect(layout.root.x, layout.root.y, layout.root.w, layout.root.h, p.bg)
 
+    mark("02 header_panel")
     drawNativePanel(canvas, layout.header, "TOMS DEBUG MODE", p.panelHeader)
+    mark("03 header_text")
     canvas.drawText(layout.header.x + 4, layout.header.y + canvas.lineH + 4, "SOURCE: " .. tostring(source or "unknown"), p.info, nil)
     canvas.drawText(layout.header.x + 4, layout.header.y + (canvas.lineH * 2) + 4, "GPU: " .. tostring(hw.monitorName or "N/A"), p.info, nil)
     canvas.drawText(layout.header.x + math.max(120, math.floor(layout.header.w * 0.55)), layout.header.y + canvas.lineH + 4, string.format("RUNTIME: %dx%d", canvas.w, canvas.h), p.warn, nil)
     canvas.drawText(layout.header.x + 4, layout.header.y + (canvas.lineH * 3) + 4, "DEBUG FILE: " .. TOMS_DEBUG_FILE, p.text, nil)
 
+    mark("04 reactor_panel")
     drawNativePanel(canvas, layout.reactor, "Reactor", p.panelHeader)
+    mark("05 reactor_values")
     drawNativeKV(canvas, layout.reactor, 0, "Global", model.statusText, p.ok)
     drawNativeKV(canvas, layout.reactor, 1, "Phase", model.phase, p.info)
     drawNativeKV(canvas, layout.reactor, 2, "Core", state.reactorFormed and "FORMED" or "UNFORMED", state.reactorFormed and p.ok or p.warn)
@@ -817,14 +969,18 @@ function M.build(api)
     drawNativeKV(canvas, layout.reactor, 4, "Fuel", model.fuelMode, p.info)
     drawNativeKV(canvas, layout.reactor, 5, "Hohlraum", model.hohlraum, state.hohlraumPresent and p.ok or p.warn)
 
+    mark("06 temperatures_panel")
     drawNativePanel(canvas, layout.temperatures, "Temperatures", p.warn)
+    mark("07 temperatures_values")
     drawNativeKV(canvas, layout.temperatures, 0, "Plasma", model.plasmaTemp, p.warn)
     drawNativeKV(canvas, layout.temperatures, 1, "Case", model.caseTemp, p.bad)
     drawNativeKV(canvas, layout.temperatures, 2, "Ignition", "300.0 C", p.info)
     drawNativeKV(canvas, layout.temperatures, 3, "Blockers", tostring(#model.blockers), (#model.blockers > 0) and p.bad or p.ok)
     drawNativeKV(canvas, layout.temperatures, 4, "Warnings", tostring(#model.warnings), (#model.warnings > 0) and p.warn or p.ok)
 
+    mark("08 laser_panel")
     drawNativePanel(canvas, layout.laser, "Laser / Power", p.ok)
+    mark("09 laser_values")
     drawNativeKV(canvas, layout.laser, 0, "Laser State", model.laserState, p.ok)
     drawNativeKV(canvas, layout.laser, 1, "Laser Pct", tostring(model.laserPct) .. "%", p.ok)
     drawNativeKV(canvas, layout.laser, 2, "Laser E", model.laserEnergy, p.info)
@@ -833,10 +989,21 @@ function M.build(api)
     drawNativeKV(canvas, layout.laser, 5, "Redraw", tostring(diag.redrawCount or 0), p.info)
     drawNativeKV(canvas, layout.laser, 6, "Sync", tostring(diag.syncCount or 0), p.info)
 
+    mark("10 footer_panel")
     drawNativePanel(canvas, layout.footer, "Controls", p.panelHeader)
+    mark("11 footer_text")
     canvas.drawText(layout.footer.x + 4, layout.footer.y + canvas.lineH + 4, "REFRESH | LASER PULSE | INJ - | INJ + | QUIT | UI DIAG", p.text, nil)
     canvas.drawText(layout.footer.x + 4, layout.footer.y + (canvas.lineH * 2) + 4, "DIRECT TOM GPU | NO WINDOWS | LAYOUT/COMPONENTS BYPASSED", p.info, nil)
 
+    -- Ultra-simple direct text probes (no component abstraction) for pipeline diagnostics.
+    mark("12 direct_text_probe")
+    canvas.drawText(layout.header.x + 8, layout.header.y + 8, "TOMS DEBUG MODE", 0xFFFFFFFF, nil)
+    canvas.drawText(layout.reactor.x + 8, layout.reactor.y + 8, "REACTOR", 0xFFFFFFFF, nil)
+    canvas.drawText(layout.temperatures.x + 8, layout.temperatures.y + 8, "TEMPERATURES", 0xFFFFFFFF, nil)
+    canvas.drawText(layout.laser.x + 8, layout.laser.y + 8, "LASER", 0xFFFFFFFF, nil)
+    canvas.drawText(layout.footer.x + 8, layout.footer.y + layout.footer.h - canvas.lineH - 4, "FOOTER TEXT CHECK (WHITE)", 0xFFFFFFFF, nil)
+
+    mark("13 sync")
     canvas.sync()
     return layout
   end
