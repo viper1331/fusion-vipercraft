@@ -147,7 +147,7 @@ function M.compute(width, height, theme, currentView)
   local w = math.max(1, asInt(width, 1))
   local h = math.max(1, asInt(height, 1))
   local nativeMetrics = type(theme.metrics) == "table" and theme.metrics.nativePixels == true
-  local minW, minH = nativeMetrics and 128 or 72, nativeMetrics and 92 or 32
+  local minW, minH = nativeMetrics and 96 or 72, nativeMetrics and 64 or 32
 
   if w < minW or h < minH then
     return {
@@ -176,7 +176,7 @@ function M.compute(width, height, theme, currentView)
   local content = rect(1, header.y2 + 1, w, math.max(1, footer.y - (header.y2 + 1)))
   local contentInner = inset(content, spacing.outerMargin, spacing.outerMargin, spacing.outerMargin, spacing.outerMargin)
   local stacked = (theme.density == "small" and (contentInner.w < 148 or contentInner.h < 92))
-    or (nativeMetrics and (contentInner.w < 260 or contentInner.h < 180))
+    or (nativeMetrics and (contentInner.w < 300 or contentInner.h < 200))
 
   local columns = {}
   local panels = {}
@@ -201,22 +201,22 @@ function M.compute(width, height, theme, currentView)
     columns.right = rows.status
   else
     local mainRows = splitVertical(contentInner, {
-      { key = "top", min = nativeMetrics and 78 or 18, weight = 38 },
-      { key = "body", min = nativeMetrics and 108 or 18, weight = 62 },
+      { key = "top", min = nativeMetrics and 72 or 18, weight = 40 },
+      { key = "body", min = nativeMetrics and 92 or 18, weight = 60 },
     }, spacing.panelGap)
 
     local topInner = inset(mainRows.top, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding)
     local bodyInner = inset(mainRows.body, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding)
 
     local topPanels = splitHorizontal(topInner, {
-      { key = "reactor", min = nativeMetrics and 74 or 20, weight = 34 },
-      { key = "temperatures", min = nativeMetrics and 74 or 20, weight = 33 },
-      { key = "laser", min = nativeMetrics and 74 or 20, weight = 33 },
+      { key = "reactor", min = nativeMetrics and 64 or 20, weight = 34 },
+      { key = "temperatures", min = nativeMetrics and 64 or 20, weight = 33 },
+      { key = "laser", min = nativeMetrics and 64 or 20, weight = 33 },
     }, spacing.sectionGap)
 
     local bodyPanels = splitHorizontal(bodyInner, {
-      { key = "core", min = nativeMetrics and 138 or 40, weight = 67 },
-      { key = "status", min = nativeMetrics and 92 or 26, weight = 33 },
+      { key = "core", min = nativeMetrics and 112 or 40, weight = 67 },
+      { key = "status", min = nativeMetrics and 72 or 26, weight = 33 },
     }, spacing.sectionGap)
 
     panels.reactor = topPanels.reactor
@@ -233,7 +233,7 @@ function M.compute(width, height, theme, currentView)
   local footerInsetY = nativeMetrics and math.max(2, math.floor((metrics.textLineGapPx or 1) * 0.8)) or 1
   local footerInner = inset(footer, spacing.outerMargin, footerInsetY, spacing.outerMargin, footerInsetY)
   local statusHeight = nativeMetrics
-    and math.max(3, math.min(footerInner.h - 2, asInt(metrics.subtitleHeightPx or sizes.lineHeight, 2)))
+    and math.max(1, math.min(math.max(1, footerInner.h - 1), asInt(metrics.subtitleHeightPx or sizes.lineHeight, 2)))
     or (theme.nativeLike and math.max(1, math.min(footerInner.h - 1, math.floor(sizes.lineHeight * 0.75))) or 1)
   local statusBounds = rect(footerInner.x, footerInner.y, footerInner.w, statusHeight)
   local controlsTop = math.min(footerInner.y2, statusBounds.y2 + 1)

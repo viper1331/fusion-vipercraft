@@ -601,6 +601,14 @@ function M.run(options)
   end
 
   local function invokeSetupMonitor(context)
+    if type(state.uiAdaptive) ~= "table" then
+      state.uiAdaptive = {}
+    end
+    state.uiAdaptive.forceReflow = true
+    state.uiAdaptive.lastReason = "setupMonitor:" .. tostring(context or "runtime")
+    state.uiAdaptive.lastEvent = "setupMonitor"
+    state.uiAdaptive.lastEventAt = (type(os) == "table" and type(os.clock) == "function") and os.clock() or 0
+
     if type(setupMonitor) ~= "function" then
       local msg = "Monitor setup unavailable"
       if context and context ~= "" then
@@ -2989,6 +2997,17 @@ function M.run(options)
     drawStats.redrawCount = tonumber(drawStats.redrawCount) or 0
     drawStats.syncCount = tonumber(drawStats.syncCount) or 0
     drawStats.frameId = tonumber(drawStats.frameId) or 0
+    if type(state.uiAdaptive) ~= "table" then
+      state.uiAdaptive = {}
+    end
+    local adaptive = state.uiAdaptive
+    if type(adaptive.bySource) ~= "table" then
+      adaptive.bySource = {}
+    end
+    adaptive.reflowCount = tonumber(adaptive.reflowCount) or 0
+    adaptive.resizeTriggerCount = tonumber(adaptive.resizeTriggerCount) or 0
+    adaptive.backendSwitchCount = tonumber(adaptive.backendSwitchCount) or 0
+    local drawForceReflow = adaptive.forceReflow == true
 
     local function drawSurface(source, surface)
       drawStats.frameId = drawStats.frameId + 1
@@ -3009,6 +3028,59 @@ function M.run(options)
       local renderW, renderH = tw, th
       local tomRenderCtx = nil
       local rendered = false
+      local sourceKey = tostring(source or "terminal")
+      local slot = type(adaptive.bySource[sourceKey]) == "table" and adaptive.bySource[sourceKey] or {}
+      local currBackend = tostring(hw.monitorBackend or "terminal")
+      local currFamily = tostring(hw.monitorBackendFamily or "terminal_fallback")
+      local currMonitor = tostring(hw.monitorName or "none")
+      local currentSignature = table.concat({
+        sourceKey,
+        tostring(variant),
+        currBackend,
+        currFamily,
+        currMonitor,
+        tostring(tw),
+        tostring(th),
+      }, "|")
+      local reflowReasons = {}
+      local reflowTriggered = false
+      if drawForceReflow then
+        reflowTriggered = true
+        reflowReasons[#reflowReasons + 1] = tostring(adaptive.lastReason or "forced")
+      end
+      if tostring(slot.signature or "") ~= currentSignature then
+        reflowTriggered = true
+        reflowReasons[#reflowReasons + 1] = "surface_metrics_changed"
+      end
+      if tostring(slot.backend or "") ~= currBackend
+        or tostring(slot.family or "") ~= currFamily
+        or tostring(slot.monitor or "") ~= currMonitor then
+        adaptive.backendSwitchCount = (tonumber(adaptive.backendSwitchCount) or 0) + 1
+        reflowReasons[#reflowReasons + 1] = "backend_surface_changed"
+      end
+      if reflowTriggered then
+        adaptive.reflowCount = (tonumber(adaptive.reflowCount) or 0) + 1
+      end
+      slot.signature = currentSignature
+      slot.backend = currBackend
+      slot.family = currFamily
+      slot.monitor = currMonitor
+      slot.w = tw
+      slot.h = th
+      slot.lastReflowFrame = drawStats.frameId
+      adaptive.bySource[sourceKey] = slot
+      adaptive.lastSource = sourceKey
+      adaptive.lastW = tw
+      adaptive.lastH = th
+      adaptive.lastBackend = currBackend
+      adaptive.lastFamily = currFamily
+      adaptive.lastMonitor = currMonitor
+      drawStats.adaptiveReflowTriggered = reflowTriggered
+      drawStats.adaptiveReflowReason = (#reflowReasons > 0) and table.concat(reflowReasons, ",") or "none"
+      drawStats.reflowCount = adaptive.reflowCount
+      drawStats.resizeTriggerCount = adaptive.resizeTriggerCount
+      drawStats.backendSwitchCount = adaptive.backendSwitchCount
+
       drawStats.lastSource = renderSource
       drawStats.lastW = tw
       drawStats.lastH = th
@@ -3075,6 +3147,11 @@ function M.run(options)
           wrappedPath = "io.monitor.setupMonitor -> io.display_backend.createSurface",
           sourceResolvedBy = "core.app.drawUI.drawSurface",
           termRedirectTarget = tostring(renderSource == "toms_gpu" and "display_surface:toms_native" or source or "terminal"),
+          adaptiveReflowTriggered = reflowTriggered,
+          adaptiveReflowReason = drawStats.adaptiveReflowReason,
+          adaptiveReflowCount = drawStats.reflowCount,
+          adaptiveResizeTriggers = drawStats.resizeTriggerCount,
+          adaptiveBackendSwitchCount = drawStats.backendSwitchCount,
         }
       end
 
@@ -3093,7 +3170,21 @@ function M.run(options)
         nativeWidth = tostring(drawStats.nativeW or 0),
         nativeHeight = tostring(drawStats.nativeH or 0),
         tomDiag = tostring(state.tomUiDiagnosticMode == true),
+        reflow = tostring(reflowTriggered == true),
+        reflowReason = tostring(drawStats.adaptiveReflowReason or "none"),
+        reflowCount = tostring(drawStats.reflowCount or 0),
       })
+      if reflowTriggered then
+        logger.info("UI adaptive reflow", {
+          source = sourceKey,
+          variant = variant,
+          reason = drawStats.adaptiveReflowReason,
+          width = tostring(tw),
+          height = tostring(th),
+          backend = currBackend,
+          family = currFamily,
+        })
+      end
 
       if variant == "tom" and tomRenderer and type(tomRenderer.render) == "function" then
         local okTom, errTom = pcall(tomRenderer.render, renderSource, renderSurface, renderW, renderH, tomRenderCtx)
@@ -3101,6 +3192,11 @@ function M.run(options)
           rendered = true
           drawStats.renderPath = state.tomUiDiagnosticMode and "tom_simple_diag" or "tom_full"
           drawStats.tomRenderSucceeded = true
+          local tomLayout = type(drawStats.lastLayout) == "table" and drawStats.lastLayout or {}
+          drawStats.adaptiveDensity = tostring(tomLayout.density or "native")
+          drawStats.adaptiveLayoutMode = tostring(tomLayout.mode or drawStats.renderPath)
+          adaptive.density = drawStats.adaptiveDensity
+          adaptive.layoutMode = drawStats.adaptiveLayoutMode
         else
           logger.error("Tom renderer failed", { err = tostring(errTom) })
           drawStats.renderPath = "tom_error"
@@ -3119,6 +3215,10 @@ function M.run(options)
           })
         end
         local layout = computeLayout(tw, th)
+        drawStats.adaptiveDensity = (layout.mode == "compact") and "small" or (layout.mode == "standard" and "medium" or "large")
+        drawStats.adaptiveLayoutMode = tostring(layout.mode or "standard")
+        adaptive.density = drawStats.adaptiveDensity
+        adaptive.layoutMode = drawStats.adaptiveLayoutMode
 
         term.setBackgroundColor(C.bg)
         term.setTextColor(C.text)
@@ -3170,6 +3270,8 @@ function M.run(options)
         variant = variant,
         path = tostring(drawStats.renderPath or "legacy"),
         fallback = tostring(drawStats.fallbackAfterTom == true),
+        density = tostring(drawStats.adaptiveDensity or adaptive.density or "unknown"),
+        layoutMode = tostring(drawStats.adaptiveLayoutMode or adaptive.layoutMode or "unknown"),
       })
     end
 
@@ -3198,6 +3300,10 @@ function M.run(options)
     term.redirect(nativeTerm)
     term.setCursorBlink(false)
     state.uiDrawn = true
+    adaptive.forceReflow = false
+    if drawForceReflow then
+      adaptive.lastReason = "none"
+    end
   end
 
   local startupOk = CoreStartup.run({

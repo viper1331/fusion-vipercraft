@@ -472,6 +472,14 @@ function M.build(api)
       addLine(lines, "Text draw clipped", tostring(diag.textDrawClippedCount or 0))
       lines[#lines + 1] = ""
 
+      lines[#lines + 1] = "[ADAPTIVE REFLOW]"
+      addLine(lines, "Triggered", tostring(surfaceCtx.adaptiveReflowTriggered == true))
+      addLine(lines, "Reason", tostring(surfaceCtx.adaptiveReflowReason or "none"))
+      addLine(lines, "Reflow count", tostring(surfaceCtx.adaptiveReflowCount or 0))
+      addLine(lines, "Resize triggers", tostring(surfaceCtx.adaptiveResizeTriggers or 0))
+      addLine(lines, "Backend switches", tostring(surfaceCtx.adaptiveBackendSwitchCount or 0))
+      lines[#lines + 1] = ""
+
       lines[#lines + 1] = "[DRAW PIPELINE]"
       local pipeline = type(diag.drawPipeline) == "table" and diag.drawPipeline or {}
       if #pipeline == 0 then
@@ -881,14 +889,7 @@ function M.build(api)
     end
     local contentY = margin + headerH + gap
     local contentH = math.max(20, h - contentY - footerH - margin - gap)
-    local usableW = math.max(20, w - (margin * 2) - (gap * 2))
-    local colW = math.max(8, math.floor(usableW / 3))
-    local leftW = colW
-    local centerW = colW
-    local rightW = math.max(8, usableW - leftW - centerW)
-    local leftX = margin
-    local midX = leftX + leftW + gap
-    local rightX = midX + centerW + gap
+    local contentW = math.max(20, w - (margin * 2))
 
     local function mkRect(x, y, rw, rh)
       return {
@@ -899,15 +900,54 @@ function M.build(api)
       }
     end
 
+    local small = (w < 420 or h < 260)
+    local reactorRect
+    local temperaturesRect
+    local laserRect
+    local statusRect
+
+    if small then
+      local usableH = math.max(12, contentH - (gap * 3))
+      local h1 = math.max(6, math.floor(usableH * 0.24))
+      local h2 = math.max(6, math.floor(usableH * 0.24))
+      local h3 = math.max(6, math.floor(usableH * 0.24))
+      local h4 = math.max(6, usableH - h1 - h2 - h3)
+      local y1 = contentY
+      local y2 = y1 + h1 + gap
+      local y3 = y2 + h2 + gap
+      local y4 = y3 + h3 + gap
+      reactorRect = mkRect(margin, y1, contentW, h1)
+      temperaturesRect = mkRect(margin, y2, contentW, h2)
+      laserRect = mkRect(margin, y3, contentW, h3)
+      statusRect = mkRect(margin, y4, contentW, h4)
+    else
+      local topH = math.max(40, math.floor((contentH - gap) * 0.58))
+      if topH > contentH - 24 then
+        topH = math.max(24, contentH - 24)
+      end
+      local bottomH = math.max(12, contentH - topH - gap)
+      local usableW = math.max(12, contentW - (gap * 2))
+      local leftW = math.max(10, math.floor(usableW * 0.33))
+      local midW = math.max(10, math.floor(usableW * 0.34))
+      local rightW = math.max(10, usableW - leftW - midW)
+      local leftX = margin
+      local midX = leftX + leftW + gap
+      local rightX = midX + midW + gap
+      reactorRect = mkRect(leftX, contentY, leftW, topH)
+      temperaturesRect = mkRect(midX, contentY, midW, topH)
+      laserRect = mkRect(rightX, contentY, rightW, topH)
+      statusRect = mkRect(margin, contentY + topH + gap, contentW, bottomH)
+    end
+
     return {
       mode = "diagnostic_native_pixels",
-      density = "native",
+      density = small and "small" or ((w >= 920 and h >= 560) and "large" or "medium"),
       root = mkRect(1, 1, w, h),
       header = mkRect(margin, margin, w - (margin * 2), headerH),
-      reactor = mkRect(leftX, contentY, leftW, contentH),
-      temperatures = mkRect(midX, contentY, centerW, contentH),
-      laser = mkRect(rightX, contentY, rightW, contentH),
-      status = nil,
+      reactor = reactorRect,
+      temperatures = temperaturesRect,
+      laser = laserRect,
+      status = statusRect,
       footer = mkRect(margin, h - footerH - margin + 1, w - (margin * 2), footerH),
     }
   end
@@ -989,21 +1029,33 @@ function M.build(api)
     drawNativeKV(canvas, layout.laser, 5, "Redraw", tostring(diag.redrawCount or 0), p.info)
     drawNativeKV(canvas, layout.laser, 6, "Sync", tostring(diag.syncCount or 0), p.info)
 
-    mark("10 footer_panel")
+    mark("10 status_panel")
+    if type(layout.status) == "table" then
+      drawNativePanel(canvas, layout.status, "Status / Runtime", p.panelHeader)
+      drawNativeKV(canvas, layout.status, 0, "Backend", tostring(hw.monitorBackendFamily or "N/A"), p.info)
+      drawNativeKV(canvas, layout.status, 1, "Source", tostring(source or "N/A"), p.info)
+      drawNativeKV(canvas, layout.status, 2, "Density", tostring(layout.density or "N/A"), p.warn)
+      drawNativeKV(canvas, layout.status, 3, "Reflow", tostring((diag.surfaceContext and diag.surfaceContext.adaptiveReflowTriggered) == true), ((diag.surfaceContext and diag.surfaceContext.adaptiveReflowTriggered) == true) and p.ok or p.muted)
+      drawNativeKV(canvas, layout.status, 4, "Reason", tostring((diag.surfaceContext and diag.surfaceContext.adaptiveReflowReason) or "none"), p.muted)
+      drawNativeKV(canvas, layout.status, 5, "Resize Ev", tostring((diag.surfaceContext and diag.surfaceContext.adaptiveResizeTriggers) or 0), p.info)
+      drawNativeKV(canvas, layout.status, 6, "Backend Sw", tostring((diag.surfaceContext and diag.surfaceContext.adaptiveBackendSwitchCount) or 0), p.info)
+    end
+
+    mark("11 footer_panel")
     drawNativePanel(canvas, layout.footer, "Controls", p.panelHeader)
-    mark("11 footer_text")
+    mark("12 footer_text")
     canvas.drawText(layout.footer.x + 4, layout.footer.y + canvas.lineH + 4, "REFRESH | LASER PULSE | INJ - | INJ + | QUIT | UI DIAG", p.text, nil)
     canvas.drawText(layout.footer.x + 4, layout.footer.y + (canvas.lineH * 2) + 4, "DIRECT TOM GPU | NO WINDOWS | LAYOUT/COMPONENTS BYPASSED", p.info, nil)
 
     -- Ultra-simple direct text probes (no component abstraction) for pipeline diagnostics.
-    mark("12 direct_text_probe")
+    mark("13 direct_text_probe")
     canvas.drawText(layout.header.x + 8, layout.header.y + 8, "TOMS DEBUG MODE", 0xFFFFFFFF, nil)
     canvas.drawText(layout.reactor.x + 8, layout.reactor.y + 8, "REACTOR", 0xFFFFFFFF, nil)
     canvas.drawText(layout.temperatures.x + 8, layout.temperatures.y + 8, "TEMPERATURES", 0xFFFFFFFF, nil)
     canvas.drawText(layout.laser.x + 8, layout.laser.y + 8, "LASER", 0xFFFFFFFF, nil)
     canvas.drawText(layout.footer.x + 8, layout.footer.y + layout.footer.h - canvas.lineH - 4, "FOOTER TEXT CHECK (WHITE)", 0xFFFFFFFF, nil)
 
-    mark("13 sync")
+    mark("14 sync")
     canvas.sync()
     return layout
   end
@@ -1334,12 +1386,12 @@ function M.build(api)
       }
       diag.lastLayout = {
         mode = "diagnostic_direct",
-        density = theme.density,
+        density = (type(layout) == "table" and layout.density) or theme.density,
         header = layout.header,
         reactor = layout.reactor,
         temperatures = layout.temperatures,
         laser = layout.laser,
-        status = nil,
+        status = layout.status,
         footer = layout.footer,
       }
       if type(layout) ~= "table" then

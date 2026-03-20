@@ -173,6 +173,14 @@ function M.route(ev, p1, p2, p3, p4, p5, api)
 
   if ev == "monitor_resize" or ev == "term_resize" or ev == "tm_monitor_resize" then
     logDebug("Display resize", { event = ev })
+    if type(state.uiAdaptive) ~= "table" then
+      state.uiAdaptive = {}
+    end
+    state.uiAdaptive.forceReflow = true
+    state.uiAdaptive.lastReason = tostring(ev)
+    state.uiAdaptive.lastEvent = tostring(ev)
+    state.uiAdaptive.lastEventAt = (type(os) == "table" and type(os.clock) == "function") and os.clock() or 0
+    state.uiAdaptive.resizeTriggerCount = (tonumber(state.uiAdaptive.resizeTriggerCount) or 0) + 1
     api.setupMonitor()
     state.uiDrawn = false
     return
@@ -180,6 +188,14 @@ function M.route(ev, p1, p2, p3, p4, p5, api)
 
   if ev == "peripheral" or ev == "peripheral_detach" then
     logDebug("Peripheral topology changed", { event = ev, side = tostring(p1) })
+    if type(state.uiAdaptive) ~= "table" then
+      state.uiAdaptive = {}
+    end
+    state.uiAdaptive.forceReflow = true
+    state.uiAdaptive.lastReason = tostring(ev)
+    state.uiAdaptive.lastEvent = tostring(ev)
+    state.uiAdaptive.lastEventAt = (type(os) == "table" and type(os.clock) == "function") and os.clock() or 0
+    state.uiAdaptive.resizeTriggerCount = (tonumber(state.uiAdaptive.resizeTriggerCount) or 0) + 1
     api.setupMonitor()
     state.uiDrawn = false
     if state.choosingMonitor then
