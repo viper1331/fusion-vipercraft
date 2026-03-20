@@ -157,6 +157,8 @@ function M.setupMonitor(nativeTerm, hw, CFG, C, chosenCandidate, getTypeOf, logg
   options = type(options) == "table" and options or {}
   local outputMode = string.lower(tostring((CFG and CFG.displayOutput) or "monitor"))
 
+  -- Reset runtime display bindings first: every setup pass rebuilds the active surface
+  -- from detected terrain capabilities (Tom native / classic monitor / terminal fallback).
   hw.displaySurface = nil
   hw.monitorBackend = "terminal"
   hw.monitorBackendFamily = "terminal_fallback"
@@ -182,6 +184,8 @@ function M.setupMonitor(nativeTerm, hw, CFG, C, chosenCandidate, getTypeOf, logg
     local surface, meta = DisplayBackend.createSurface(candidate, CFG, {
       debug = options.tomDebug == true,
     })
+    -- `displaySurface` is now the only rendering target for runtime drawing.
+    -- UI modules must consume this object, not raw peripherals.
     hw.displaySurface = surface or hw.monitor
     hw.monitorSurfaceMeta = type(meta) == "table" and meta or nil
 

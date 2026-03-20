@@ -620,13 +620,6 @@ function M.new(options)
     return palette.textMuted or colors.gray
   end
 
-  local function drawPipe(path, color)
-    for i = 1, #path do
-      local p = path[i]
-      safeFilledRect(p.x, p.y, p.w, p.h, color)
-    end
-  end
-
   local function drawThermalMarkers(bounds, reactorBounds, coreBounds, model)
     local b = copyRect(bounds)
     local reactor = copyRect(reactorBounds)

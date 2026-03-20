@@ -124,39 +124,6 @@ local function inset(bounds, left, top, right, bottom)
   return rect(x, y, w, h)
 end
 
-local function splitVertical(bounds, specs, gap)
-  local out = {}
-  local count = #specs
-  if count <= 0 then return out end
-  gap = math.max(0, math.floor(tonumber(gap) or 0))
-
-  local usable = math.max(1, bounds.h - ((count - 1) * gap))
-  local weightSum = 0
-  for i = 1, count do
-    weightSum = weightSum + math.max(0, tonumber(specs[i].weight) or 0)
-  end
-  if weightSum <= 0 then weightSum = count end
-
-  local y = bounds.y
-  local used = 0
-  for i = 1, count do
-    local h = math.floor((usable * math.max(0, tonumber(specs[i].weight) or 1)) / weightSum)
-    if h < 1 then h = 1 end
-    if i == count then
-      h = math.max(1, (bounds.y + bounds.h) - y)
-    end
-    out[specs[i].key] = rect(bounds.x, y, bounds.w, h)
-    y = y + h + gap
-    used = used + h
-  end
-  if used < usable then
-    local k = specs[count].key
-    local last = out[k]
-    out[k] = rect(last.x, last.y, last.w, last.h + (usable - used))
-  end
-  return out
-end
-
 function M.build(api)
   local state = assert(api.state, "state is required")
   local hw = assert(api.hw, "hw is required")

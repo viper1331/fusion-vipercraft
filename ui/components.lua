@@ -272,6 +272,24 @@ function M.buildButtons(ctx, layout)
   local drawBigButton = ctx.drawBigButton
   local actions = ctx.actions
 
+  -- Shared hitbox policy for every adaptive button row:
+  -- row height drives default padding, while each item can override it.
+  local function addAdaptiveRowButton(item, x, y, wBtn, rowH)
+    local hitPadX = item.hitPadX
+    local hitPadY = item.hitPadY
+    if hitPadX == nil then
+      hitPadX = (rowH <= 2) and 2 or 1
+    end
+    if hitPadY == nil then
+      hitPadY = 1
+    end
+    addButton(item.id, x, y, wBtn, rowH, item.label, item.bg, item.fg, item.action, {
+      hitPadX = hitPadX,
+      hitPadY = hitPadY,
+      disabled = item.disabled and true or false,
+    })
+  end
+
   local function buildMonitorSelectionButtons()
     local boxW = ctx.clamp(layout.width - 6, 24, 60)
     local x = math.floor((layout.width - boxW) / 2) + 1
@@ -371,19 +389,7 @@ function M.buildButtons(ctx, layout)
           if i == #rowItems then
             wBtn = math.max(minWidths[i], (bx + bw) - x)
           end
-          local hitPadX = item.hitPadX
-          local hitPadY = item.hitPadY
-          if hitPadX == nil then
-            hitPadX = (rowH <= 2) and 2 or 1
-          end
-          if hitPadY == nil then
-            hitPadY = 1
-          end
-          addButton(item.id, x, y, wBtn, rowH, item.label, item.bg, item.fg, item.action, {
-            hitPadX = hitPadX,
-            hitPadY = hitPadY,
-            disabled = item.disabled and true or false,
-          })
+          addAdaptiveRowButton(item, x, y, wBtn, rowH)
           x = x + wBtn + gapX
         end
 
@@ -519,19 +525,7 @@ function M.buildButtons(ctx, layout)
         if i == #rowItems then
           wBtn = math.max(minWidths[i], (bx + bw) - x)
         end
-        local hitPadX = item.hitPadX
-        local hitPadY = item.hitPadY
-        if hitPadX == nil then
-          hitPadX = (rowH <= 2) and 2 or 1
-        end
-        if hitPadY == nil then
-          hitPadY = 1
-        end
-        addButton(item.id, x, y, wBtn, rowH, item.label, item.bg, item.fg, item.action, {
-          hitPadX = hitPadX,
-          hitPadY = hitPadY,
-          disabled = item.disabled and true or false,
-        })
+        addAdaptiveRowButton(item, x, y, wBtn, rowH)
         x = x + wBtn + gapX
       end
 

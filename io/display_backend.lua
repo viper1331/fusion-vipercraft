@@ -1497,14 +1497,25 @@ function M.createSurface(candidate, cfg, opts)
   end
 
   if candidate.kind == "toms_gpu" then
+    local targetSize = (cfg and cfg.tomTargetSize) or 64
     local runtimeInfo = candidate.runtime
+    local alreadyPrepared = type(runtimeInfo) == "table" and runtimeInfo.setSizeTried == true
+    -- Avoid re-running setSize on every wrapper creation: detectCandidate already prepares
+    -- runtime in normal flow. We only force initialization again if metadata is missing.
     local finalProbe = probeTomRuntime(candidate.obj, {
-      prepareRuntime = true,
-      targetSize = (cfg and cfg.tomTargetSize) or 64,
+      prepareRuntime = not alreadyPrepared,
+      targetSize = targetSize,
     })
     if type(finalProbe) == "table" then
+      if alreadyPrepared then
+        finalProbe.setSizeTried = runtimeInfo.setSizeTried
+        finalProbe.setSizeApplied = runtimeInfo.setSizeApplied
+        finalProbe.setSizeMode = runtimeInfo.setSizeMode
+        finalProbe.targetSize = runtimeInfo.targetSize or targetSize
+      end
       runtimeInfo = finalProbe
     end
+    -- Keep compat wrapper behind an explicit mode only; native is the authoritative path.
     local wrapperMode = sanitizeTomWrapperMode((cfg and cfg.tomWrapperMode) or opts.tomWrapperMode)
     if wrapperMode == "compat_term" then
       local surface, meta = buildTomTermSurface(candidate.obj, cfg, runtimeInfo)
