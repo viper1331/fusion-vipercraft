@@ -1,12 +1,40 @@
+local function resolveCurrentDir()
+  if type(debug) == "table" and type(debug.getinfo) == "function" then
+    local info = debug.getinfo(1, "S")
+    local source = info and info.source or ""
+    if type(source) == "string" and source:sub(1, 1) == "@" then
+      local filePath = source:sub(2):gsub("\\", "/")
+      if type(fs) == "table" and type(fs.getDir) == "function" then
+        return fs.getDir(filePath)
+      end
+    end
+  end
+  return ""
+end
+
 local function loadAssetData()
   local okRequire, modRequire = pcall(require, "ui.toms.assets_data")
   if okRequire and type(modRequire) == "table" then
     return modRequire
   end
-  local okFile, modFile = pcall(dofile, "ui/toms/assets_data.lua")
-  if okFile and type(modFile) == "table" then
-    return modFile
+
+  local candidates = {
+    "ui/toms/assets_data.lua",
+    "/ui/toms/assets_data.lua",
+  }
+
+  local thisDir = resolveCurrentDir()
+  if thisDir ~= "" and type(fs) == "table" and type(fs.combine) == "function" then
+    candidates[#candidates + 1] = fs.combine(thisDir, "assets_data.lua")
   end
+
+  for i = 1, #candidates do
+    local okFile, modFile = pcall(dofile, candidates[i])
+    if okFile and type(modFile) == "table" then
+      return modFile
+    end
+  end
+
   return { paletteMap = {}, sprites = {} }
 end
 

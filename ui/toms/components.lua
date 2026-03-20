@@ -636,25 +636,38 @@ function M.new(options)
     local inner = inset(b, 1, 1, 1, 1)
     safeFilledRect(inner.x, inner.y, inner.w, inner.h, palette.panelBg or colors.black)
 
-    local topPad = math.max(3, math.floor(lineHeight * 1.0))
-    local bottomPad = math.max(3, math.floor(lineHeight * 0.9))
-    local sidePad = math.max(2, math.floor(lineHeight * 0.5))
+    local topPad = math.max(2, math.floor(lineHeight * 0.70))
+    local bottomPad = math.max(2, math.floor(lineHeight * 0.55))
+    local sidePad = math.max(2, math.floor(lineHeight * 0.45))
     local reactorArea = inset(inner, sidePad, topPad, sidePad, bottomPad)
-    local cx = reactorArea.x + math.floor(reactorArea.w / 2)
-    local cy = reactorArea.y + math.floor(reactorArea.h / 2)
+    local cx = reactorArea.x + math.floor((reactorArea.w - 1) / 2)
+    local cy = reactorArea.y + math.floor((reactorArea.h - 1) / 2)
 
-    local reactorW = clamp(math.floor(reactorArea.w * 0.70), math.max(16, math.floor(reactorArea.w * 0.52)), math.max(18, reactorArea.w - 2))
-    local reactorH = clamp(math.floor(reactorArea.h * 0.64), math.max(10, math.floor(reactorArea.h * 0.48)), math.max(12, reactorArea.h - 2))
+    local moduleCount = clamp(asInt((model and model.laserCount) or 1, 1), 1, 16)
+    local moduleAspect = tonumber(model and model.laserModuleAspect) or 6.75
+    if moduleAspect < 1 then
+      moduleAspect = 6.75
+    end
+    local moduleW = clamp(math.floor(reactorArea.w * 0.34), 24, math.max(24, math.floor(reactorArea.w * 0.58)))
+    local moduleH = clamp(math.floor(moduleW / moduleAspect + 0.5), 4, 14)
+    local moduleGap = math.max(1, math.floor(moduleH * 0.20))
+    local stackH = (moduleCount * moduleH) + ((moduleCount - 1) * moduleGap)
+    local topSpaceBudget = math.max(12, math.floor(reactorArea.h * 0.35))
+    while stackH > topSpaceBudget and moduleH > 3 do
+      moduleH = moduleH - 1
+      moduleGap = math.max(1, math.floor(moduleH * 0.20))
+      stackH = (moduleCount * moduleH) + ((moduleCount - 1) * moduleGap)
+    end
+
+    local reactorW = clamp(math.floor(reactorArea.w * 0.72), math.max(20, math.floor(reactorArea.w * 0.58)), math.max(22, reactorArea.w - 2))
+    local reactorH = clamp(math.floor(reactorArea.h * 0.64), math.max(14, math.floor(reactorArea.h * 0.48)), math.max(16, reactorArea.h - 2))
     local reactorX = clamp(cx - math.floor(reactorW / 2), reactorArea.x, reactorArea.x2 - reactorW + 1)
-    local reactorY = clamp(cy - math.floor(reactorH / 2), reactorArea.y, reactorArea.y2 - reactorH + 1)
+    local reactorY = clamp(cy - math.floor(reactorH / 2), reactorArea.y + stackH + 3, reactorArea.y2 - reactorH + 1)
     local reactor = rect(reactorX, reactorY, reactorW, reactorH)
 
     local reactorDrawn = drawAsset("reactor", reactor.x, reactor.y, reactor.w, reactor.h)
     if not reactorDrawn then
-      local shellColor = palette.reactorShell or colors.lightBlue
-      local shellEdge = palette.reactorShellDark or colors.blue
-      safeFrame(reactor, shellEdge, shellColor)
-      safeFrame(inset(reactor, 2, 2, 2, 2), shellEdge, palette.panelBgSoft or colors.blue)
+      safeText(reactor.x, reactor.y + math.floor(reactor.h / 2), "REACTOR ASSET MISSING", palette.critical or colors.red, nil, reactor.w, "center")
     end
 
     local anchors = type(model) == "table" and type(model.reactorAnchors) == "table" and model.reactorAnchors or {}
@@ -672,73 +685,48 @@ function M.new(options)
     end
 
     local coreCx, coreCy = point(anchors.core, cx, cy)
-    local tX, tY = point(anchors.tritium, reactor.x + math.floor(reactor.w * 0.24), reactor.y2)
+    local tX, tY = point(anchors.tritium, reactor.x + math.floor(reactor.w * 0.42), reactor.y2)
     local dtX, dtY = point(anchors.dtfuel, coreCx, reactor.y2)
-    local dX, dY = point(anchors.deuterium, reactor.x2 - math.floor(reactor.w * 0.24), reactor.y2)
-    local energyX, energyY = point(anchors.energy, reactor.x2, coreCy)
+    local dX, dY = point(anchors.deuterium, reactor.x + math.floor(reactor.w * 0.58), reactor.y2)
+    local energyX, energyY = point(anchors.energy, reactor.x2, reactor.y + math.floor(reactor.h * 0.5))
     local laserX, laserY = point(anchors.laser, coreCx, reactor.y)
 
-    local coreSize = clamp(math.floor(math.min(reactor.w, reactor.h) * 0.10), 4, 9)
-    local core = rect(coreCx - math.floor(coreSize / 2), coreCy - math.floor(coreSize / 2), coreSize, coreSize)
-    local coreColor = reactorStateTone(model)
-    safeFilledRect(core.x, core.y, core.w, core.h, coreColor)
-    safeRect(core.x, core.y, core.w, core.h, palette.borderStrong or colors.cyan)
-    if core.w >= 6 then
-      safeText(core.x + 1, core.y + math.floor((core.h - 1) / 2), "CORE", palette.textPrimary or colors.white, nil, core.w - 2, "center")
-    end
-
-    local leftInColor = flowTone((model and model.tOpen) == true, palette.reactorFlowT or colors.green)
-    local dtInColor = flowTone((model and model.dtOpen) == true, palette.reactorFlowDT or colors.purple)
-    local rightInColor = flowTone((model and model.dOpen) == true, palette.reactorFlowD or colors.red)
-    local lineRaise = math.max(1, math.floor(lineHeight * 1.0))
-    drawPipe({
-      rect(tX, tY - lineRaise, 1, math.max(2, core.y2 - (tY - lineRaise) + 1)),
-      rect(math.min(tX, coreCx), coreCy, math.max(1, math.abs(coreCx - tX) + 1), 1),
-    }, leftInColor)
-    drawPipe({
-      rect(dtX, dtY - lineRaise, 1, math.max(2, core.y2 - (dtY - lineRaise) + 1)),
-    }, dtInColor)
-    drawPipe({
-      rect(dX, dY - lineRaise, 1, math.max(2, core.y2 - (dY - lineRaise) + 1)),
-      rect(math.min(coreCx, dX), coreCy, math.max(1, math.abs(dX - coreCx) + 1), 1),
-    }, rightInColor)
-
-    safeText(tX - 2, tY + 1, "T", leftInColor, nil, 4, "left")
-    safeText(dtX - 2, dtY + 1, "DT", dtInColor, nil, 5, "center")
-    safeText(dX - 1, dY + 1, "D", rightInColor, nil, 4, "right")
-    safeText(energyX + 1, energyY - 1, "RF", palette.energy or colors.yellow, nil, 8, "left")
-
-    local moduleCount = clamp(asInt((model and model.laserCount) or 1, 1), 1, 8)
-    local moduleH = clamp(math.floor(lineHeight * 1.20), 6, 12)
-    local moduleW = clamp(math.floor(moduleH * 6.8), 28, 96)
-    local moduleGap = math.max(2, math.floor(moduleH * 0.30))
-    local totalW = (moduleCount * moduleW) + ((moduleCount - 1) * moduleGap)
-    local startX = clamp(coreCx - math.floor(totalW / 2), inner.x + 1, inner.x2 - totalW + 1)
-    local modulesY = clamp(laserY - moduleH - 4, inner.y + 1, reactor.y - moduleH - 1)
-    if modulesY < inner.y then
-      modulesY = inner.y
-    end
-
+    local moduleX = clamp(laserX - math.floor(moduleW / 2), inner.x + 1, inner.x2 - moduleW + 1)
+    local stackTop = clamp(reactor.y - stackH - 2, inner.y + 1, math.max(inner.y + 1, reactor.y - 2))
     for i = 1, moduleCount do
-      local mx = startX + ((i - 1) * (moduleW + moduleGap))
-      local drawnModule = drawAsset("laser_module", mx, modulesY, moduleW, moduleH)
-      if not drawnModule then
-        safeFilledRect(mx, modulesY, moduleW, moduleH, palette.ok or colors.lime)
-        safeRect(mx, modulesY, moduleW, moduleH, palette.panelBg or colors.black)
+      local my = stackTop + ((i - 1) * (moduleH + moduleGap))
+      if my > reactor.y - 1 then break end
+      local drawnModule = drawAsset("laser_module", moduleX, my, moduleW, moduleH)
+      if not drawnModule and i == 1 then
+        safeText(moduleX, my, "LASER ASSET MISSING", palette.critical or colors.red, nil, moduleW, "center")
       end
     end
 
-    local emitterY = modulesY + moduleH
-    safeFilledRect(coreCx, emitterY, 1, math.max(1, reactor.y - emitterY), palette.reactorLaserCharge or colors.lightBlue)
+    local emitterY = stackTop + stackH
+    safeFilledRect(laserX, emitterY, 1, math.max(1, reactor.y - emitterY), palette.reactorLaserCharge or colors.lightBlue)
     local beamVisible = (model and model.laserActive) == true or (model and model.laserCharging) == true
     if beamVisible then
       local beamColor = (model and model.laserActive) and (palette.reactorLaser or colors.yellow)
         or (palette.reactorLaserCharge or colors.lightBlue)
-      safeFilledRect(coreCx, emitterY, 1, math.max(1, core.y - emitterY), beamColor)
+      safeFilledRect(laserX, emitterY, 1, math.max(1, reactor.y + math.floor(reactor.h * 0.15) - emitterY), beamColor)
     end
-    safeText(coreCx - 10, modulesY - 1, tostring((model and model.laserLabel) or "LAS"), palette.ok or colors.lime, nil, 20, "center")
+    safeText(laserX - math.floor(moduleW / 2), stackTop - 1, tostring((model and model.laserLabel) or "LAS"), palette.ok or colors.lime, nil, moduleW, "center")
 
-    drawThermalMarkers(inner, reactor, core, model)
+    local badgeW = clamp(math.floor(math.min(reactor.w, reactor.h) * 0.22), 8, 24)
+    local badgeH = 2
+    local badgeX = clamp(coreCx - math.floor(badgeW / 2), reactor.x + 1, reactor.x2 - badgeW)
+    local badgeY = clamp(coreCy - 1, reactor.y + 1, reactor.y2 - badgeH)
+    local stateTone = reactorStateTone(model)
+    safeFilledRect(badgeX, badgeY, badgeW, badgeH, stateTone)
+    safeRect(badgeX, badgeY, badgeW, badgeH, palette.panelBg or colors.black)
+    safeText(badgeX, badgeY, tostring((model and model.reactorState) or "idle"), palette.textPrimary or colors.white, stateTone, badgeW, "center")
+
+    safeText(tX - 1, tY + 1, "T", flowTone((model and model.tOpen) == true, palette.reactorFlowT or colors.green), nil, 2, "left")
+    safeText(dtX - 1, dtY + 1, "DT", flowTone((model and model.dtOpen) == true, palette.reactorFlowDT or colors.purple), nil, 4, "center")
+    safeText(dX, dY + 1, "D", flowTone((model and model.dOpen) == true, palette.reactorFlowD or colors.red), nil, 2, "right")
+    safeText(energyX + 1, energyY - 1, "RF", palette.energy or colors.yellow, nil, 8, "left")
+
+    drawThermalMarkers(inner, reactor, rect(coreCx, coreCy, 1, 1), model)
   end
 
   local function drawLaserStack(bounds, model)
@@ -779,10 +767,14 @@ function M.new(options)
       if y > modulesBottom then break end
       local active = i <= activeCount
       local color = active and (palette.ok or colors.lime) or (palette.textDim or colors.gray)
-      safeFilledRect(moduleX, y, moduleW, moduleH, color)
-      safeRect(moduleX, y, moduleW, moduleH, palette.panelBg or colors.black)
-      if moduleW >= 3 then
-        safeText(moduleX, y, active and "[] " or ".. ", palette.panelBg or colors.black, nil, moduleW, "left")
+      local drawnModule = drawAsset("laser_module", moduleX, y, moduleW, moduleH)
+      if not drawnModule then
+        safeFilledRect(moduleX, y, moduleW, moduleH, color)
+        safeRect(moduleX, y, moduleW, moduleH, palette.panelBg or colors.black)
+      end
+      if moduleW >= 5 then
+        local stateLabel = active and "ON" or "OFF"
+        safeText(moduleX + 1, y + math.floor((moduleH - 1) / 2), stateLabel, palette.panelBg or colors.black, color, math.max(1, moduleW - 2), "left")
       end
     end
 

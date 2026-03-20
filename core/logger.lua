@@ -285,12 +285,47 @@ function M.new(options)
     ensureLogDir(cfg.file)
     rotateLogIfNeeded()
 
-    local handle = fsApi.open(cfg.file, "a")
-    if not handle then
-      return false
+    local function appendWithRewrite()
+      if type(fsApi.exists) ~= "function" then
+        return false
+      end
+
+      local previous = ""
+      if fsApi.exists(cfg.file) then
+        local reader = fsApi.open(cfg.file, "r")
+        if reader then
+          previous = tostring(reader.readAll() or "")
+          reader.close()
+        end
+      end
+
+      local writer = fsApi.open(cfg.file, "w")
+      if not writer then
+        return false
+      end
+
+      if previous ~= "" then
+        writer.write(previous)
+        if previous:sub(-1) ~= "\n" then
+          writer.write("\n")
+        end
+      end
+      writer.writeLine(line)
+      writer.close()
+      return true
     end
-    handle.writeLine(line)
-    handle.close()
+
+    local handle = fsApi.open(cfg.file, "a")
+    if handle then
+      handle.writeLine(line)
+      handle.close()
+    else
+      local okRewrite = appendWithRewrite()
+      if not okRewrite then
+        return false
+      end
+    end
+
     if trackedLineCount == nil then
       trackedLineCount = countFileLines(cfg.file)
     else

@@ -83,14 +83,22 @@ function M.run(ctx)
         fail(178, "Missing controls.buttonBounds for " .. tostring(item.w) .. "x" .. tostring(item.h))
         return
       end
-      if not inside(layout.footer, controls.buttonBounds) then
-        fail(179, "Button bounds outside footer for " .. tostring(item.w) .. "x" .. tostring(item.h))
+      if not inside(layout.content, controls.buttonBounds) and not inside(layout.footer, controls.buttonBounds) then
+        fail(179, "Button bounds outside content/footer for " .. tostring(item.w) .. "x" .. tostring(item.h))
+        return
+      end
+      if type(controls.ioBounds) ~= "table" then
+        fail(180, "Missing controls.ioBounds for " .. tostring(item.w) .. "x" .. tostring(item.h))
+        return
+      end
+      if not inside(layout.content, controls.ioBounds) then
+        fail(181, "IO bounds outside content for " .. tostring(item.w) .. "x" .. tostring(item.h))
         return
       end
     end
   end
 
-  ok("Tom layout engine v2 adaptive bounds OK")
+  ok("Tom layout engine adaptive bounds OK")
 end
 
 return M

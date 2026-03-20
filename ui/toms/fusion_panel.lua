@@ -13,6 +13,7 @@ local function loadTomAssets()
   return {
     draw = function() return false end,
     getAnchors = function() return nil end,
+    getSpriteSize = function() return 0, 0 end,
   }
 end
 local TomAssets = loadTomAssets()
@@ -1216,6 +1217,11 @@ function M.build(api)
     })
     local coreInner = inset(bounds, 1, 1, 1, 1)
     local anchors = TomAssets.getAnchors("reactor", coreInner.x, coreInner.y, coreInner.w, coreInner.h)
+    local laserSpriteW, laserSpriteH = TomAssets.getSpriteSize("laser_module")
+    local moduleAspect = 6.75
+    if tonumber(laserSpriteW) and tonumber(laserSpriteH) and tonumber(laserSpriteH) > 0 then
+      moduleAspect = tonumber(laserSpriteW) / tonumber(laserSpriteH)
+    end
     ui.drawReactorCore(coreInner, {
       tick = state.tick or 0,
       reactorState = model.reactorState,
@@ -1229,6 +1235,7 @@ function M.build(api)
       dtOpen = model.dtOpen,
       dOpen = model.dOpen,
       laserCount = model.laserCount,
+      laserModuleAspect = moduleAspect,
       reactorAnchors = anchors,
     })
   end
@@ -1774,7 +1781,8 @@ function M.build(api)
     local warning = model.warnings[1] or "NONE"
     local warningTone = warning == "NONE" and theme.palette.info or theme.palette.warning
     local headerLeft = "FUSION SUPERVISOR"
-    local headerCenter = model.phase
+    local activeView = string.upper(tostring(state.currentView or "supervision"))
+    local headerCenter = model.phase .. " | " .. activeView
     local headerRight = model.statusText .. " | " .. asText(warning, "NONE")
 
     local footerSegments = {
@@ -1832,16 +1840,32 @@ function M.build(api)
       api.drawButtons(api.getCurrentInputSource and api.getCurrentInputSource() or "monitor")
     end
 
-    if controlsInner.h >= 2 then
+    if controlsInner.h >= 3 then
       rootUi.safeText(
         controlsInner.x + 1,
         controlsInner.y,
-        "ACTIONS: REFRESH | LASER PULSE | INJECTION | QUIT",
+        "PAGES: SUP DIAG MAN IND UPD CFG SET",
+        theme.palette.info,
+        nil,
+        math.max(1, controlsInner.w - 2),
+        "left"
+      )
+      rootUi.safeText(
+        controlsInner.x + 1,
+        controlsInner.y + 1,
+        "ACTIONS: REFRESH | MONITOR | LASER PULSE | INJ-/+ | QUIT",
         theme.palette.textMuted,
         nil,
         math.max(1, controlsInner.w - 2),
         "left"
       )
+    end
+
+    if type(api.drawIoPanel) == "function" and type(layout.controls) == "table" and type(layout.controls.ioBounds) == "table" then
+      local ioBounds = layout.controls.ioBounds
+      if ioBounds.w >= 8 and ioBounds.h >= 4 then
+        pcall(api.drawIoPanel, ioBounds)
+      end
     end
 
     rootUi.drawHeader(layout.header, headerLeft, headerCenter, headerRight, model.phaseTone, warningTone)

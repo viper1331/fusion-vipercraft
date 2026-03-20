@@ -382,14 +382,31 @@ function M.buildButtons(ctx, layout)
       end
     end
 
+    local function buildTomNavigationButtons()
+      addGridRow({
+        { id = "viewSup", label = "SUP", bg = state.currentView == "supervision" and C.btnOn or C.panelMid, action = function() actions.setView("supervision") end },
+        { id = "viewDiag", label = "DIAG", bg = state.currentView == "diagnostic" and C.btnOn or C.panelMid, action = function() actions.setView("diagnostic") end },
+        { id = "viewMan", label = "MAN", bg = state.currentView == "manual" and C.btnOn or C.panelMid, action = function() actions.setView("manual") end },
+        { id = "viewInd", label = "IND", bg = state.currentView == "induction" and C.btnOn or C.panelMid, action = function() actions.setView("induction") end },
+      }, 2, 1)
+      addGridRow({
+        { id = "viewUpd", label = "UPD", bg = state.currentView == "update" and C.btnOn or C.panelMid, action = function() actions.setView("update") end },
+        { id = "viewCfg", label = "CFG", bg = state.currentView == "config" and C.btnOn or C.panelMid, action = function() actions.setView("config") end },
+        { id = "viewSetup", label = "SET", bg = state.currentView == "setup" and C.btnOn or C.panelMid, action = function() actions.setView("setup") end },
+      }, 2, 1)
+    end
+
     local injAvailable = state.injectionWritable == true
     local quitAction = type(actions.quitProgram) == "function" and actions.quitProgram or actions.stopRequested
+
+    buildTomNavigationButtons()
 
     local items = {
       { id = "refreshNow", label = "REFRESH", bg = C.btnAction, action = actions.refreshNow },
       { id = "manualPulse", label = "LASER PULSE", bg = C.warn, action = actions.fireLaser },
       { id = "manualInjDown", label = "INJ -", bg = injAvailable and C.panelMid or C.inactive, action = function() actions.adjustInjectionRate(-1) end, disabled = not injAvailable },
       { id = "manualInjUp", label = "INJ +", bg = injAvailable and C.btnAction or C.inactive, action = function() actions.adjustInjectionRate(1) end, disabled = not injAvailable },
+      { id = "monitor", label = "MONITOR", bg = C.btnWarn, action = actions.startMonitorSelection },
       { id = "quit", label = "QUIT", bg = C.bad, action = quitAction },
     }
     if type(actions.toggleTomDiagnostic) == "function" then

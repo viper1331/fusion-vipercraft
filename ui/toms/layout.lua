@@ -180,14 +180,17 @@ function M.compute(width, height, theme, currentView)
 
   local columns = {}
   local panels = {}
+  local controlsButtonBounds = nil
+  local controlsIoBounds = nil
+  local controlsNavBounds = nil
 
   if stacked then
     local rows = splitVertical(contentInner, {
-      { key = "reactor", min = 6, weight = 4 },
-      { key = "temperatures", min = 4, weight = 3 },
-      { key = "laser", min = 6, weight = 4 },
-      { key = "core", min = 8, weight = 8 },
-      { key = "status", min = 4, weight = 4 },
+      { key = "reactor", min = nativeMetrics and 30 or 6, weight = 18 },
+      { key = "temperatures", min = nativeMetrics and 24 or 5, weight = 16 },
+      { key = "laser", min = nativeMetrics and 26 or 6, weight = 17 },
+      { key = "core", min = nativeMetrics and 44 or 10, weight = 28 },
+      { key = "status", min = nativeMetrics and 28 or 6, weight = 21 },
     }, spacing.panelGap)
 
     panels.reactor = rows.reactor
@@ -199,35 +202,41 @@ function M.compute(width, height, theme, currentView)
     columns.left = rows.reactor
     columns.center = rows.core
     columns.right = rows.status
+    controlsButtonBounds = inset(rows.status, 1, 1, 1, 1)
+    controlsIoBounds = inset(rows.laser, 1, 1, 1, 1)
+    controlsNavBounds = inset(rows.status, 1, 1, 1, 1)
   else
-    local mainRows = splitVertical(contentInner, {
-      { key = "top", min = nativeMetrics and 72 or 18, weight = 40 },
-      { key = "body", min = nativeMetrics and 92 or 18, weight = 60 },
+    local mainCols = splitHorizontal(contentInner, {
+      { key = "left", min = nativeMetrics and 88 or 24, weight = 26 },
+      { key = "center", min = nativeMetrics and 150 or 42, weight = 48 },
+      { key = "right", min = nativeMetrics and 88 or 24, weight = 26 },
     }, spacing.panelGap)
 
-    local topInner = inset(mainRows.top, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding)
-    local bodyInner = inset(mainRows.body, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding, spacing.panelPadding)
+    columns.left = mainCols.left
+    columns.center = mainCols.center
+    columns.right = mainCols.right
 
-    local topPanels = splitHorizontal(topInner, {
-      { key = "reactor", min = nativeMetrics and 64 or 20, weight = 34 },
-      { key = "temperatures", min = nativeMetrics and 64 or 20, weight = 33 },
-      { key = "laser", min = nativeMetrics and 64 or 20, weight = 33 },
+    local leftPanels = splitVertical(inset(mainCols.left, 1, 1, 1, 1), {
+      { key = "reactor", min = nativeMetrics and 30 or 6, weight = 24 },
+      { key = "temperatures", min = nativeMetrics and 26 or 6, weight = 24 },
+      { key = "status", min = nativeMetrics and 38 or 10, weight = 52 },
     }, spacing.sectionGap)
 
-    local bodyPanels = splitHorizontal(bodyInner, {
-      { key = "core", min = nativeMetrics and 112 or 40, weight = 67 },
-      { key = "status", min = nativeMetrics and 72 or 26, weight = 33 },
+    local rightPanels = splitVertical(inset(mainCols.right, 1, 1, 1, 1), {
+      { key = "laser", min = nativeMetrics and 28 or 7, weight = 24 },
+      { key = "controls", min = nativeMetrics and 40 or 10, weight = 46 },
+      { key = "io", min = nativeMetrics and 30 or 8, weight = 30 },
     }, spacing.sectionGap)
 
-    panels.reactor = topPanels.reactor
-    panels.temperatures = topPanels.temperatures
-    panels.laser = topPanels.laser
-    panels.status = bodyPanels.status
-    panels.core = bodyPanels.core
+    panels.reactor = leftPanels.reactor
+    panels.temperatures = leftPanels.temperatures
+    panels.status = leftPanels.status
+    panels.core = inset(mainCols.center, 1, 1, 1, 1)
+    panels.laser = rightPanels.laser
 
-    columns.left = topPanels.reactor
-    columns.center = bodyPanels.core
-    columns.right = bodyPanels.status
+    controlsButtonBounds = inset(rightPanels.controls, 1, 1, 1, 1)
+    controlsIoBounds = rightPanels.io
+    controlsNavBounds = rightPanels.controls
   end
 
   local footerInsetY = nativeMetrics and math.max(2, math.floor((metrics.textLineGapPx or 1) * 0.8)) or 1
@@ -238,7 +247,8 @@ function M.compute(width, height, theme, currentView)
   local statusBounds = rect(footerInner.x, footerInner.y, footerInner.w, statusHeight)
   local controlsTop = math.min(footerInner.y2, statusBounds.y2 + 1)
   local controlsHeight = math.max(1, footerInner.y2 - controlsTop + 1)
-  local buttonBounds = rect(footerInner.x, controlsTop, footerInner.w, controlsHeight)
+  local footerControlsBounds = rect(footerInner.x, controlsTop, footerInner.w, controlsHeight)
+  local buttonBounds = controlsButtonBounds or footerControlsBounds
   local legacyMode = stacked and "compact" or ((theme.density == "large") and "large" or "standard")
 
   return {
@@ -272,7 +282,8 @@ function M.compute(width, height, theme, currentView)
     controls = {
       statusBounds = statusBounds,
       buttonBounds = buttonBounds,
-      ioBounds = panels.status,
+      ioBounds = controlsIoBounds or panels.status,
+      navBounds = controlsNavBounds or buttonBounds,
       footerBounds = footerInner,
     },
     legacy = {

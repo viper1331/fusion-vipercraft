@@ -40,17 +40,19 @@ function M.run(ctx)
     choosingMonitor = false,
     injectionWritable = true,
     currentView = "supervision",
-    controlBounds = { x = 2, y = 2, w = 90, h = 3 },
+    controlBounds = { x = 2, y = 2, w = 90, h = 30 },
   }
 
   UIComponents.buildButtons({
     state = state,
     C = {
       btnAction = colors.cyan,
+      btnOn = colors.lime,
       warn = colors.orange,
       panelMid = colors.gray,
       inactive = colors.lightGray,
       bad = colors.red,
+      btnWarn = colors.orange,
     },
     clamp = function(v, lo, hi)
       if v < lo then return lo end
@@ -64,11 +66,14 @@ function M.run(ctx)
     addRowButton = addRowButton,
     drawBigButton = function() end,
     actions = {
+      setView = function() end,
       refreshNow = function() end,
       fireLaser = function() end,
+      canIgnite = function() return false end,
       adjustInjectionRate = function() end,
       quitProgram = function() end,
       stopRequested = function() end,
+      startMonitorSelection = function() end,
     },
   }, {
     tomFooterControls = true,
@@ -78,10 +83,18 @@ function M.run(ctx)
   })
 
   local required = {
+    "viewSup",
+    "viewDiag",
+    "viewMan",
+    "viewInd",
+    "viewUpd",
+    "viewCfg",
+    "viewSetup",
     "refreshNow",
     "manualPulse",
     "manualInjDown",
     "manualInjUp",
+    "monitor",
     "quit",
   }
   for _, id in ipairs(required) do
