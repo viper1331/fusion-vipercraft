@@ -36,7 +36,17 @@ function M.render(ctx)
   ctx.ui.drawLabelValue(panels.laser, 1, "Message", asText(setup.lastMessage, "Ready"), ctx.theme.palette.textPrimary, ctx.theme.palette.textMuted)
   ctx.ui.drawLabelValue(panels.laser, 2, "View", asText(uiCfg.preferredView or state.currentView, "supervision"), ctx.theme.palette.info, ctx.theme.palette.textMuted)
 
-  common.drawCorePanel(ctx.ui, panels.core, ctx.theme, ctx.model, "CONFIG REACTOR PREVIEW")
+  common.drawInfoPanel(ctx.ui, panels.core, ctx.theme, "CONFIG OVERVIEW", {
+    { kind = "section", text = "UI settings" },
+    { label = "Output", value = asText(uiCfg.output or cfg.displayOutput, "monitor"), valueTone = ctx.theme.palette.info },
+    { label = "View", value = asText(uiCfg.preferredView or state.currentView, "supervision"), valueTone = ctx.theme.palette.info },
+    { label = "Energy", value = asText(uiCfg.energyUnit or cfg.energyUnit, "j"), valueTone = ctx.theme.palette.info },
+    { label = "Laser count", value = tostring(cfg.laserCount or uiCfg.laserCount or 1), valueTone = ctx.theme.palette.ok },
+    { kind = "section", text = "Config state" },
+    { label = "Dirty", value = setup.dirty and "YES" or "NO", valueTone = setup.dirty and ctx.theme.palette.warning or ctx.theme.palette.ok },
+    { label = "Save status", value = asText(setup.saveStatus, "N/A"), valueTone = ctx.theme.palette.info },
+    { label = "Message", value = asText(setup.lastMessage, "Ready"), valueTone = ctx.theme.palette.textPrimary },
+  })
   common.drawStatusPanel(ctx.ui, panels.status, ctx.theme, ctx.model)
   return true
 end

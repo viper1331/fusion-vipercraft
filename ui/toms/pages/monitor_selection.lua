@@ -41,7 +41,17 @@ function M.render(ctx)
   ctx.ui.drawLabelValue(panels.laser, 1, "Family", asText(hw.monitorBackendFamily, "fallback"), ctx.theme.palette.info, ctx.theme.palette.textMuted)
   ctx.ui.drawLabelValue(panels.laser, 2, "Wrapper", asText(hw.monitorWrapperType, "terminal"), ctx.theme.palette.info, ctx.theme.palette.textMuted)
 
-  common.drawCorePanel(ctx.ui, panels.core, ctx.theme, ctx.model, "DISPLAY PREVIEW")
+  common.drawInfoPanel(ctx.ui, panels.core, ctx.theme, "DISPLAY SELECTION", {
+    { kind = "section", text = "Selection hints" },
+    { label = "Touch", value = "Tap candidate row", valueTone = ctx.theme.palette.info },
+    { label = "Keyboard", value = "Keys 1..9", valueTone = ctx.theme.palette.info },
+    { label = "Backend", value = asText(hw.monitorBackend, "terminal"), valueTone = ctx.theme.palette.info },
+    { label = "Family", value = asText(hw.monitorBackendFamily, "fallback"), valueTone = ctx.theme.palette.info },
+    { kind = "section", text = "Current target" },
+    { label = "Monitor", value = asText(hw.monitorName, "term"), valueTone = ctx.theme.palette.ok },
+    { label = "Wrapper", value = asText(hw.monitorWrapperType, "terminal"), valueTone = ctx.theme.palette.info },
+    { label = "Detected", value = tostring(#list), valueTone = ctx.theme.palette.ok },
+  })
   common.drawStatusPanel(ctx.ui, panels.status, ctx.theme, ctx.model)
   return true
 end

@@ -20,7 +20,17 @@ function M.render(ctx)
 
   common.drawTemperaturePanel(ctx.ui, panels.temperatures, ctx.theme, ctx.model)
   common.drawLaserPanel(ctx.ui, panels.laser, ctx.theme, ctx.model)
-  common.drawCorePanel(ctx.ui, panels.core, ctx.theme, ctx.model, "INDUCTION / FUSION LINK")
+  common.drawInfoPanel(ctx.ui, panels.core, ctx.theme, "INDUCTION / FUSION LINK", {
+    { kind = "section", text = "Power routing" },
+    { label = "Grid", value = ctx.model.energyKnown and string.format("%.0f%%", ctx.model.energyPct) or "N/A", valueTone = ctx.theme.palette.energy },
+    { label = "Laser", value = ctx.model.laserState, valueTone = ctx.model.laserTone },
+    { label = "Stored", value = asText(type(ctx.api.formatEnergy) == "function" and ctx.api.formatEnergy(state.inductionEnergy) or state.inductionEnergy, "N/A"), valueTone = ctx.theme.palette.energy },
+    { label = "Capacity", value = asText(type(ctx.api.formatEnergy) == "function" and ctx.api.formatEnergy(state.inductionMax) or state.inductionMax, "N/A"), valueTone = ctx.theme.palette.energy },
+    { kind = "section", text = "Coupling checks" },
+    { label = "Reactor", value = state.reactorPresent and "ONLINE" or "OFFLINE", valueTone = state.reactorPresent and ctx.theme.palette.ok or ctx.theme.palette.critical },
+    { label = "Induction", value = state.inductionPresent and "ONLINE" or "OFFLINE", valueTone = state.inductionPresent and ctx.theme.palette.ok or ctx.theme.palette.critical },
+    { label = "Control", value = ctx.model.allowControl and "UNLOCKED" or "LOCKED", valueTone = ctx.model.allowControl and ctx.theme.palette.warning or ctx.theme.palette.ok },
+  })
   common.drawStatusPanel(ctx.ui, panels.status, ctx.theme, ctx.model)
   return true
 end

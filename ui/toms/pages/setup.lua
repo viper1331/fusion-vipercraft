@@ -48,7 +48,17 @@ function M.render(ctx)
     ctx.ui.drawLabelValue(panels.laser, i - 1, tostring(row.role or "?"), tostring(row.name or "?") .. " " .. tostring(row.status or "?"), tone, ctx.theme.palette.textMuted)
   end
 
-  common.drawCorePanel(ctx.ui, panels.core, ctx.theme, ctx.model, "SETUP REACTOR PREVIEW")
+  common.drawInfoPanel(ctx.ui, panels.core, ctx.theme, "SETUP OVERVIEW", {
+    { kind = "section", text = "Install target" },
+    { label = "Display", value = asText(working.monitor and working.monitor.name, ctx.model.monitorName), valueTone = ctx.theme.palette.info },
+    { label = "Output", value = asText(working.ui and working.ui.output, cfg.displayOutput), valueTone = ctx.theme.palette.info },
+    { label = "View", value = asText(working.ui and working.ui.preferredView, state.currentView), valueTone = ctx.theme.palette.info },
+    { kind = "section", text = "Runtime readiness" },
+    { label = "Save", value = asText(setup.saveStatus, "N/A"), valueTone = ctx.theme.palette.info },
+    { label = "Test", value = asText(setup.lastTestResult, "N/A"), valueTone = ctx.theme.palette.info },
+    { label = "Message", value = asText(setup.lastMessage, "Ready"), valueTone = ctx.theme.palette.textPrimary },
+    { label = "Controls", value = ctx.model.allowControl and "UNLOCKED" or "LOCKED", valueTone = ctx.model.allowControl and ctx.theme.palette.warning or ctx.theme.palette.ok },
+  })
   common.drawStatusPanel(ctx.ui, panels.status, ctx.theme, ctx.model)
   return true
 end

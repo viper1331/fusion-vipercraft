@@ -32,7 +32,18 @@ function M.render(ctx)
   ctx.ui.drawLabelValue(panels.laser, 2, "Auto Check", asText(updateState.autoCheck, "N/A"), ctx.theme.palette.info, ctx.theme.palette.textMuted)
   ctx.ui.drawLabelValue(panels.laser, 3, "Manifest", asText(updateState.manifestVersion, "N/A"), ctx.theme.palette.info, ctx.theme.palette.textMuted)
 
-  common.drawCorePanel(ctx.ui, panels.core, ctx.theme, ctx.model, "UPDATE OVERVIEW")
+  common.drawInfoPanel(ctx.ui, panels.core, ctx.theme, "UPDATE OVERVIEW", {
+    { kind = "section", text = "Channel status" },
+    { label = "Local version", value = asText(updateState.localVersion, "N/A"), valueTone = ctx.theme.palette.info },
+    { label = "Remote version", value = asText(updateState.remoteVersion, "N/A"), valueTone = ctx.theme.palette.info },
+    { label = "Manifest", value = asText(updateState.manifestVersion, "N/A"), valueTone = ctx.theme.palette.info },
+    { label = "Auto check", value = asText(updateState.autoCheck, "N/A"), valueTone = ctx.theme.palette.info },
+    { kind = "section", text = "Execution" },
+    { label = "Busy", value = updateState.inProgress and "YES" or "NO", valueTone = updateState.inProgress and ctx.theme.palette.warning or ctx.theme.palette.ok },
+    { label = "Check status", value = asText(updateState.checkStatus, "N/A"), valueTone = ctx.theme.palette.warning },
+    { label = "Last action", value = asText(ctx.model.lastAction, "NONE"), valueTone = ctx.theme.palette.textPrimary },
+    { label = "Message", value = asText(updateState.lastMessage, "Ready"), valueTone = ctx.theme.palette.textPrimary },
+  })
   common.drawStatusPanel(ctx.ui, panels.status, ctx.theme, ctx.model)
   return true
 end

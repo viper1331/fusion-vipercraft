@@ -53,7 +53,17 @@ function M.render(ctx)
   ctx.ui.drawLabelValue(panels.laser, 6, "fuel", asText(methods.fuel, "N/A"), ctx.theme.palette.textPrimary, ctx.theme.palette.textMuted)
   ctx.ui.drawLabelValue(panels.laser, 7, "laserE", asText(methods.laserEnergy, "N/A"), ctx.theme.palette.textPrimary, ctx.theme.palette.textMuted)
 
-  common.drawCorePanel(ctx.ui, panels.core, ctx.theme, ctx.model, "REACTOR TOPOLOGY")
+  common.drawInfoPanel(ctx.ui, panels.core, ctx.theme, "RUNTIME DIAGNOSTICS", {
+    { kind = "section", text = "System overview" },
+    { label = "Global", value = ctx.model.statusText, valueTone = ctx.model.statusTone },
+    { label = "Phase", value = ctx.model.phase, valueTone = ctx.model.phaseTone },
+    { label = "Backend", value = ctx.model.backendName, valueTone = ctx.theme.palette.info },
+    { label = "Display", value = ctx.model.monitorName, valueTone = ctx.theme.palette.info },
+    { kind = "section", text = "Ignition safety" },
+    { label = "Blockers", value = tostring(#(ctx.model.blockers or {})), valueTone = (#(ctx.model.blockers or {}) > 0) and ctx.theme.palette.critical or ctx.theme.palette.ok },
+    { label = "Warnings", value = tostring(#(ctx.model.warnings or {})), valueTone = (#(ctx.model.warnings or {}) > 0) and ctx.theme.palette.warning or ctx.theme.palette.ok },
+    { label = "Control", value = ctx.model.allowControl and "UNLOCKED" or "LOCKED", valueTone = ctx.model.allowControl and ctx.theme.palette.warning or ctx.theme.palette.ok },
+  })
   common.drawStatusPanel(ctx.ui, panels.status, ctx.theme, ctx.model)
   return true
 end

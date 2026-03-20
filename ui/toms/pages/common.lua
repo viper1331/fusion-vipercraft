@@ -168,6 +168,37 @@ function M.build(deps)
     })
   end
 
+  local function drawInfoPanel(ui, bounds, theme, title, rows, panelOpts)
+    local opts = type(panelOpts) == "table" and panelOpts or {}
+    ui.drawPanel(bounds, title or "PAGE OVERVIEW", {
+      bg = opts.bg or theme.palette.panelBg,
+      border = opts.border or theme.palette.borderStrong,
+      headerBg = opts.headerBg or theme.palette.panelHeaderAlt,
+      headerText = opts.headerText or theme.palette.textOnDark or theme.palette.textPrimary,
+      shadow = opts.shadow,
+    })
+
+    local maxRows = math.max(0, (tonumber(bounds.h) or 0) - 4)
+    local rowIndex = 0
+    local entries = type(rows) == "table" and rows or {}
+    for i = 1, #entries do
+      if rowIndex >= maxRows then
+        break
+      end
+      local entry = entries[i]
+      if type(entry) == "table" and entry.kind == "section" then
+        ui.drawSectionTitle(bounds, rowIndex, tostring(entry.text or ""), entry.tone or theme.palette.info)
+      else
+        local label = type(entry) == "table" and entry.label or ""
+        local value = type(entry) == "table" and entry.value or ""
+        local valueTone = type(entry) == "table" and entry.valueTone or theme.palette.textPrimary
+        local labelTone = type(entry) == "table" and entry.labelTone or theme.palette.textMuted
+        ui.drawLabelValue(bounds, rowIndex, tostring(label), tostring(value), valueTone, labelTone)
+      end
+      rowIndex = rowIndex + 1
+    end
+  end
+
   return {
     asText = asText,
     drawReactorPanel = drawReactorPanel,
@@ -176,6 +207,7 @@ function M.build(deps)
     drawStatusPanel = drawStatusPanel,
     drawIoSummaryPanel = drawIoSummaryPanel,
     drawCorePanel = drawCorePanel,
+    drawInfoPanel = drawInfoPanel,
     state = state,
     hw = hw,
     CFG = CFG,
