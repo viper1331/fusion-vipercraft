@@ -1,5 +1,5 @@
 {
-    "version":  "2.4.69",
+    "version":  "2.4.71",
     "files":  [
                   "fusion.lua",
                   "fusion.version",
@@ -37,6 +37,8 @@
                   "ui/toms/assets_data.lua",
                   "ui/toms/fusion_panel.lua",
                   "ui/toms/layout.lua",
+                  "ui/toms/nav.lua",
+                  "ui/toms/runtime_model.lua",
                   "ui/toms/pages/common.lua",
                   "ui/toms/pages/config.lua",
                   "ui/toms/pages/diagnostic.lua",

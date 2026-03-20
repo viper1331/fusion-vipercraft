@@ -71,6 +71,12 @@ function M.run(ctx)
     if name == "ui.toms.components" then
       return assert(dofile(toPath("ui/toms/components.lua")))
     end
+    if name == "ui.toms.nav" then
+      return assert(dofile(toPath("ui/toms/nav.lua")))
+    end
+    if name == "ui.toms.runtime_model" then
+      return assert(dofile(toPath("ui/toms/runtime_model.lua")))
+    end
     if name == "ui.toms.pages.common" then
       return assert(dofile(toPath("ui/toms/pages/common.lua")))
     end

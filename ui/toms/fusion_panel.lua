@@ -1,6 +1,8 @@
 local TomTheme = require("ui.toms.theme")
 local TomLayout = require("ui.toms.layout")
 local TomComponents = require("ui.toms.components")
+local TomNav = require("ui.toms.nav")
+local TomRuntimeModel = require("ui.toms.runtime_model")
 local TomPageCommon = require("ui.toms.pages.common")
 local TomPageRegistry = require("ui.toms.pages.registry")
 local function loadTomAssets()
@@ -26,6 +28,9 @@ local TOMS_DEBUG_DEFAULT = false
 local TOMS_DEBUG_FILE = "logs/toms_debug.txt"
 local TOMS_DEBUG_DIR = "logs"
 local debugFileTargetCache = nil
+local asNumber = TomRuntimeModel.asNumber
+local asText = TomRuntimeModel.asText
+local clamp = TomRuntimeModel.clamp
 
 local function resolveProgramRootDir()
   if type(fs) ~= "table" or type(fs.getDir) ~= "function" then
@@ -84,26 +89,6 @@ local function getDebugFileTarget()
   return target
 end
 
-local function asNumber(value, fallback)
-  local n = tonumber(value)
-  if n == nil then return fallback or 0 end
-  return n
-end
-
-local function asText(value, fallback)
-  local out = tostring(value or "")
-  if out == "" then
-    return tostring(fallback or "N/A")
-  end
-  return out
-end
-
-local function clamp(value, lo, hi)
-  if value < lo then return lo end
-  if value > hi then return hi end
-  return value
-end
-
 local function rect(x, y, w, h)
   x = math.floor(tonumber(x) or 1)
   y = math.floor(tonumber(y) or 1)
@@ -149,138 +134,18 @@ function M.build(api)
     end
   end
 
-  local function phaseText()
-    if type(api.reactorPhase) == "function" then
-      return tostring(api.reactorPhase())
-    end
-    return asText(state.status, "INIT")
-  end
-
-  local function phaseTone()
-    if type(api.phaseColor) == "function" then
-      return api.phaseColor(phaseText())
-    end
-    return C.info
-  end
-
-  local function laserTone(theme)
-    local st = tostring(state.laserState or "ABSENT")
-    if st == "READY" then return theme.palette.ok end
-    if st == "CHARGING" then return theme.palette.warning end
-    if st == "INSUFFICIENT" then return theme.palette.warning end
-    if st == "ABSENT" then return theme.palette.critical end
-    return theme.palette.textMuted
-  end
-
-  local function reactorVisualState()
-    if not state.reactorPresent then return "warning" end
-    if not state.reactorFormed then return "warning" end
-    if state.ignition then return "active" end
-    if state.laserReady and (#(state.ignitionBlockers or {}) == 0) then
-      return "ready"
-    end
-    return "idle"
-  end
-
-  local function globalStatus()
-    local blockers = type(state.ignitionBlockers) == "table" and state.ignitionBlockers or {}
-    local warnings = type(state.safetyWarnings) == "table" and state.safetyWarnings or {}
-    if #blockers > 0 then
-      return "BLOCKED", C.bad
-    end
-    if state.ignition then
-      return "RUNNING", C.ok
-    end
-    if #warnings > 0 then
-      return "WARNING", C.warn
-    end
-    return "READY", C.info
-  end
-
-  local function formatTemperature(value, decimals)
-    if type(api.formatTemperature) == "function" then
-      return tostring(api.formatTemperature(value, { compact = true, decimals = decimals or 1 }))
-    end
-    return string.format("%.1f C", asNumber(value, 0))
-  end
-
-  local function formatEnergy(value)
-    if type(api.formatEnergy) == "function" then
-      return tostring(api.formatEnergy(value))
-    end
-    return asText(value, "N/A")
-  end
-
-  local function formatEnergyTick(value)
-    if type(api.formatEnergyPerTick) == "function" then
-      return tostring(api.formatEnergyPerTick(value))
-    end
-    return asText(value, "N/A")
-  end
-
-  local function runtimeModel(theme)
-    local warnings = type(state.safetyWarnings) == "table" and state.safetyWarnings or {}
-    local events = type(state.eventLog) == "table" and state.eventLog or {}
-    local blockers = type(state.ignitionBlockers) == "table" and state.ignitionBlockers or {}
-    local configuredLaserCount = math.max(1, math.floor(tonumber(CFG.laserCount or state.laserCount or 1) or 1))
-    local laserCount = configuredLaserCount
-    local activeLasers = 0
-    if state.laserState == "READY" then
-      activeLasers = laserCount
-    elseif state.laserState == "CHARGING" then
-      activeLasers = math.max(1, math.floor(laserCount / 2))
-    end
-    if not state.laserPresent then
-      activeLasers = 0
-    end
-
-    local statusText, statusTone = globalStatus()
-    local laserRatio = clamp(asNumber(state.laserPct, 0) / 100, 0, 1)
-    local gridRatio = clamp(asNumber(state.energyPct, 0) / 100, 0, 1)
-    return {
-      phase = phaseText(),
-      phaseTone = phaseTone(),
-      laserTone = laserTone(theme),
-      warnings = warnings,
-      events = events,
-      blockers = blockers,
-      reactorState = reactorVisualState(),
-      statusText = statusText,
-      statusTone = statusTone,
-      active = state.ignition == true,
-      ignition = state.ignition == true,
-      injectionRate = math.floor(asNumber(state.injectionRate, 0)),
-      plasmaTemp = formatTemperature(state.plasmaTemp, 1),
-      caseTemp = formatTemperature(state.caseTemp, 1),
-      passiveGeneration = formatEnergyTick(state.passiveGeneration),
-      steamProduction = string.format("%.1f mB/t", asNumber(state.steamProduction, 0)),
-      fuelFlow = string.format("%.1f mB/t", asNumber(state.fuelFlowMbT, 0)),
-      fuelMode = asText(type(api.getRuntimeFuelMode) == "function" and api.getRuntimeFuelMode() or "N/A", "N/A"),
-      laserState = asText(state.laserStatusText or state.laserState, "ABS"),
-      laserPct = clamp(math.floor(asNumber(state.laserPct, 0) + 0.5), 0, 999),
-      laserRatio = laserRatio,
-      laserEnergy = formatEnergy(state.laserEnergy),
-      laserMax = formatEnergy(state.laserMax),
-      laserNeed = formatEnergy(state.laserThresholdRaw),
-      laserCount = laserCount,
-      laserActiveCount = activeLasers,
-      laserCharging = state.laserChargeOn == true,
-      laserActive = state.laserLineOn == true,
-      energyPct = clamp(asNumber(state.energyPct, 0), 0, 100),
-      energyRatio = gridRatio,
-      energyKnown = state.energyKnown == true,
-      energyStored = formatEnergy(state.energyStored),
-      energyMax = formatEnergy(state.energyMax),
-      lastAction = asText(state.lastAction, "NONE"),
-      monitorName = asText(hw.monitorName, "terminal"),
-      backendName = asText(hw.monitorBackend, "cc_monitor"),
-      tOpen = state.tOpen == true,
-      dtOpen = state.dtOpen == true,
-      dOpen = state.dOpen == true,
-      hohlraum = state.hohlraumPresent and "PRESENT" or "MISSING",
-      allowControl = CFG.allowControl == true,
-    }
-  end
+  local runtimeModel = TomRuntimeModel.build({
+    state = state,
+    hw = hw,
+    CFG = CFG,
+    C = C,
+    reactorPhase = api.reactorPhase,
+    phaseColor = api.phaseColor,
+    formatTemperature = api.formatTemperature,
+    formatEnergy = api.formatEnergy,
+    formatEnergyPerTick = api.formatEnergyPerTick,
+    getRuntimeFuelMode = api.getRuntimeFuelMode,
+  })
 
   local function ensureTomRenderDiag()
     if type(state.tomRenderDiag) ~= "table" then
@@ -1076,33 +941,6 @@ function M.build(api)
     assets = TomAssets,
   })
 
-  local function drawNavigationBar(ui, bounds, titleBounds, theme, activeView)
-    local nav = type(bounds) == "table" and bounds or nil
-    if not nav then
-      return
-    end
-    local bg = theme.palette.panelBgSoft or theme.palette.panelBg or colors.gray
-    ui.safeFilledRect(nav.x, nav.y, nav.w, nav.h, bg)
-    ui.safeFilledRect(nav.x, nav.y, nav.w, 1, theme.palette.borderStrong or colors.cyan)
-    ui.safeFilledRect(nav.x, nav.y2, nav.w, 1, theme.palette.border or colors.lightBlue)
-    local title = type(titleBounds) == "table" and titleBounds or nil
-    if title and title.h >= 1 then
-      local titleBg = theme.palette.panelHeader or colors.blue
-      ui.safeFilledRect(title.x, title.y, title.w, title.h, titleBg)
-      local textY = title.y + math.floor((title.h - 1) / 2)
-      ui.safeText(title.x + 2, textY, "NAVIGATION", theme.palette.info, titleBg, math.max(1, math.floor(title.w * 0.38)), "left")
-      ui.safeText(
-        title.x + 2,
-        textY,
-        "ACTIVE " .. string.upper(tostring(activeView or "supervision")),
-        theme.palette.textOnDark or theme.palette.textPrimary,
-        titleBg,
-        math.max(1, title.w - 4),
-        "right"
-      )
-    end
-  end
-
   local function createUiForTarget(target, width, height, theme)
     local renderTarget = target or term.current()
     return TomComponents.new({
@@ -1400,7 +1238,7 @@ function M.build(api)
     local warning = model.warnings[1] or "NONE"
     local warningTone = warning == "NONE" and theme.palette.info or theme.palette.warning
     local headerLeft = "FUSION SUPERVISOR"
-    local navView = state.choosingMonitor and "monitor_selection" or tostring(state.currentView or "supervision")
+    local navView = TomNav.resolveActiveView(state, state.currentView)
     local activeView = string.upper(navView)
     local warningText = asText(warning, "NONE")
     if #warningText > 24 then
@@ -1428,7 +1266,7 @@ function M.build(api)
     local navTitleBounds = layout.controls and layout.controls.navTitleBounds or nil
 
     rootUi.drawHeader(layout.header, headerLeft, headerCenter, headerRight, model.phaseTone, warningTone)
-    drawNavigationBar(rootUi, navBounds, navTitleBounds, theme, navView)
+    TomNav.drawBar(rootUi, navBounds, navTitleBounds, theme, navView)
     rootUi.drawFooter(layout.controls.statusBounds or layout.footer, footerSegments)
 
     local view = navView
@@ -1463,15 +1301,7 @@ function M.build(api)
       w = controlsInner.w,
       h = math.max(1, controlsInner.h),
     }
-    local navInner = type(layout.controls) == "table" and type(layout.controls.navBounds) == "table"
-      and layout.controls.navBounds
-      or (navBounds and inset(navBounds, 1, 1, 1, 1) or nil)
-    state.tomNavBounds = navInner and {
-      x = navInner.x,
-      y = navInner.y,
-      w = navInner.w,
-      h = navInner.h,
-    } or nil
+    state.tomNavBounds = TomNav.resolveTouchBounds(layout, navBounds, inset)
 
     if type(api.buildButtons) == "function" and type(api.drawButtons) == "function" then
       api.buildButtons(legacyLayout)

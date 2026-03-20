@@ -51,6 +51,8 @@ function M.run(ctx)
     "ui/toms/theme.lua",
     "ui/toms/layout.lua",
     "ui/toms/components.lua",
+    "ui/toms/nav.lua",
+    "ui/toms/runtime_model.lua",
     "ui/toms/fusion_panel.lua",
     "ui/toms/pages/common.lua",
     "ui/toms/pages/supervision.lua",
