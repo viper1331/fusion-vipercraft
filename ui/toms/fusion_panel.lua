@@ -1844,20 +1844,14 @@ function M.build(api)
     end
 
     local controlsBounds = layout.controls.buttonBounds
-    rootUi.drawPanel(controlsBounds, "CONTROLS", {
-      bg = theme.palette.panelBg,
-      border = theme.palette.border,
-      headerBg = theme.palette.panelHeaderAlt,
-      headerText = theme.palette.textOnDark or theme.palette.textPrimary,
-    })
-
-    local controlsInner = inset(controlsBounds, 1, 1, 1, 1)
-    local controlsOffsetY = (controlsInner.h >= 2) and 1 or 0
+    local controlsInner = inset(controlsBounds, 1, 0, 1, 0)
+    -- Footer actions are intentionally rendered directly in the dedicated footer
+    -- control lane: right-column CONTROL window has been removed.
     state.controlBounds = {
       x = controlsInner.x,
-      y = controlsInner.y + controlsOffsetY,
+      y = controlsInner.y,
       w = controlsInner.w,
-      h = math.max(1, controlsInner.h - controlsOffsetY),
+      h = math.max(1, controlsInner.h),
     }
     local navInner = type(layout.controls) == "table" and type(layout.controls.navBounds) == "table"
       and layout.controls.navBounds

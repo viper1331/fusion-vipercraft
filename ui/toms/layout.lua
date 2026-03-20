@@ -169,9 +169,9 @@ function M.compute(width, height, theme, currentView)
   local footerH = clamp(math.max(4, asInt(metrics.footerHeightPx or sizes.footerHeight, 7)), 4, math.max(4, h - headerH - 10))
   local navWanted = nativeMetrics
     and clamp(
-      asInt((sizes.lineHeight or 8) + (spacing.panelPadding or 2) + 4, 12),
-      9,
-      18
+      asInt(((sizes.lineHeight or 8) * 1.9) + (spacing.panelPadding or 2) + 4, 15),
+      11,
+      24
     )
     or 4
   local navMax = math.max(3, h - headerH - footerH - 6)
@@ -192,7 +192,6 @@ function M.compute(width, height, theme, currentView)
   local panels = {}
   local controlsButtonBounds = nil
   local controlsIoBounds = nil
-  local controlsNavBounds = nil
 
   if stacked then
     local rows = splitVertical(contentInner, {
@@ -212,9 +211,8 @@ function M.compute(width, height, theme, currentView)
     columns.left = rows.reactor
     columns.center = rows.core
     columns.right = rows.status
-    controlsButtonBounds = inset(rows.status, 1, 1, 1, 1)
+    controlsButtonBounds = nil
     controlsIoBounds = inset(rows.laser, 1, 1, 1, 1)
-    controlsNavBounds = inset(rows.status, 1, 1, 1, 1)
   else
     local mainCols = splitHorizontal(contentInner, {
       { key = "left", min = nativeMetrics and 88 or 24, weight = 26 },
@@ -233,9 +231,8 @@ function M.compute(width, height, theme, currentView)
     }, spacing.sectionGap)
 
     local rightPanels = splitVertical(inset(mainCols.right, 1, 1, 1, 1), {
-      { key = "laser", min = nativeMetrics and 36 or 7, weight = 23 },
-      { key = "controls", min = nativeMetrics and 58 or 11, weight = 51 },
-      { key = "io", min = nativeMetrics and 30 or 7, weight = 26 },
+      { key = "laser", min = nativeMetrics and 44 or 8, weight = 46 },
+      { key = "io", min = nativeMetrics and 44 or 8, weight = 54 },
     }, spacing.sectionGap)
 
     panels.reactor = leftPanels.reactor
@@ -244,9 +241,8 @@ function M.compute(width, height, theme, currentView)
     panels.core = inset(mainCols.center, 1, 1, 1, 1)
     panels.laser = rightPanels.laser
 
-    controlsButtonBounds = inset(rightPanels.controls, 1, 1, 1, 1)
+    controlsButtonBounds = nil
     controlsIoBounds = rightPanels.io
-    controlsNavBounds = rightPanels.controls
   end
 
   local footerInsetY = nativeMetrics and math.max(2, math.floor((metrics.textLineGapPx or 1) * 0.8)) or 1

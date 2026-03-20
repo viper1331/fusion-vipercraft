@@ -446,12 +446,13 @@ function M.new(options)
     local b = copyRect(bounds)
     local y = rowY(b, rowIndex)
     if y > b.y2 then return end
-    local usable = math.max(6, b.w - 4)
+    local usable = math.max(8, b.w - 4)
     local labelText = tostring(label or "")
     local valueText = tostring(value or "N/A")
 
-    if usable <= 20 then
-      local compact = abbreviate(labelText, math.max(3, math.floor(usable * 0.40))) .. ": " .. valueText
+    if usable <= 26 then
+      local compactLabel = abbreviate(labelText, math.max(3, math.floor(usable * 0.34)))
+      local compact = compactLabel .. ": " .. valueText
       safeText(
         b.x + 2,
         y,
@@ -464,7 +465,7 @@ function M.new(options)
       return
     end
 
-    local keyW = clamp(math.floor(usable * 0.36), 5, math.max(5, usable - 8))
+    local keyW = clamp(math.floor(usable * 0.30), 4, math.max(4, usable - 9))
     local valW = math.max(4, usable - keyW - 1)
     safeText(
       b.x + 2,
@@ -482,7 +483,7 @@ function M.new(options)
       valueTone or palette.textPrimary or colors.white,
       nil,
       valW,
-      (valW <= 9) and "left" or "right"
+      (valW <= 12) and "left" or "right"
     )
   end
 

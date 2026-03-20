@@ -405,16 +405,17 @@ function M.buildButtons(ctx, layout)
         w = math.max(12, ctrl.w - 2),
         h = 3,
       }
-      local navRowH = navArea.h >= 9 and 4 or (navArea.h >= 5 and 3 or 2)
+      local navRowH = navArea.h >= 14 and 4 or (navArea.h >= 8 and 3 or 2)
+      local navGapY = navArea.h >= 10 and 1 or 0
       addGridRowsInArea({
         { id = "viewSup", label = "SUP", bg = state.currentView == "supervision" and C.btnOn or C.panelMid, action = function() actions.setView("supervision") end },
         { id = "viewDiag", label = "DIAG", bg = state.currentView == "diagnostic" and C.btnOn or C.panelMid, action = function() actions.setView("diagnostic") end },
         { id = "viewMan", label = "MAN", bg = state.currentView == "manual" and C.btnOn or C.panelMid, action = function() actions.setView("manual") end },
         { id = "viewInd", label = "IND", bg = state.currentView == "induction" and C.btnOn or C.panelMid, action = function() actions.setView("induction") end },
-        { id = "viewUpd", label = "UPD", bg = state.currentView == "update" and C.btnOn or C.panelMid, action = function() actions.setView("update") end },
+        { id = "viewUpd", label = "UPDATE", bg = state.currentView == "update" and C.btnOn or C.panelMid, action = function() actions.setView("update") end },
         { id = "viewCfg", label = "CFG", bg = state.currentView == "config" and C.btnOn or C.panelMid, action = function() actions.setView("config") end },
-        { id = "viewSetup", label = "SET", bg = state.currentView == "setup" and C.btnOn or C.panelMid, action = function() actions.setView("setup") end },
-      }, navArea, navRowH, 1, 1)
+        { id = "viewSetup", label = "SETUP", bg = state.currentView == "setup" and C.btnOn or C.panelMid, action = function() actions.setView("setup") end },
+      }, navArea, navRowH, 1, navGapY)
     end
 
     local injAvailable = state.injectionWritable == true
@@ -445,8 +446,9 @@ function M.buildButtons(ctx, layout)
       w = math.max(12, ctrl.w - 2),
       h = math.max(3, ctrl.h - 6),
     }
-    local actionRowH = actionArea.h >= 11 and 4 or (actionArea.h >= 5 and 3 or 2)
-    addGridRowsInArea(items, actionArea, actionRowH, 1, 1)
+    local actionRowH = actionArea.h >= 14 and 4 or (actionArea.h >= 8 and 3 or 2)
+    local actionGapY = actionArea.h >= 10 and 1 or 0
+    addGridRowsInArea(items, actionArea, actionRowH, 1, actionGapY)
 
     return
   end
