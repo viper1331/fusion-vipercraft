@@ -1,5 +1,5 @@
 {
-    "version":  "2.4.59",
+    "version":  "2.4.60",
     "files":  [
                   "fusion.lua",
                   "fusion.version",
@@ -33,6 +33,8 @@
                   "ui/reactor_diagram.lua",
                   "ui/theme.lua",
                   "ui/toms/components.lua",
+                  "ui/toms/assets.lua",
+                  "ui/toms/assets_data.lua",
                   "ui/toms/fusion_panel.lua",
                   "ui/toms/layout.lua",
                   "ui/toms/theme.lua",

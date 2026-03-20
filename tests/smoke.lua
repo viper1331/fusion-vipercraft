@@ -140,6 +140,7 @@ local modules = {
   "toms_footer_controls.lua",
   "toms_diagnostic_mode.lua",
   "toms_native_surface_pipeline.lua",
+  "toms_assets_integration.lua",
   "toms_fusion_panel.lua",
 }
 

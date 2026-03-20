@@ -185,6 +185,9 @@ function M.run(ctx)
     { source = "terminal", view = "supervision", w = 92, h = 30 },
     { source = "monitor", view = "manual", w = 128, h = 38 },
     { source = "monitor", view = "induction", w = 140, h = 42 },
+    { source = "monitor", view = "diagnostic", w = 128, h = 38 },
+    { source = "monitor", view = "update", w = 128, h = 38 },
+    { source = "monitor", view = "setup", w = 128, h = 38 },
     { source = "monitor", view = "config", w = 120, h = 36 },
   }
 
@@ -216,12 +219,12 @@ function M.run(ctx)
     fail(183, "Renderer did not build/draw control buttons")
     return
   end
-  if counters.legacy <= 0 then
-    fail(184, "Renderer did not route legacy views")
+  if counters.legacy ~= 0 then
+    fail(184, "Renderer should not route legacy views in Tom native mode")
     return
   end
-  if counters.monitorSelection <= 0 then
-    fail(185, "Renderer did not route monitor selection view")
+  if counters.monitorSelection ~= 0 then
+    fail(185, "Renderer should render monitor selection in Tom native mode without legacy callback")
     return
   end
   if type(state.controlBounds) ~= "table" then

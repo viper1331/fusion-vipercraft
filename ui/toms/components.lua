@@ -88,6 +88,7 @@ local COLOR_ARGB = {
 function M.new(options)
   options = type(options) == "table" and options or {}
   local target = options.target or term.current()
+  local assetDrawer = type(options.assetDrawer) == "function" and options.assetDrawer or nil
   local width = asInt(options.width, 0)
   local height = asInt(options.height, 0)
   if (width <= 0 or height <= 0) and target and type(target.getSize) == "function" then
@@ -315,6 +316,24 @@ function M.new(options)
     if b.w > 2 and b.h > 2 then
       safeFilledRect(b.x + 1, b.y + 1, b.w - 2, b.h - 2, fillColor)
     end
+  end
+
+  local function drawAsset(key, x, y, w, h)
+    if type(assetDrawer) ~= "function" then
+      return false
+    end
+    local ok, drawn = pcall(
+      assetDrawer,
+      tostring(key or ""),
+      asInt(x, 1),
+      asInt(y, 1),
+      math.max(1, asInt(w, 1)),
+      math.max(1, asInt(h, 1))
+    )
+    if not ok then
+      return false
+    end
+    return drawn == true
   end
 
   local function drawBackdrop(bounds)
@@ -617,93 +636,107 @@ function M.new(options)
     local inner = inset(b, 1, 1, 1, 1)
     safeFilledRect(inner.x, inner.y, inner.w, inner.h, palette.panelBg or colors.black)
 
-    local topPad = math.max(2, math.floor(lineHeight * 0.7))
+    local topPad = math.max(3, math.floor(lineHeight * 1.0))
     local bottomPad = math.max(3, math.floor(lineHeight * 0.9))
     local sidePad = math.max(2, math.floor(lineHeight * 0.5))
     local reactorArea = inset(inner, sidePad, topPad, sidePad, bottomPad)
     local cx = reactorArea.x + math.floor(reactorArea.w / 2)
     local cy = reactorArea.y + math.floor(reactorArea.h / 2)
 
-    local reactorW = clamp(math.floor(reactorArea.w * 0.66), math.max(16, math.floor(reactorArea.w * 0.52)), math.max(18, reactorArea.w - 2))
-    local reactorH = clamp(math.floor(reactorArea.h * 0.60), math.max(10, math.floor(reactorArea.h * 0.48)), math.max(12, reactorArea.h - 2))
+    local reactorW = clamp(math.floor(reactorArea.w * 0.70), math.max(16, math.floor(reactorArea.w * 0.52)), math.max(18, reactorArea.w - 2))
+    local reactorH = clamp(math.floor(reactorArea.h * 0.64), math.max(10, math.floor(reactorArea.h * 0.48)), math.max(12, reactorArea.h - 2))
     local reactorX = clamp(cx - math.floor(reactorW / 2), reactorArea.x, reactorArea.x2 - reactorW + 1)
     local reactorY = clamp(cy - math.floor(reactorH / 2), reactorArea.y, reactorArea.y2 - reactorH + 1)
     local reactor = rect(reactorX, reactorY, reactorW, reactorH)
 
-    local shellColor = palette.reactorShell or colors.lightBlue
-    local shellEdge = palette.reactorShellDark or colors.blue
-    safeFrame(reactor, shellEdge, shellColor)
-    safeFrame(inset(reactor, 2, 2, 2, 2), shellEdge, palette.panelBgSoft or colors.blue)
-
-    local topCapW = clamp(math.floor(reactor.w * 0.24), 4, math.max(4, reactor.w - 4))
-    local topCapX = cx - math.floor(topCapW / 2)
-    safeFilledRect(topCapX, reactor.y - 1, topCapW, 1, shellEdge)
-    safeFilledRect(topCapX + 1, reactor.y - 2, math.max(2, topCapW - 2), 1, shellEdge)
-
-    local sidePortH = clamp(math.floor(reactor.h * 0.10), 1, 3)
-    safeFilledRect(reactor.x - 2, cy - 1, 2, sidePortH, shellEdge)
-    safeFilledRect(reactor.x2 + 1, cy - 1, 2, sidePortH, shellEdge)
-
-    local coreSize = clamp(math.floor(math.min(reactor.w, reactor.h) * 0.18), 4, 10)
-    local core = rect(cx - math.floor(coreSize / 2), cy - math.floor(coreSize / 2), coreSize, coreSize)
-    local pulse = asInt((model and model.tick) or 0, 0) % 12
-    local coreColor = reactorStateTone(model)
-    if tostring((model and model.reactorState) or "") == "active" and pulse >= 6 then
-      coreColor = palette.accent or colors.purple
-    elseif tostring((model and model.reactorState) or "") == "ready" and pulse >= 6 then
-      coreColor = palette.ok or colors.lime
+    local reactorDrawn = drawAsset("reactor", reactor.x, reactor.y, reactor.w, reactor.h)
+    if not reactorDrawn then
+      local shellColor = palette.reactorShell or colors.lightBlue
+      local shellEdge = palette.reactorShellDark or colors.blue
+      safeFrame(reactor, shellEdge, shellColor)
+      safeFrame(inset(reactor, 2, 2, 2, 2), shellEdge, palette.panelBgSoft or colors.blue)
     end
+
+    local anchors = type(model) == "table" and type(model.reactorAnchors) == "table" and model.reactorAnchors or {}
+    local function point(anchor, fallbackX, fallbackY)
+      if type(anchor) == "table" then
+        local nx = tonumber(anchor.x)
+        local ny = tonumber(anchor.y)
+        if nx and ny then
+          local px = reactor.x + math.floor((reactor.w - 1) * clamp(nx, 0, 1))
+          local py = reactor.y + math.floor((reactor.h - 1) * clamp(ny, 0, 1))
+          return px, py
+        end
+      end
+      return fallbackX, fallbackY
+    end
+
+    local coreCx, coreCy = point(anchors.core, cx, cy)
+    local tX, tY = point(anchors.tritium, reactor.x + math.floor(reactor.w * 0.24), reactor.y2)
+    local dtX, dtY = point(anchors.dtfuel, coreCx, reactor.y2)
+    local dX, dY = point(anchors.deuterium, reactor.x2 - math.floor(reactor.w * 0.24), reactor.y2)
+    local energyX, energyY = point(anchors.energy, reactor.x2, coreCy)
+    local laserX, laserY = point(anchors.laser, coreCx, reactor.y)
+
+    local coreSize = clamp(math.floor(math.min(reactor.w, reactor.h) * 0.10), 4, 9)
+    local core = rect(coreCx - math.floor(coreSize / 2), coreCy - math.floor(coreSize / 2), coreSize, coreSize)
+    local coreColor = reactorStateTone(model)
     safeFilledRect(core.x, core.y, core.w, core.h, coreColor)
     safeRect(core.x, core.y, core.w, core.h, palette.borderStrong or colors.cyan)
-    safeText(core.x, core.y + math.floor((core.h - 1) / 2), "CORE", palette.textPrimary or colors.white, nil, core.w, "center")
-
-    local fieldY = cy
-    local fieldColor = (model and model.ignition) and (palette.reactorCoreReady or colors.lime) or (palette.reactorFlowT or colors.green)
-    safeFilledRect(reactor.x + 1, fieldY, reactor.w - 2, 1, fieldColor)
+    if core.w >= 6 then
+      safeText(core.x + 1, core.y + math.floor((core.h - 1) / 2), "CORE", palette.textPrimary or colors.white, nil, core.w - 2, "center")
+    end
 
     local leftInColor = flowTone((model and model.tOpen) == true, palette.reactorFlowT or colors.green)
     local dtInColor = flowTone((model and model.dtOpen) == true, palette.reactorFlowDT or colors.purple)
     local rightInColor = flowTone((model and model.dOpen) == true, palette.reactorFlowD or colors.red)
-    local leftX = reactor.x + math.floor(reactor.w * 0.24)
-    local midX = cx
-    local rightX = reactor.x2 - math.floor(reactor.w * 0.24)
-    local inletY = reactor.y2 + 2
-    local inletLen = math.max(2, math.floor(lineHeight * 0.9))
-
+    local lineRaise = math.max(1, math.floor(lineHeight * 1.0))
     drawPipe({
-      rect(leftX, inletY - inletLen, 1, inletLen + 1),
-      rect(leftX, cy + 1, math.max(1, midX - leftX), 1),
-      rect(midX - 1, cy + 1, 1, math.max(1, core.y2 - cy)),
+      rect(tX, tY - lineRaise, 1, math.max(2, core.y2 - (tY - lineRaise) + 1)),
+      rect(math.min(tX, coreCx), coreCy, math.max(1, math.abs(coreCx - tX) + 1), 1),
     }, leftInColor)
     drawPipe({
-      rect(midX, inletY - inletLen, 1, inletLen + 1),
-      rect(midX, cy + 1, 1, math.max(1, core.y2 - cy)),
+      rect(dtX, dtY - lineRaise, 1, math.max(2, core.y2 - (dtY - lineRaise) + 1)),
     }, dtInColor)
     drawPipe({
-      rect(rightX, inletY - inletLen, 1, inletLen + 1),
-      rect(midX + 1, cy + 1, math.max(1, rightX - midX), 1),
-      rect(midX + 1, cy + 1, 1, math.max(1, core.y2 - cy)),
+      rect(dX, dY - lineRaise, 1, math.max(2, core.y2 - (dY - lineRaise) + 1)),
+      rect(math.min(coreCx, dX), coreCy, math.max(1, math.abs(dX - coreCx) + 1), 1),
     }, rightInColor)
 
-    safeText(leftX - 2, inletY + 1, "T", leftInColor, nil, 4, "left")
-    safeText(midX - 2, inletY + 1, "DT", dtInColor, nil, 5, "center")
-    safeText(rightX - 1, inletY + 1, "D", rightInColor, nil, 4, "right")
+    safeText(tX - 2, tY + 1, "T", leftInColor, nil, 4, "left")
+    safeText(dtX - 2, dtY + 1, "DT", dtInColor, nil, 5, "center")
+    safeText(dX - 1, dY + 1, "D", rightInColor, nil, 4, "right")
+    safeText(energyX + 1, energyY - 1, "RF", palette.energy or colors.yellow, nil, 8, "left")
 
-    local emitterY = reactor.y - math.max(4, math.floor(lineHeight * 1.4))
-    safeFilledRect(midX - 2, emitterY, 4, 1, palette.panelBgRaised or colors.gray)
+    local moduleCount = clamp(asInt((model and model.laserCount) or 1, 1), 1, 8)
+    local moduleH = clamp(math.floor(lineHeight * 1.20), 6, 12)
+    local moduleW = clamp(math.floor(moduleH * 6.8), 28, 96)
+    local moduleGap = math.max(2, math.floor(moduleH * 0.30))
+    local totalW = (moduleCount * moduleW) + ((moduleCount - 1) * moduleGap)
+    local startX = clamp(coreCx - math.floor(totalW / 2), inner.x + 1, inner.x2 - totalW + 1)
+    local modulesY = clamp(laserY - moduleH - 4, inner.y + 1, reactor.y - moduleH - 1)
+    if modulesY < inner.y then
+      modulesY = inner.y
+    end
+
+    for i = 1, moduleCount do
+      local mx = startX + ((i - 1) * (moduleW + moduleGap))
+      local drawnModule = drawAsset("laser_module", mx, modulesY, moduleW, moduleH)
+      if not drawnModule then
+        safeFilledRect(mx, modulesY, moduleW, moduleH, palette.ok or colors.lime)
+        safeRect(mx, modulesY, moduleW, moduleH, palette.panelBg or colors.black)
+      end
+    end
+
+    local emitterY = modulesY + moduleH
+    safeFilledRect(coreCx, emitterY, 1, math.max(1, reactor.y - emitterY), palette.reactorLaserCharge or colors.lightBlue)
     local beamVisible = (model and model.laserActive) == true or (model and model.laserCharging) == true
     if beamVisible then
       local beamColor = (model and model.laserActive) and (palette.reactorLaser or colors.yellow)
         or (palette.reactorLaserCharge or colors.lightBlue)
-      local beamHeight = core.y - emitterY
-      if beamHeight > 0 then
-        local beamW = math.max(1, math.floor(lineHeight * 0.35))
-        safeFilledRect(midX - math.floor(beamW / 2), emitterY + 1, beamW, beamHeight, beamColor)
-      end
-      safeText(midX - 8, emitterY - 1, tostring((model and model.laserLabel) or "LAS"), beamColor, nil, 16, "center")
-    else
-      safeText(midX - 8, emitterY - 1, "LAS OFF", palette.textMuted or colors.gray, nil, 16, "center")
+      safeFilledRect(coreCx, emitterY, 1, math.max(1, core.y - emitterY), beamColor)
     end
+    safeText(coreCx - 10, modulesY - 1, tostring((model and model.laserLabel) or "LAS"), palette.ok or colors.lime, nil, 20, "center")
 
     drawThermalMarkers(inner, reactor, core, model)
   end
