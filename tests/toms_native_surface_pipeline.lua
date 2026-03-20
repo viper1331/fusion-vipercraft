@@ -70,6 +70,33 @@ function M.run(ctx)
     if name == "ui.toms.components" then
       return assert(dofile(toPath("ui/toms/components.lua")))
     end
+    if name == "ui.toms.pages.common" then
+      return assert(dofile(toPath("ui/toms/pages/common.lua")))
+    end
+    if name == "ui.toms.pages.supervision" then
+      return assert(dofile(toPath("ui/toms/pages/supervision.lua")))
+    end
+    if name == "ui.toms.pages.diagnostic" then
+      return assert(dofile(toPath("ui/toms/pages/diagnostic.lua")))
+    end
+    if name == "ui.toms.pages.manual" then
+      return assert(dofile(toPath("ui/toms/pages/manual.lua")))
+    end
+    if name == "ui.toms.pages.induction" then
+      return assert(dofile(toPath("ui/toms/pages/induction.lua")))
+    end
+    if name == "ui.toms.pages.update" then
+      return assert(dofile(toPath("ui/toms/pages/update.lua")))
+    end
+    if name == "ui.toms.pages.config" then
+      return assert(dofile(toPath("ui/toms/pages/config.lua")))
+    end
+    if name == "ui.toms.pages.setup" then
+      return assert(dofile(toPath("ui/toms/pages/setup.lua")))
+    end
+    if name == "ui.toms.pages.monitor_selection" then
+      return assert(dofile(toPath("ui/toms/pages/monitor_selection.lua")))
+    end
     if type(originalRequire) == "function" then
       return originalRequire(name)
     end
