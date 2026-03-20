@@ -49,6 +49,7 @@ Même si `install.lua` ne change pas, le vérifier explicitement à chaque itér
 À chaque demande de nouvelle fonction, nouvelle UI, nouveau module, nouveau fichier de configuration, nouveau fichier de log, nouveau backend ou nouveau composant technique :
 - évaluer si `install.lua` doit être adapté ;
 - si oui, le modifier dans la même itération ;
+- si oui, incrémenter `install.lua` avec une version strictement supérieure ;
 - si non, l’indiquer explicitement dans le débrief avec la raison.
 
 ### Git obligatoire en fin d’itération
