@@ -1,6 +1,6 @@
 # PLANS.md
 
-## ExecPlan — Refonte UI Tom's Peripherals sur backend natif validé
+## ExecPlan — Modularisation complète, centralisation et amélioration du code
 
 ### Statut
 
@@ -8,528 +8,432 @@ Plan actif.
 
 ### Décision
 
-La refonte de l’interface Tom’s Peripherals doit désormais être menée sur une base technique validée :
-
-- le backend Tom natif est fonctionnel ;
-- la sélection automatique de backend terrain doit être conservée ;
-- la coexistence entre interface classique et interface Tom doit être maintenue ;
-- la refonte doit maintenant porter principalement sur la qualité visuelle, la structure UI, le design system, le layout, les composants et la composition finale.
-
-### Nouveau diagnostic validé
-
-Les derniers diagnostics ont confirmé que :
-
-- le bon GPU Tom est détecté ;
-- le backend `toms_gpu` / `toms_native` est opérationnel ;
-- le runtime source natif Tom est correctement utilisé ;
-- les dimensions runtime natives sont correctement conservées ;
-- le mode debug Tom utilise le même pipeline natif que la production ;
-- le gros problème de wrapper monitor parasite est résolu.
-
-En conséquence :
-
-- il ne faut plus refaire l’architecture backend Tom ;
-- il ne faut plus rebasculer vers une abstraction monitor pour l’UI Tom ;
-- la priorité est maintenant la refonte visuelle et structurelle de l’interface Tom sur cette base saine ;
-- seule une correction ciblée des métriques/logs incohérents reste autorisée côté backend/debug.
+La séparation initiale des pages Tom a été poussée.  
+La prochaine étape n’est plus une simple correction visuelle : il faut maintenant **finaliser proprement l’architecture**, **centraliser ce qui doit l’être**, **nettoyer le code mort**, **renforcer la cohérence native-pixel de l’UI Tom** et **améliorer globalement la maintenabilité du programme**.
 
 ---
 
-## Contraintes non négociables
+## Objectif global
 
-- Ne pas casser la coexistence entre interface classique et interface Tom.
-- Ne pas supprimer le support des moniteurs classiques.
-- Ne pas supprimer le support natif Tom’s GPU.
-- Le programme doit continuer à s’adapter automatiquement au terrain :
-  - UI classique si terrain classique,
-  - UI Tom native si GPU Tom valide.
-- Ne pas repartir d’une nouvelle logique runtime.
-- Ne pas toucher au pipeline natif Tom validé, sauf pour corriger des logs/métriques debug incorrects.
-- Ne pas perdre la permissivité actuelle.
-- Ne pas hardcoder un seul setup matériel.
-- Ne pas réintroduire de coordonnées magiques non protégées.
-- Ne pas produire une “jolie interface” fragile.
-- Ne pas casser l’installateur.
-- Ne pas casser le système d’update par manifeste.
+Faire évoluer le projet vers une architecture :
+
+- plus modulaire ;
+- plus claire ;
+- plus maintenable ;
+- plus cohérente entre UI classique et UI Tom ;
+- plus robuste sur le terrain ;
+- plus propre sur la gestion des pages, des composants, des assets, de la navigation et du runtime.
+
+Le but n’est pas de réécrire gratuitement ce qui fonctionne déjà.  
+Le but est de **consolider l’existant validé**, d’éliminer les zones techniques fragiles et de structurer proprement la suite du projet.
 
 ---
 
-## Base technique de référence à conserver
+## Invariants à préserver
 
-Le système validé sert de socle technique.
-Il doit être conservé, réutilisé ou extrait proprement dans des modules plus clairs.
+Les éléments suivants sont considérés comme **validés** et ne doivent pas être cassés :
 
-### Détection et sélection backend
+1. **Backend Tom natif**
+   - pipeline Tom natif validé ;
+   - rendu natif GPU ;
+   - dimensions runtime natives ;
+   - compatibilité avec le debug Tom natif.
 
-Conserver ou réutiliser autant que possible :
+2. **Coexistence des interfaces**
+   - interface classique disponible ;
+   - interface Tom disponible ;
+   - sélection automatique du backend selon la détection terrain.
 
-#### Détection périphériques
-- `getNames()`
-- `getMethods()`
-- `methodSet()`
-- `hasAll()`
-- `wrapIf()`
-- `exists()`
-- `filterAliases()`
-- `pickPreferred()`
-- `chooseOne()`
-- `findGpus()`
-- `findKeyboards()`
-- `findRsports()`
-- `findByExistingNames()`
+3. **Comportements runtime**
+   - adaptativité runtime ;
+   - reflow à la volée ;
+   - logique de navigation ;
+   - logique de sécurité existante ;
+   - `allow_control = false` par défaut, sauf demande explicite contraire.
 
-#### Sélection de backend terrain
-Le programme doit continuer à distinguer au minimum :
-- `classic_monitor`
-- `toms_native`
-- `terminal_fallback` si nécessaire
+4. **Assets**
+   - usage des PNG réels pour le réacteur ;
+   - usage des PNG réels pour les modules laser.
 
-### Initialisation GPU Tom native
-
-Conserver la séquence validée :
-- wrap GPU
-- `refreshSize()`
-- `pcall(gpu.setSize, 64)`
-- `refreshSize()`
-- `getSize()`
-
-### Lecture des données
-- `hasMethod()`
-- `tryCall()`
-- `fmt()`
-- `clamp()`
-- lecture permissive des méthodes fusion / laser
-
-### Sécurités runtime
-- `allow_control = false` par défaut
-- `pulseLaser()`
-- `changeInjection()`
-- aucun crash si méthode absente
-
-### Sécurités graphiques
-- `clipText()`
-- `safeFilledRect()`
-- `safeRect()`
-- `safeText()`
-
-### Interactions
-- boutons
-- `handleClick()`
-- `tm_monitor_touch`
-- `tm_monitor_mouse_click`
-- boucle timer + redraw
-- raccourcis clavier utiles
-
-### Debug Tom
-Le mode debug Tom doit rester sur le même chemin natif que la prod Tom.
-Il ne doit pas rebasculer vers un wrapper monitor.
+5. **Workflow dépôt**
+   - mise à jour de `fusion.version` ;
+   - synchronisation de `fusion.manifest.json` ;
+   - vérification/adaptation de `install.lua`.
 
 ---
 
-## Objectif final
+## Règle nouvelle obligatoire
 
-Produire une nouvelle interface Tom’s :
+### Interdiction de tronquer automatiquement les textes dans l’interface Tom
 
-- propre,
-- lisible,
-- élégante,
-- cohérente,
-- adaptive,
-- robuste,
-- professionnelle,
-- belle quelle que soit la taille réelle du GPU natif,
-- immédiatement compréhensible comme un panneau de supervision.
+À partir de maintenant :
 
-Le style visé est :
+- aucun texte important ne doit être coupé automatiquement dans l’interface Tom ;
+- la troncature automatique ne doit plus être utilisée comme solution normale de rendu.
 
-- supervision industrielle,
-- SCADA,
-- salle de contrôle,
-- futuriste sobre.
+Si un contenu est trop long, les solutions autorisées sont :
 
----
+- redimensionnement de zone ;
+- reflow ;
+- multi-ligne ;
+- libellé court conçu pour la page ;
+- scroll/log dédié si nécessaire ;
+- redistribution de l’espace.
 
-## Architecture cible
-
-La couche UI Tom’s doit rester structurée en composants clairs.
-
-Architecture souhaitée, à adapter au style du repo si nécessaire :
-
-- `ui/toms/theme.lua`
-- `ui/toms/layout.lua`
-- `ui/toms/components.lua`
-- `ui/toms/fusion_panel.lua`
-
-Ou toute structure équivalente respectant la séparation suivante :
-
-1. thème / design tokens
-2. layout engine
-3. composants UI
-4. écran final
-5. orchestration / branchement runtime
-
-Important :
-- conserver cette modularité ;
-- ne pas revenir à un gros fichier de rendu monolithique ;
-- ne pas refaire le backend de surface si celui-ci est déjà validé.
+Mais **pas** de coupe brutale systématique.
 
 ---
 
-## Phases d’exécution
+## Axes de travail
 
-### Phase 1 — Validation des invariants backend
+### 1. Finaliser la modularisation par pages de l’interface Tom
 
-Avant tout travail visuel :
+Chaque page Tom disponible doit être une vraie unité modulaire.
 
-- vérifier que le backend Tom natif reste inchangé ;
-- vérifier que l’UI classique reste disponible ;
-- vérifier que la sélection automatique terrain reste disponible ;
-- vérifier que le debug Tom continue à utiliser le même wrapper natif que la prod Tom.
+#### Exigences
+- chaque page doit avoir son propre fichier ;
+- chaque page doit avoir son propre rendu ;
+- chaque page doit avoir sa logique de composition propre ;
+- chaque page doit avoir ses interactions spécifiques si nécessaire ;
+- l’orchestrateur Tom principal ne doit plus contenir tout le rendu inline.
 
-À ce stade :
-- ne pas réécrire le backend ;
-- seulement corriger d’éventuelles incohérences de logging.
+#### Cible
+Le fichier principal Tom doit devenir un **orchestrateur léger** :
+- état partagé ;
+- page active ;
+- navigation ;
+- dispatch vers les pages ;
+- accès runtime partagé ;
+- rendu de structure commune seulement.
 
-### Phase 2 — Correction des logs et métriques debug
+---
 
-Corriger les incohérences restantes dans le debug, notamment :
+### 2. Clarifier la séparation entre logique partagée et logique spécifique
 
-- valeurs `blocks`
-- valeurs `wrapped`
-- valeurs `scale`
-- ou toute métrique mal étiquetée qui ne reflète pas correctement la réalité native du GPU
+#### À centraliser
+- thème / design tokens ;
+- helpers de layout partagé ;
+- composants UI partagés ;
+- navigation ;
+- helpers texte ;
+- helpers hit-testing ;
+- helpers assets ;
+- formateurs runtime ;
+- règles communes de panel/header/footer.
+
+#### À laisser dans chaque page
+- contenu spécifique ;
+- disposition spécifique ;
+- labels spécifiques ;
+- logique visuelle spécifique ;
+- zones propres à la page.
 
 Objectif :
-avoir un fichier debug fiable, cohérent, lisible, et utilisable pour les prochains diagnostics.
-
-### Phase 3 — Inspection UI actuelle
-
-Identifier précisément :
-
-- les fichiers UI Tom actuels ;
-- les helpers déjà présents ;
-- les modules réutilisables dans `core/`, `io/`, `ui/` ;
-- ce qui est déjà bon visuellement ;
-- ce qui est placeholder ;
-- ce qui doit être remplacé dans la composition.
-
-Décider ce qui est :
-- conservé,
-- amélioré,
-- refactoré,
-- supprimé.
-
-### Phase 4 — Consolidation du design system
-
-Créer ou améliorer une couche de style centralisée.
-
-Prévoir au minimum :
-
-#### Palette
-- info blue
-- ok green
-- warning orange
-- critical red
-- dark panel background
-- secondary panel background
-- primary text
-- muted text
-- border colors
-- accent colors
-
-#### Échelle d’espacement
-- outer margin
-- panel padding
-- panel gap
-- section gap
-- line spacing
-
-#### Échelle de taille
-- title height
-- subtitle height
-- row height
-- gauge thickness
-- button height
-- badge height
-
-#### Règles de texte
-- clipping
-- truncation
-- alignment
-- centering si nécessaire
-
-Toutes les tailles doivent être dérivées d’une échelle UI calculée depuis `W` et `H`.
-
-### Phase 5 — Refonte du layout engine
-
-Construire un moteur de layout calculé depuis la taille runtime réelle native.
-
-Structure recommandée :
-
-- root bounds
-- header
-- content
-- footer
-
-Dans `content`, calculer dynamiquement :
-
-- reactor summary
-- temperatures
-- laser / power
-- reactor core
-- status / debug
-- controls si utile selon la densité
-
-Prévoir 3 niveaux de densité :
-
-- small density
-- medium density
-- large density
-
-Important :
-ce ne sont pas 3 interfaces différentes.
-C’est la même identité visuelle, avec plus ou moins de richesse selon la place disponible.
-
-### Phase 6 — Refonte des composants UI
-
-Créer ou améliorer des composants cohérents et réutilisables.
-
-Au minimum :
-
-- `drawPanel`
-- `drawPanelHeader`
-- `drawSectionTitle`
-- `drawLabelValue`
-- `drawStatusBadge`
-- `drawGauge`
-- `drawHorizontalBar`
-- `drawVerticalBar`
-- `drawButton`
-- `drawButtonRow`
-- `drawReactorCore`
-- `drawHeader`
-- `drawFooter`
-
-Règles :
-
-- jamais de dessin hors zone ;
-- clipping/truncation obligatoire ;
-- style homogène ;
-- réutilisables sur plusieurs tailles ;
-- aucune barre ou zone sans signification.
-
-### Phase 7 — Nouvelle composition de l’écran Tom
-
-Composer le nouvel écran fusion Tom à partir :
-
-- du layout engine ;
-- des composants ;
-- des données runtime ;
-- de la base technique existante.
-
-Sections attendues :
-
-#### Header
-- titre global
-- backend / GPU actif
-- état système global
-
-#### Reactor summary
-- active / ignited
-- injection
-- passive generation
-- steam ou `N/A`
-- fuel si disponible
-
-#### Temperatures
-- plasma temp
-- case temp
-- target ignition
-
-#### Laser / Power
-- energy
-- max
-- ratio
-- état prêt / non prêt
-
-#### Reactor core
-- représentation stylisée du réacteur
-- centré
-- adaptable
-- visuellement utile
-- pas un placeholder
-- états visuels possibles :
-  - idle
-  - active
-  - ready
-  - warning
-  - blocked si pertinent
-
-#### Status / Debug
-- erreur en cours ou raison du blocage
-- backend utilisé
-- wrapper utilisé
-- méthodes matchées si utile
-- mode contrôle
-
-#### Footer / Controls
-- Refresh
-- Laser Pulse
-- Injection -
-- Injection +
-- Quit
-
-### Phase 8 — Usage éventuel des windows Tom’s
-
-Utiliser `createWindow(...)` seulement si cela améliore clairement :
-
-- la structure ;
-- la lisibilité ;
-- la modularité ;
-- le rendu.
-
-Règles :
-
-- nombre raisonnable de windows ;
-- pas de gaspillage VRAM ;
-- fond root GPU conservé ;
-- ordre de sync explicite ;
-- aucune régression sur le rendu natif.
-
-Si les windows n’apportent rien visuellement ou compliquent l’UI, préférer un rendu root GPU bien structuré.
-
-### Phase 9 — Finalisation visuelle
-
-L’interface finale ne doit plus ressembler :
-
-- ni à une accumulation de rectangles ;
-- ni à un prototype ;
-- ni à un layout placeholder ;
-- ni à une maquette abstraite.
-
-Attendus :
-
-- hiérarchie visuelle claire ;
-- panneaux équilibrés ;
-- espacement régulier ;
-- titres lisibles ;
-- valeurs bien alignées ;
-- jauges identifiables ;
-- centre réacteur valorisé ;
-- footer de contrôle clair ;
-- style sobre et professionnel.
-
-### Phase 10 — Nettoyage
-
-Une fois la nouvelle UI Tom en place :
-
-- retirer l’ancienne couche visuelle Tom devenue obsolète ;
-- éviter les doubles chemins de rendu Tom inutiles ;
-- laisser un code maintenable ;
-- conserver séparément l’UI classique.
-
-### Phase 11 — Intégration dépôt
-
-Mettre à jour si nécessaire :
-
-- `fusion.version`
-- `fusion.manifest.json`
-- `install.lua`
-
-S’assurer qu’aucun fichier runtime nécessaire n’est oublié.
+- ne pas laisser du code spécifique de page dispersé dans les fichiers communs ;
+- ne pas mettre toute la logique dans un seul fichier central.
 
 ---
 
-## Données critiques toujours visibles
+### 3. Revoir tout le code Tom dans une logique 100 % native-pixel
 
-Quelle que soit la taille, l’UI Tom doit toujours afficher :
+L’interface Tom doit être pensée comme une interface **native-pixel**.
 
-- état réacteur ;
-- injection ;
-- plasma temp ;
-- case temp ;
-- énergie laser ;
-- statut global / erreur.
+Cela implique une réanalyse de tout ce qui concerne :
 
-Si une donnée manque :
+- layout ;
+- texte ;
+- tailles ;
+- padding ;
+- hitboxes ;
+- placement d’assets ;
+- header/footer ;
+- navigation ;
+- panel bounds ;
+- zones tactiles.
 
-- afficher `N/A` proprement ;
-- ne jamais laisser une zone vide sans explication.
+#### Ce qui doit disparaître
+- les hypothèses héritées d’une logique terminal/monitor/grid ;
+- les unités textuelles utilisées comme si elles étaient suffisantes pour le rendu Tom ;
+- les restes de logique monitor si elles nuisent au rendu natif.
 
----
-
-## Interactions
-
-Le hit-testing doit être recalculé depuis le layout, pas codé avec des coordonnées figées.
-
-Compatibilité à préserver :
-
-- `tm_monitor_touch`
-- `tm_monitor_mouse_click`
-- timer refresh
-- raccourcis clavier utiles
-
-Les boutons doivent rester :
-
-- visibles ;
-- bien espacés ;
-- lisibles ;
-- exploitables quelle que soit la taille.
+#### Ce qui doit exister
+- métriques explicites en pixels ;
+- dimensions minimales explicites ;
+- calculs de bounds cohérents ;
+- logique de texte adaptée au pixel natif ;
+- hitboxes cohérentes avec un usage tactile terrain.
 
 ---
 
-## Compatibilité terrain obligatoire
+### 4. Centraliser proprement la navigation Tom
 
-Le programme doit continuer à supporter :
+La navigation Tom doit être une brique dédiée.
 
-- l’interface classique pour les terrains en moniteur classique ;
-- l’interface Tom native pour les terrains en GPU Tom.
+#### La navigation doit gérer
+- la liste des pages disponibles ;
+- l’ordre des pages ;
+- la page active ;
+- les labels d’onglets ;
+- les hitboxes tactiles ;
+- l’affichage de la barre de navigation ;
+- l’état actif/inactif.
 
-Le choix doit continuer à se faire automatiquement selon la détection réelle du terrain.
+#### Objectif
+- éviter d’avoir la navigation recodée ou partiellement répartie dans plusieurs pages ;
+- rendre la navigation proprement réutilisable et testable ;
+- faciliter l’ajout de pages futures.
 
-La refonte UI Tom ne doit en aucun cas casser cette adaptation terrain.
+---
+
+### 5. Centraliser proprement les assets Tom
+
+Les assets Tom doivent être gérés proprement, en particulier :
+
+- image PNG du réacteur ;
+- image PNG du module laser ;
+- logique d’empilement des modules laser ;
+- mise à l’échelle ;
+- centrage ;
+- positionnement ;
+- lecture du nombre de modules à partir de la source de configuration/installateur/runtime.
+
+#### Objectif
+- éviter de disperser le chargement et le placement des assets dans plusieurs pages ;
+- rendre leur gestion cohérente et maintenable ;
+- garantir que les modules laser affichés correspondent bien au paramètre réel.
+
+---
+
+### 6. Revoir la structure de l’orchestrateur principal
+
+Le système global doit rester cohérent côté bootstrap/runtime.
+
+Il faut réévaluer :
+
+- l’orchestration principale ;
+- la séparation entre runtime, UI, IO et dispatch ;
+- la responsabilité réelle de l’orchestrateur principal.
+
+#### Objectif
+- éviter un fichier principal qui sait tout faire ;
+- clarifier les responsabilités ;
+- faciliter l’évolution future des backends d’affichage.
+
+---
+
+### 7. Faire une vraie passe de nettoyage du code mort
+
+Une fois la séparation stabilisée, il faut faire une analyse sérieuse du code mort.
+
+#### À rechercher
+- branches de rendu devenues inutiles ;
+- vieux chemins Tom obsolètes ;
+- helpers dupliqués ;
+- wrappers non utilisés ;
+- modules zombies ;
+- imports inutilisés ;
+- compatibilité legacy inutile ;
+- code de debug dépassé ;
+- anciennes étapes de refactor laissées en place.
+
+#### Politique
+- supprimer si confirmé mort ;
+- documenter si doute ;
+- ne pas supprimer à l’aveugle.
+
+---
+
+### 8. Commenter ce qui doit l’être
+
+Le projet a besoin de commentaires utiles, pas décoratifs.
+
+#### À commenter en priorité
+- rôles des modules ;
+- orchestration de l’UI Tom ;
+- séparation classique / Tom ;
+- règles native-pixel ;
+- navigation ;
+- chargement des assets ;
+- logique d’empilement des modules laser ;
+- règles de sécurité runtime ;
+- couplage version / manifeste / installateur ;
+- logique “pas de troncature”.
+
+#### Interdiction
+- ne pas commenter des évidences triviales ;
+- ne pas polluer le code de commentaires inutiles.
+
+---
+
+### 9. Rendre l’adaptativité homogène sur toutes les pages
+
+Toutes les pages Tom doivent fonctionner dans le même système adaptatif.
+
+Chaque page doit recevoir un contexte cohérent contenant au minimum :
+- largeur/hauteur runtime ;
+- densité active ;
+- palette ;
+- métriques de texte ;
+- bounds partagés ;
+- contexte tactile ;
+- état runtime nécessaire ;
+- infos de navigation.
+
+#### Objectif
+- éviter que chaque page réinvente sa propre logique de dimensionnement ;
+- garantir une cohérence globale ;
+- éviter qu’une page casse alors qu’une autre fonctionne.
+
+---
+
+### 10. Revoir les logs et le debug pour refléter la nouvelle architecture
+
+Les logs doivent refléter la structure réelle du code.
+
+#### À prévoir
+- page active ;
+- backend actif ;
+- wrapper actif ;
+- état navigation ;
+- état assets ;
+- nombre de modules laser ;
+- densité active ;
+- états de layout ;
+- suppression des références à des chemins morts.
+
+#### Objectif
+- avoir un debug fiable ;
+- ne pas conserver des logs qui décrivent une ancienne architecture.
+
+---
+
+### 11. Synchronisation obligatoire version / manifeste / installateur
+
+À chaque itération structurelle :
+- incrémenter `fusion.version` ;
+- synchroniser `fusion.manifest.json` ;
+- vérifier `install.lua` ;
+- adapter `install.lua` si nouveaux fichiers/modules/assets.
+
+Même si `install.lua` ne change pas, le débrief doit dire explicitement qu’il a été vérifié.
+
+---
+
+## Architecture cible recommandée
+
+### Tom UI
+
+Structure cible suggérée :
+
+- `ui/toms/fusion_panel.lua` → orchestrateur léger
+- `ui/toms/nav.lua` → navigation
+- `ui/toms/theme.lua` → thème et métriques
+- `ui/toms/layout.lua` → layout partagé
+- `ui/toms/components.lua` → composants communs
+- `ui/toms/assets.lua` → assets et placement
+- `ui/toms/pages/supervision.lua`
+- `ui/toms/pages/diagnostics.lua`
+- `ui/toms/pages/update.lua`
+- `ui/toms/pages/config.lua`
+- `ui/toms/pages/setup.lua`
+- `ui/toms/pages/manual.lua`
+- autres pages si elles existent réellement
+
+Cette structure peut être adaptée aux conventions exactes du dépôt, mais l’esprit doit rester :
+- orchestrateur léger ;
+- briques partagées centralisées ;
+- pages séparées.
+
+---
+
+## Ordre d’exécution recommandé
+
+### Phase 1 — Réanalyse complète de l’état actuel
+- relire tout le dépôt concerné ;
+- identifier ce qui a déjà été séparé ;
+- identifier ce qui reste centralisé ;
+- identifier les doublons et zones techniques fragiles.
+
+### Phase 2 — Stabilisation de l’architecture par pages
+- finaliser la séparation de chaque page Tom ;
+- alléger l’orchestrateur principal ;
+- fixer les responsabilités de chaque module.
+
+### Phase 3 — Centralisation des briques partagées
+- navigation ;
+- assets ;
+- texte ;
+- hit-testing ;
+- formatage ;
+- métriques partagées.
+
+### Phase 4 — Révision native-pixel
+- supprimer les restes de logique monitor/grid nuisibles ;
+- revoir tout le système texte/layout/hitboxes ;
+- appliquer la règle “pas de troncature”.
+
+### Phase 5 — Nettoyage du code mort
+- supprimer les branches obsolètes ;
+- nettoyer les imports ;
+- retirer les doubles chemins devenus inutiles.
+
+### Phase 6 — Commentaires utiles
+- documenter l’architecture et les règles importantes.
+
+### Phase 7 — Logs/debug
+- réaligner le debug sur la nouvelle structure.
+
+### Phase 8 — Synchronisation dépôt
+- version ;
+- manifeste ;
+- installateur ;
+- commit ;
+- push.
 
 ---
 
 ## Critères d’acceptation
 
-La refonte est considérée terminée seulement si :
+La modularisation et la centralisation sont considérées réussies seulement si :
 
-1. le backend Tom natif validé est préservé ;
-2. l’UI classique reste disponible ;
-3. l’UI Tom reste disponible ;
-4. la sélection automatique terrain reste fonctionnelle ;
-5. la couche UI Tom actuelle a été réellement améliorée ;
-6. l’interface Tom est visuellement propre et professionnelle ;
-7. l’interface Tom reste belle sur petit, moyen et grand écran natif ;
-8. aucune erreur graphique hors bornes n’est possible ;
-9. les données critiques restent visibles ;
-10. le réacteur central a un vrai rôle visuel ;
-11. les contrôles restent utilisables ;
-12. la détection périphérique reste permissive ;
-13. le debug Tom reste sur le pipeline natif ;
-14. le logging debug Tom est cohérent et fiable ;
-15. `fusion.version` a été incrémenté ;
-16. `fusion.manifest.json` a été synchronisé ;
-17. `install.lua` reste compatible.
+1. chaque page Tom a son propre fichier ;
+2. l’orchestrateur Tom est allégé ;
+3. la navigation est centralisée proprement ;
+4. les assets sont gérés proprement ;
+5. la logique partagée est centralisée ;
+6. la logique spécifique est bien répartie par page ;
+7. l’UI Tom est cohérente avec une logique native-pixel ;
+8. aucune troncature automatique de texte n’est encore utilisée dans l’UI Tom ;
+9. le code mort confirmé a été traité ;
+10. les commentaires utiles ont été ajoutés ;
+11. l’UI classique reste disponible ;
+12. l’UI Tom reste disponible ;
+13. la sélection terrain reste valide ;
+14. le backend Tom natif reste intact ;
+15. `fusion.version` est mis à jour ;
+16. `fusion.manifest.json` est synchronisé ;
+17. `install.lua` est vérifié et adapté si nécessaire.
 
 ---
 
-## Livrables attendus de l’implémentation
+## Livrables attendus
 
 1. liste exacte des fichiers modifiés ;
 2. liste exacte des fichiers créés ;
-3. résumé clair en français ;
-4. explication de ce qui a été conservé côté backend/runtime ;
-5. explication de ce qui a été corrigé dans les logs debug ;
-6. explication de ce qui a été refondu côté UI Tom ;
-7. description du design system ;
-8. description du layout engine ;
-9. description des composants créés ou améliorés ;
-10. description des états visuels du reactor core ;
-11. description du comportement small / medium / large density ;
-12. confirmation que l’UI classique reste disponible ;
-13. confirmation que l’UI Tom reste disponible ;
-14. confirmation que la sélection automatique terrain reste fonctionnelle ;
-15. confirmation que la refonte UI Tom repose bien sur le backend natif validé ;
-16. tests manuels recommandés en jeu.
+3. liste exacte des fichiers supprimés ;
+4. résumé en français ;
+5. liste complète des pages Tom identifiées ;
+6. mapping page → fichier ;
+7. liste de la logique partagée centralisée ;
+8. liste de la logique spécifique laissée par page ;
+9. explication des changements faits pour la logique native-pixel ;
+10. explication de la suppression de la troncature ;
+11. liste du code mort retiré ;
+12. liste des commentaires utiles ajoutés ;
+13. explication des changements dans les logs/debug ;
+14. mise à jour de `fusion.version` ;
+15. mise à jour de `fusion.manifest.json` ;
+16. vérification ou modification de `install.lua` ;
+17. état du commit ;
+18. état du push ;
+19. tests manuels recommandés.
