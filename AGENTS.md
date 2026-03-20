@@ -157,3 +157,24 @@ Si la tâche touche plusieurs modules, plusieurs backends, l’UI, le runtime, l
 - faire un plan court avant de coder ;
 - exécuter le plan ;
 - signaler les écarts entre le plan et le résultat final.
+
+## Complément spécifique CraftOS-PC pour les tests Codex
+
+CraftOS-PC n’est utilisé ici que comme environnement de test local du programme par Codex.
+
+Règles obligatoires :
+- pour tout test local du programme via CraftOS-PC sous Windows, utiliser obligatoirement `CraftOS-PC_console.exe` et non `CraftOS-PC.exe` ;
+- cette obligation ne concerne que les scripts, outils, tâches, batchs ou configurations utilisés par Codex pour exécuter ou tester le programme dans CraftOS-PC ;
+- ne pas modifier les autres points de lancement du projet si CraftOS-PC n’est pas leur runtime réel ;
+- vérifier explicitement la présence de `CraftOS-PC_console.exe` avant de conclure qu’un environnement de test CraftOS-PC est opérationnel ;
+- si `CraftOS-PC_console.exe` est absent, arrêter la mise en place du test CraftOS-PC et indiquer clairement qu’il faut relancer l’installateur CraftOS-PC avec l’option `Console build` activée ;
+- si un chemin vers CraftOS-PC existe déjà dans la configuration de test, le réutiliser et le corriger vers la version console au lieu d’écrire un chemin en dur ;
+- mettre à jour tous les scripts de test, batchs, tâches VS Code ou configurations utilisées par Codex pour qu’ils pointent vers `CraftOS-PC_console.exe` ;
+- ne jamais considérer un test CraftOS-PC comme valide si le point de lancement utilisé par Codex référence encore `CraftOS-PC.exe` au lieu de `CraftOS-PC_console.exe`.
+
+Compte rendu attendu si CraftOS-PC est concerné :
+- préciser que CraftOS-PC est utilisé uniquement pour les tests locaux ;
+- indiquer quel exécutable de test est utilisé ;
+- indiquer quels scripts ou configurations de test ont été corrigés ;
+- préciser si la build console a été vérifiée ou non.
+
