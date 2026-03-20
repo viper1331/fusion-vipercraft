@@ -344,17 +344,7 @@ function M.new(options)
   local function drawBackdrop(bounds)
     local b = copyRect(bounds)
     local bg = palette.bgRoot or colors.black
-    local grid = palette.bgBackdrop or colors.gray
     safeFilledRect(b.x, b.y, b.w, b.h, bg)
-
-    local hStride = math.max(8, math.floor(rowStep * 2.2))
-    local vStride = math.max(16, math.floor(rowStep * 4.2))
-    for y = b.y + hStride, b.y2, hStride do
-      safeFilledRect(b.x, y, b.w, 1, grid)
-    end
-    for x = b.x + vStride, b.x2, vStride do
-      safeFilledRect(x, b.y, 1, b.h, grid)
-    end
   end
 
   local function drawPanel(bounds, title, opts)

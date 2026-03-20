@@ -1210,6 +1210,28 @@ function M.build(api)
     ui.drawLabelValue(bounds, 5, "Backend", model.backendName, theme.palette.info, theme.palette.textMuted)
   end
 
+  local function drawNavigationBar(ui, bounds, theme, activeView)
+    local nav = type(bounds) == "table" and bounds or nil
+    if not nav then
+      return
+    end
+    local bg = theme.palette.panelBgSoft or theme.palette.panelBg or colors.gray
+    ui.safeFilledRect(nav.x, nav.y, nav.w, nav.h, bg)
+    ui.safeFilledRect(nav.x, nav.y, nav.w, 1, theme.palette.borderStrong or colors.cyan)
+    ui.safeFilledRect(nav.x, nav.y2, nav.w, 1, theme.palette.border or colors.lightBlue)
+    local textY = nav.y + math.floor((nav.h - 1) / 2)
+    ui.safeText(nav.x + 2, textY, "NAVIGATION", theme.palette.info, bg, math.max(1, math.floor(nav.w * 0.34)), "left")
+    ui.safeText(
+      nav.x + 2,
+      textY,
+      "ACTIVE " .. string.upper(tostring(activeView or "supervision")),
+      theme.palette.textMuted,
+      bg,
+      math.max(1, nav.w - 4),
+      "right"
+    )
+  end
+
   local function createUiForTarget(target, width, height, theme)
     local renderTarget = target or term.current()
     return TomComponents.new({
@@ -1732,6 +1754,7 @@ function M.build(api)
         layout = computeDiagnosticLayout(width, height, theme)
       end
       if (not usedNativeDebug) and type(api.buildButtons) == "function" and type(api.drawButtons) == "function" then
+        state.tomNavBounds = nil
         api.buildButtons(buildLegacyLayout({
           legacy = {
             mode = "standard",
@@ -1807,8 +1830,10 @@ function M.build(api)
       { text = "MON " .. model.monitorName, tone = theme.palette.info },
     }
     local legacyLayout = buildLegacyLayout(layout, theme)
+    local navBounds = layout.navBar or (layout.controls and layout.controls.navBounds) or nil
 
     rootUi.drawHeader(layout.header, headerLeft, headerCenter, headerRight, model.phaseTone, warningTone)
+    drawNavigationBar(rootUi, navBounds, theme, state.currentView)
     rootUi.drawFooter(layout.controls.statusBounds or layout.footer, footerSegments)
 
     local view = tostring(state.currentView or "supervision")
@@ -1849,6 +1874,15 @@ function M.build(api)
       w = controlsInner.w,
       h = math.max(1, controlsInner.h - controlsOffsetY),
     }
+    local navInner = type(layout.controls) == "table" and type(layout.controls.navBounds) == "table"
+      and layout.controls.navBounds
+      or (navBounds and inset(navBounds, 1, 1, 1, 1) or nil)
+    state.tomNavBounds = navInner and {
+      x = navInner.x,
+      y = navInner.y,
+      w = navInner.w,
+      h = navInner.h,
+    } or nil
 
     if type(api.buildButtons) == "function" and type(api.drawButtons) == "function" then
       api.buildButtons(legacyLayout)
@@ -1862,8 +1896,6 @@ function M.build(api)
       end
     end
 
-    rootUi.drawHeader(layout.header, headerLeft, headerCenter, headerRight, model.phaseTone, warningTone)
-    rootUi.drawFooter(layout.controls.statusBounds or layout.footer, footerSegments)
     return layout
   end
 

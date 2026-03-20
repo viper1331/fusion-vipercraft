@@ -165,15 +165,21 @@ function M.compute(width, height, theme, currentView)
   local metrics = type(theme.metrics) == "table" and theme.metrics or {}
   local root = rect(1, 1, w, h)
 
-  local headerH = clamp(math.max(2, asInt(metrics.headerHeightPx or sizes.headerHeight, 3)), 2, math.max(2, h - 12))
-  local footerH = clamp(math.max(4, asInt(metrics.footerHeightPx or sizes.footerHeight, 7)), 4, math.max(4, h - headerH - 8))
+  local headerH = clamp(math.max(2, asInt(metrics.headerHeightPx or sizes.headerHeight, 3)), 2, math.max(2, h - 14))
+  local footerH = clamp(math.max(4, asInt(metrics.footerHeightPx or sizes.footerHeight, 7)), 4, math.max(4, h - headerH - 10))
+  local navWanted = nativeMetrics
+    and math.max(10, asInt((sizes.buttonHeight or 10) + (spacing.panelPadding or 2), 10))
+    or 3
+  local navMax = math.max(2, h - headerH - footerH - 6)
+  local navH = clamp(navWanted, 2, navMax)
   local header = rect(1, 1, w, headerH)
+  local navBar = rect(1, header.y2 + 1, w, navH)
   local footer = rect(1, h - footerH + 1, w, footerH)
-  if footer.y <= header.y2 then
-    footer = rect(1, header.y2 + 1, w, 4)
+  if footer.y <= navBar.y2 then
+    footer = rect(1, navBar.y2 + 1, w, 4)
   end
 
-  local content = rect(1, header.y2 + 1, w, math.max(1, footer.y - (header.y2 + 1)))
+  local content = rect(1, navBar.y2 + 1, w, math.max(1, footer.y - (navBar.y2 + 1)))
   local contentInner = inset(content, spacing.outerMargin, spacing.outerMargin, spacing.outerMargin, spacing.outerMargin)
   local stacked = (theme.density == "small" and (contentInner.w < 148 or contentInner.h < 92))
     or (nativeMetrics and (contentInner.w < 300 or contentInner.h < 200))
@@ -240,6 +246,7 @@ function M.compute(width, height, theme, currentView)
   end
 
   local footerInsetY = nativeMetrics and math.max(2, math.floor((metrics.textLineGapPx or 1) * 0.8)) or 1
+  local navMarginX = nativeMetrics and clamp(math.floor((spacing.outerMargin or 1) * 0.5), 1, 8) or 1
   local footerInner = inset(footer, spacing.outerMargin, footerInsetY, spacing.outerMargin, footerInsetY)
   local statusHeight = nativeMetrics
     and math.max(1, math.min(math.max(1, footerInner.h - 1), asInt(metrics.subtitleHeightPx or sizes.lineHeight, 2)))
@@ -260,6 +267,7 @@ function M.compute(width, height, theme, currentView)
     view = currentView or "supervision",
     root = root,
     header = header,
+    navBar = navBar,
     content = content,
     footer = footer,
     columns = columns,
@@ -283,7 +291,7 @@ function M.compute(width, height, theme, currentView)
       statusBounds = statusBounds,
       buttonBounds = buttonBounds,
       ioBounds = controlsIoBounds or panels.status,
-      navBounds = controlsNavBounds or buttonBounds,
+      navBounds = inset(navBar, navMarginX, 1, navMarginX, 1),
       footerBounds = footerInner,
     },
     legacy = {

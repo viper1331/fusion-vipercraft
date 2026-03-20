@@ -295,18 +295,20 @@ function M.buildButtons(ctx, layout)
   end
 
   if layout.tomFooterControls then
-    local bounds = type(state.controlBounds) == "table" and state.controlBounds or nil
     local ctrl = layout.right or layout.left or { x = 1, y = 1, w = layout.width or 20, h = 4 }
-    local bx = bounds and bounds.x or (ctrl.x + 1)
-    local bw = bounds and math.max(12, bounds.w) or math.max(14, ctrl.w - 2)
-    local y = bounds and bounds.y or (ctrl.y + 1)
-    local maxY = bounds and (bounds.y + bounds.h - 1) or (layout.bottom - 1)
-    local gapY = 1
+    local navBounds = type(state.tomNavBounds) == "table" and state.tomNavBounds or nil
+    local actionBounds = type(state.controlBounds) == "table" and state.controlBounds or nil
 
-    local function addGridRow(items, rowH, gapX)
+    local function addGridRowsInArea(items, area, rowH, gapX, gapY)
       if #items == 0 then return end
+      if type(area) ~= "table" then return end
       rowH = math.max(2, rowH or 2)
       gapX = gapX or 1
+      gapY = gapY or 1
+      local bx = area.x
+      local bw = math.max(10, area.w)
+      local y = area.y
+      local maxY = area.y + area.h - 1
 
       local function minButtonWidth(item)
         local label = tostring(item.label or "")
@@ -383,17 +385,22 @@ function M.buildButtons(ctx, layout)
     end
 
     local function buildTomNavigationButtons()
-      addGridRow({
+      local navArea = navBounds or {
+        x = ctrl.x + 1,
+        y = ctrl.y + 1,
+        w = math.max(12, ctrl.w - 2),
+        h = 3,
+      }
+      local navRowH = navArea.h >= 4 and 3 or 2
+      addGridRowsInArea({
         { id = "viewSup", label = "SUP", bg = state.currentView == "supervision" and C.btnOn or C.panelMid, action = function() actions.setView("supervision") end },
         { id = "viewDiag", label = "DIAG", bg = state.currentView == "diagnostic" and C.btnOn or C.panelMid, action = function() actions.setView("diagnostic") end },
         { id = "viewMan", label = "MAN", bg = state.currentView == "manual" and C.btnOn or C.panelMid, action = function() actions.setView("manual") end },
         { id = "viewInd", label = "IND", bg = state.currentView == "induction" and C.btnOn or C.panelMid, action = function() actions.setView("induction") end },
-      }, 2, 1)
-      addGridRow({
         { id = "viewUpd", label = "UPD", bg = state.currentView == "update" and C.btnOn or C.panelMid, action = function() actions.setView("update") end },
         { id = "viewCfg", label = "CFG", bg = state.currentView == "config" and C.btnOn or C.panelMid, action = function() actions.setView("config") end },
         { id = "viewSetup", label = "SET", bg = state.currentView == "setup" and C.btnOn or C.panelMid, action = function() actions.setView("setup") end },
-      }, 2, 1)
+      }, navArea, navRowH, 1, 1)
     end
 
     local injAvailable = state.injectionWritable == true
@@ -418,7 +425,14 @@ function M.buildButtons(ctx, layout)
       }
     end
 
-    addGridRow(items, 2, 1)
+    local actionArea = actionBounds or {
+      x = ctrl.x + 1,
+      y = (navBounds and (navBounds.y + navBounds.h + 1)) or (ctrl.y + 5),
+      w = math.max(12, ctrl.w - 2),
+      h = math.max(3, ctrl.h - 6),
+    }
+    local actionRowH = actionArea.h >= 4 and 3 or 2
+    addGridRowsInArea(items, actionArea, actionRowH, 1, 1)
 
     return
   end
