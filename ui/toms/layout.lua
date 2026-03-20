@@ -223,9 +223,9 @@ function M.compute(width, height, theme, currentView)
     }, spacing.sectionGap)
 
     local rightPanels = splitVertical(inset(mainCols.right, 1, 1, 1, 1), {
-      { key = "laser", min = nativeMetrics and 28 or 7, weight = 24 },
-      { key = "controls", min = nativeMetrics and 40 or 10, weight = 46 },
-      { key = "io", min = nativeMetrics and 30 or 8, weight = 30 },
+      { key = "laser", min = nativeMetrics and 34 or 7, weight = 25 },
+      { key = "controls", min = nativeMetrics and 48 or 10, weight = 44 },
+      { key = "io", min = nativeMetrics and 34 or 8, weight = 31 },
     }, spacing.sectionGap)
 
     panels.reactor = leftPanels.reactor

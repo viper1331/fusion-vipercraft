@@ -123,6 +123,11 @@ function M.new(options)
       if maxLen <= 3 then return raw:sub(1, maxLen) end
       return raw:sub(1, maxLen - 3) .. "..."
     end
+  local abbreviate = type(textRules.abbreviate) == "function"
+    and textRules.abbreviate
+    or function(value, maxLen)
+      return truncate(value, maxLen)
+    end
 
   local function clipText(text, maxLen)
     return truncate(tostring(text or ""), math.max(0, asInt(maxLen, 0)))
@@ -342,8 +347,8 @@ function M.new(options)
     local grid = palette.bgBackdrop or colors.gray
     safeFilledRect(b.x, b.y, b.w, b.h, bg)
 
-    local hStride = math.max(4, math.floor(rowStep * 1.5))
-    local vStride = math.max(10, math.floor(rowStep * 3.4))
+    local hStride = math.max(8, math.floor(rowStep * 2.2))
+    local vStride = math.max(16, math.floor(rowStep * 4.2))
     for y = b.y + hStride, b.y2, hStride do
       safeFilledRect(b.x, y, b.w, 1, grid)
     end
@@ -406,19 +411,39 @@ function M.new(options)
     )
   end
 
-  local function rowY(bounds, rowIndex)
+  local function rowTop(bounds)
     local b = copyRect(bounds)
-    local top = b.y + panelHeaderH + 1 + rowPadding
+    return b.y + panelHeaderH + 1 + rowPadding
+  end
+
+  local function maxRows(bounds)
+    local b = copyRect(bounds)
+    local top = rowTop(b)
+    local bottom = b.y2 - rowPadding
+    if bottom < top then
+      return 0
+    end
+    return math.floor((bottom - top) / rowStep) + 1
+  end
+
+  local function rowVisible(bounds, rowIndex)
+    local idx = math.max(0, asInt(rowIndex, 0))
+    return idx < maxRows(bounds)
+  end
+
+  local function rowY(bounds, rowIndex)
+    local top = rowTop(bounds)
     return top + (math.max(0, asInt(rowIndex, 0)) * rowStep)
   end
 
   local function drawSectionTitle(bounds, rowIndex, title, tone)
+    if not rowVisible(bounds, rowIndex) then return end
     local b = copyRect(bounds)
     local y = rowY(b, rowIndex)
     safeText(
       b.x + 2,
       y,
-      tostring(title or ""),
+      abbreviate(tostring(title or ""), math.max(4, b.w - 4)),
       tone or palette.info or colors.cyan,
       nil,
       math.max(1, b.w - 4),
@@ -427,16 +452,34 @@ function M.new(options)
   end
 
   local function drawLabelValue(bounds, rowIndex, label, value, valueTone, labelTone)
+    if not rowVisible(bounds, rowIndex) then return end
     local b = copyRect(bounds)
     local y = rowY(b, rowIndex)
     if y > b.y2 then return end
     local usable = math.max(6, b.w - 4)
-    local keyW = clamp(math.floor(usable * 0.44), 4, math.max(4, usable - 2))
-    local valW = math.max(1, usable - keyW - 1)
+    local labelText = tostring(label or "")
+    local valueText = tostring(value or "N/A")
+
+    if usable <= 20 then
+      local compact = abbreviate(labelText, math.max(3, math.floor(usable * 0.40))) .. ": " .. valueText
+      safeText(
+        b.x + 2,
+        y,
+        compact,
+        valueTone or palette.textPrimary or colors.white,
+        nil,
+        usable,
+        "left"
+      )
+      return
+    end
+
+    local keyW = clamp(math.floor(usable * 0.36), 5, math.max(5, usable - 8))
+    local valW = math.max(4, usable - keyW - 1)
     safeText(
       b.x + 2,
       y,
-      tostring(label or ""),
+      abbreviate(labelText, keyW),
       labelTone or palette.textMuted or colors.lightGray,
       nil,
       keyW,
@@ -445,15 +488,16 @@ function M.new(options)
     safeText(
       b.x + 2 + keyW + 1,
       y,
-      tostring(value or "N/A"),
+      valueText,
       valueTone or palette.textPrimary or colors.white,
       nil,
       valW,
-      "right"
+      (valW <= 9) and "left" or "right"
     )
   end
 
   local function drawStatusBadge(bounds, rowIndex, textValue, tone)
+    if not rowVisible(bounds, rowIndex) then return end
     local b = copyRect(bounds)
     local y = rowY(b, rowIndex)
     if y > b.y2 then return end
@@ -476,6 +520,7 @@ function M.new(options)
   end
 
   local function drawGauge(bounds, rowIndex, ratio, opts)
+    if not rowVisible(bounds, rowIndex) then return end
     local b = copyRect(bounds)
     local y = rowY(b, rowIndex)
     if y > b.y2 then return end
@@ -684,15 +729,21 @@ function M.new(options)
       return fallbackX, fallbackY
     end
 
-    local coreCx, coreCy = point(anchors.core, cx, cy)
+    local reactorCenterX = reactor.x + math.floor((reactor.w - 1) / 2)
+    local coreCx, coreCy = point(anchors.core, reactorCenterX, cy)
     local tX, tY = point(anchors.tritium, reactor.x + math.floor(reactor.w * 0.42), reactor.y2)
     local dtX, dtY = point(anchors.dtfuel, coreCx, reactor.y2)
     local dX, dY = point(anchors.deuterium, reactor.x + math.floor(reactor.w * 0.58), reactor.y2)
     local energyX, energyY = point(anchors.energy, reactor.x2, reactor.y + math.floor(reactor.h * 0.5))
-    local laserX, laserY = point(anchors.laser, coreCx, reactor.y)
+    local laserX = reactorCenterX
 
-    local moduleX = clamp(laserX - math.floor(moduleW / 2), inner.x + 1, inner.x2 - moduleW + 1)
-    local stackTop = clamp(reactor.y - stackH - 2, inner.y + 1, math.max(inner.y + 1, reactor.y - 2))
+    local moduleX = clamp(reactorCenterX - math.floor(moduleW / 2), inner.x + 1, inner.x2 - moduleW + 1)
+    local laserGap = math.max(2, math.floor(lineHeight * 0.45))
+    local stackTop = clamp(
+      reactor.y - stackH - laserGap,
+      inner.y + 1,
+      math.max(inner.y + 1, reactor.y - stackH - 1)
+    )
     for i = 1, moduleCount do
       local my = stackTop + ((i - 1) * (moduleH + moduleGap))
       if my > reactor.y - 1 then break end
@@ -817,21 +868,31 @@ function M.new(options)
     local bg = palette.panelHeaderAlt or palette.panelBgSoft or colors.gray
     safeFilledRect(b.x, b.y, b.w, b.h, bg)
     safeFilledRect(b.x, b.y, b.w, 1, palette.borderStrong or colors.cyan)
-    local y = b.y + math.floor((math.max(1, math.min(b.h, lineHeight)) - 1) / 2)
+    local y = b.y + math.floor((b.h - 1) / 2)
 
     local list = type(segments) == "table" and segments or {}
     if #list <= 0 then return end
+    local gap = nativePixels and math.max(4, fontCharWidth) or 1
+    local available = math.max(1, b.w - 2 - ((#list - 1) * gap))
+    local slotW = math.max(1, math.floor(available / #list))
+    local remainder = available - (slotW * #list)
     local x = b.x + 1
-    local gap = 1
-    local remaining = b.w - 2
+
     for i = 1, #list do
-      if remaining <= 0 then break end
       local seg = list[i]
-      local textValue = clipText(seg.text or "", remaining)
-      safeText(x, y, textValue, seg.tone or palette.textMuted or colors.lightGray, bg, remaining, "left")
-      local step = nativePixels and measureTextPixels(textValue) or #textValue
-      x = x + step + gap
-      remaining = (b.x + b.w - 1) - x
+      local w = slotW
+      if remainder > 0 then
+        w = w + 1
+        remainder = remainder - 1
+      end
+      local align = "center"
+      if i == 1 then
+        align = "left"
+      elseif i == #list then
+        align = "right"
+      end
+      safeText(x, y, seg.text or "", seg.tone or palette.textMuted or colors.lightGray, bg, w, align)
+      x = x + w + gap
     end
   end
 

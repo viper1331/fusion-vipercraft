@@ -1195,6 +1195,21 @@ function M.build(api)
     end
   end
 
+  local function drawIoSummaryPanel(ui, bounds, theme, model)
+    ui.drawPanel(bounds, "REAL I/O", {
+      bg = theme.palette.panelBg,
+      border = theme.palette.border,
+      headerBg = theme.palette.panelHeaderAlt,
+      headerText = theme.palette.textPrimary,
+    })
+    ui.drawLabelValue(bounds, 0, "LAS CHG", model.laserCharging and "ON" or "OFF", model.laserCharging and theme.palette.ok or theme.palette.textMuted, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 1, "LAS PULSE", model.laserActive and "ON" or "OFF", model.laserActive and theme.palette.warning or theme.palette.textMuted, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 2, "T LOCK", model.tOpen and "OPEN" or "CLOSED", model.tOpen and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 3, "DT LOCK", model.dtOpen and "OPEN" or "CLOSED", model.dtOpen and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 4, "D LOCK", model.dOpen and "OPEN" or "CLOSED", model.dOpen and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
+    ui.drawLabelValue(bounds, 5, "Backend", model.backendName, theme.palette.info, theme.palette.textMuted)
+  end
+
   local function createUiForTarget(target, width, height, theme)
     local renderTarget = target or term.current()
     return TomComponents.new({
@@ -1840,31 +1855,10 @@ function M.build(api)
       api.drawButtons(api.getCurrentInputSource and api.getCurrentInputSource() or "monitor")
     end
 
-    if controlsInner.h >= 3 then
-      rootUi.safeText(
-        controlsInner.x + 1,
-        controlsInner.y,
-        "PAGES: SUP DIAG MAN IND UPD CFG SET",
-        theme.palette.info,
-        nil,
-        math.max(1, controlsInner.w - 2),
-        "left"
-      )
-      rootUi.safeText(
-        controlsInner.x + 1,
-        controlsInner.y + 1,
-        "ACTIONS: REFRESH | MONITOR | LASER PULSE | INJ-/+ | QUIT",
-        theme.palette.textMuted,
-        nil,
-        math.max(1, controlsInner.w - 2),
-        "left"
-      )
-    end
-
-    if type(api.drawIoPanel) == "function" and type(layout.controls) == "table" and type(layout.controls.ioBounds) == "table" then
+    if type(layout.controls) == "table" and type(layout.controls.ioBounds) == "table" then
       local ioBounds = layout.controls.ioBounds
       if ioBounds.w >= 8 and ioBounds.h >= 4 then
-        pcall(api.drawIoPanel, ioBounds)
+        drawIoSummaryPanel(rootUi, ioBounds, theme, model)
       end
     end
 
