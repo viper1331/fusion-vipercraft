@@ -87,8 +87,8 @@ local function buildNativeMetrics(width, height, density, lineHeight)
   local sectionGapPx = clamp(math.floor((panelGapPx * 0.72) + 0.5), 3, 12)
   local textLineGapPx = clamp(math.floor((lineHeight * 0.28) + 0.5), 1, 4)
 
-  local headerHeightPx = clamp(math.floor((height * 0.12) + 0.5), 30, 66)
-  local footerHeightPx = clamp(math.floor((height * 0.14) + 0.5), 34, 74)
+  local headerHeightPx = clamp(math.floor((height * 0.075) + 0.5), 18, 38)
+  local footerHeightPx = clamp(math.floor((height * 0.10) + 0.5), 24, 52)
   local titleHeightPx = clamp(math.floor((lineHeight * 1.10) + 0.5), 7, 16)
   local subtitleHeightPx = clamp(math.floor((lineHeight * 0.88) + 0.5), 6, 14)
   local rowHeightPx = clamp(lineHeight + textLineGapPx, 7, 18)
@@ -188,18 +188,20 @@ function M.build(width, height, options)
     palette = {
       bgRoot = colors.black,
       bgBackdrop = colors.black,
-      panelBg = colors.gray,
+      panelBg = colors.lightGray,
       panelBgSoft = colors.gray,
-      panelBgRaised = colors.lightGray,
+      panelBgRaised = colors.white,
       panelHeader = colors.blue,
       panelHeaderAlt = colors.gray,
       border = colors.lightBlue,
       borderStrong = colors.cyan,
       borderSoft = colors.gray,
-      textPrimary = colors.white,
-      textMuted = colors.lightGray,
-      textDim = colors.gray,
-      info = colors.lightBlue,
+      textPrimary = colors.black,
+      textMuted = colors.gray,
+      textDim = colors.lightGray,
+      textOnDark = colors.white,
+      textOnLight = colors.black,
+      info = colors.cyan,
       ok = colors.lime,
       warning = colors.orange,
       critical = colors.red,

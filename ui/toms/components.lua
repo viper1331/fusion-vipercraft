@@ -343,7 +343,7 @@ function M.new(options)
 
   local function drawBackdrop(bounds)
     local b = copyRect(bounds)
-    local bg = palette.bgRoot or colors.black
+    local bg = palette.bgBackdrop or palette.bgRoot or colors.black
     safeFilledRect(b.x, b.y, b.w, b.h, bg)
   end
 
@@ -353,7 +353,7 @@ function M.new(options)
     local border = cfg.border or palette.border or colors.lightBlue
     local innerBg = cfg.bg or palette.panelBg or colors.black
     local headerBg = cfg.headerBg or palette.panelHeader or colors.blue
-    local headerText = cfg.headerText or palette.textPrimary or colors.white
+    local headerText = cfg.headerText or palette.textOnDark or palette.textPrimary or colors.white
     local shadow = cfg.shadow or palette.borderSoft or colors.gray
 
     if b.w < 4 or b.h < (panelHeaderH + 2) then
@@ -394,7 +394,7 @@ function M.new(options)
       b.x + 2,
       b.y + 1 + math.floor((hh - 1) / 2),
       tostring(title or ""),
-      tone or palette.textPrimary or colors.white,
+      tone or palette.textOnDark or palette.textPrimary or colors.white,
       bg,
       math.max(1, b.w - 4),
       "left"
@@ -502,7 +502,7 @@ function M.new(options)
       b.x + 3,
       y + math.floor((badgeH - 1) / 2),
       string.upper(tostring(textValue or "")),
-      palette.textPrimary or colors.white,
+      palette.textOnDark or palette.textPrimary or colors.white,
       bg,
       math.max(1, badgeW - 2),
       "left"
@@ -571,7 +571,7 @@ function M.new(options)
     local cfg = type(opts) == "table" and opts or {}
     local border = cfg.border or palette.border or colors.lightBlue
     local face = cfg.bg or palette.buttonFace or colors.gray
-    local textColor = cfg.fg or palette.textPrimary or colors.white
+    local textColor = cfg.fg or palette.textOnLight or palette.textPrimary or colors.white
     safeFrame(b, border, face)
     if b.w >= 6 and b.h >= 2 then
       safeFilledRect(b.x + 1, b.y + 1, math.max(1, b.w - 2), 1, face)
@@ -848,7 +848,7 @@ function M.new(options)
     local y = b.y + math.floor((b.h - 1) / 2)
     local leftW = math.max(10, math.floor(b.w * 0.30))
     local rightW = math.max(12, math.floor(b.w * 0.30))
-    safeText(b.x + 1, y, leftText or "", palette.textPrimary or colors.white, bg, leftW, "left")
+    safeText(b.x + 1, y, leftText or "", palette.textOnDark or palette.textPrimary or colors.white, bg, leftW, "left")
     safeText(b.x + leftW, y, centerText or "", centerTone or palette.info or colors.cyan, bg, math.max(8, b.w - leftW - rightW), "center")
     safeText(b.x + b.w - rightW, y, rightText or "", rightTone or palette.warning or colors.orange, bg, rightW - 1, "right")
   end
@@ -881,7 +881,7 @@ function M.new(options)
       elseif i == #list then
         align = "right"
       end
-      safeText(x, y, seg.text or "", seg.tone or palette.textMuted or colors.lightGray, bg, w, align)
+      safeText(x, y, seg.text or "", seg.tone or palette.textOnDark or palette.textMuted or colors.lightGray, bg, w, align)
       x = x + w + gap
     end
   end

@@ -1100,7 +1100,7 @@ function M.build(api)
       bg = theme.palette.panelBg,
       border = theme.palette.borderStrong,
       headerBg = theme.palette.panelHeader,
-      headerText = theme.palette.textPrimary,
+      headerText = theme.palette.textOnDark or theme.palette.textPrimary,
     })
     ui.drawStatusBadge(bounds, 0, model.active and "ACTIVE" or "IDLE", model.active and theme.palette.ok or theme.palette.warning)
     ui.drawLabelValue(bounds, 2, "Ignited", model.ignition and "YES" or "NO", model.ignition and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
@@ -1118,7 +1118,7 @@ function M.build(api)
       bg = theme.palette.panelBg,
       border = theme.palette.warning,
       headerBg = theme.palette.panelHeaderAlt,
-      headerText = theme.palette.textPrimary,
+      headerText = theme.palette.textOnDark or theme.palette.textPrimary,
     })
     ui.drawLabelValue(bounds, 0, "Plasma", model.plasmaTemp, theme.palette.warning, theme.palette.textMuted)
     ui.drawLabelValue(bounds, 1, "Case", model.caseTemp, theme.palette.critical, theme.palette.textMuted)
@@ -1133,7 +1133,7 @@ function M.build(api)
       bg = theme.palette.panelBg,
       border = theme.palette.ok,
       headerBg = theme.palette.panelHeaderAlt,
-      headerText = theme.palette.textPrimary,
+      headerText = theme.palette.textOnDark or theme.palette.textPrimary,
     })
     local inner = inset(bounds, 1, 1, 1, 1)
     ui.drawLaserStack(inner, {
@@ -1166,7 +1166,7 @@ function M.build(api)
       bg = theme.palette.panelBg,
       border = theme.palette.border,
       headerBg = theme.palette.panelHeaderAlt,
-      headerText = theme.palette.textPrimary,
+      headerText = theme.palette.textOnDark or theme.palette.textPrimary,
     })
     ui.drawLabelValue(bounds, 0, "Global", model.statusText, model.statusTone, theme.palette.textMuted)
     ui.drawLabelValue(bounds, 1, "Phase", model.phase, model.phaseTone, theme.palette.textMuted)
@@ -1200,7 +1200,7 @@ function M.build(api)
       bg = theme.palette.panelBg,
       border = theme.palette.border,
       headerBg = theme.palette.panelHeaderAlt,
-      headerText = theme.palette.textPrimary,
+      headerText = theme.palette.textOnDark or theme.palette.textPrimary,
     })
     ui.drawLabelValue(bounds, 0, "LAS CHG", model.laserCharging and "ON" or "OFF", model.laserCharging and theme.palette.ok or theme.palette.textMuted, theme.palette.textMuted)
     ui.drawLabelValue(bounds, 1, "LAS PULSE", model.laserActive and "ON" or "OFF", model.laserActive and theme.palette.warning or theme.palette.textMuted, theme.palette.textMuted)
@@ -1210,7 +1210,7 @@ function M.build(api)
     ui.drawLabelValue(bounds, 5, "Backend", model.backendName, theme.palette.info, theme.palette.textMuted)
   end
 
-  local function drawNavigationBar(ui, bounds, theme, activeView)
+  local function drawNavigationBar(ui, bounds, titleBounds, theme, activeView)
     local nav = type(bounds) == "table" and bounds or nil
     if not nav then
       return
@@ -1219,17 +1219,22 @@ function M.build(api)
     ui.safeFilledRect(nav.x, nav.y, nav.w, nav.h, bg)
     ui.safeFilledRect(nav.x, nav.y, nav.w, 1, theme.palette.borderStrong or colors.cyan)
     ui.safeFilledRect(nav.x, nav.y2, nav.w, 1, theme.palette.border or colors.lightBlue)
-    local textY = nav.y + math.floor((nav.h - 1) / 2)
-    ui.safeText(nav.x + 2, textY, "NAVIGATION", theme.palette.info, bg, math.max(1, math.floor(nav.w * 0.34)), "left")
-    ui.safeText(
-      nav.x + 2,
-      textY,
-      "ACTIVE " .. string.upper(tostring(activeView or "supervision")),
-      theme.palette.textMuted,
-      bg,
-      math.max(1, nav.w - 4),
-      "right"
-    )
+    local title = type(titleBounds) == "table" and titleBounds or nil
+    if title and title.h >= 1 then
+      local titleBg = theme.palette.panelHeader or colors.blue
+      ui.safeFilledRect(title.x, title.y, title.w, title.h, titleBg)
+      local textY = title.y + math.floor((title.h - 1) / 2)
+      ui.safeText(title.x + 2, textY, "NAVIGATION", theme.palette.info, titleBg, math.max(1, math.floor(title.w * 0.38)), "left")
+      ui.safeText(
+        title.x + 2,
+        textY,
+        "ACTIVE " .. string.upper(tostring(activeView or "supervision")),
+        theme.palette.textOnDark or theme.palette.textPrimary,
+        titleBg,
+        math.max(1, title.w - 4),
+        "right"
+      )
+    end
   end
 
   local function createUiForTarget(target, width, height, theme)
@@ -1250,7 +1255,7 @@ function M.build(api)
       bg = theme.palette.panelBg,
       border = theme.palette.borderStrong,
       headerBg = theme.palette.panelHeaderAlt,
-      headerText = theme.palette.textPrimary,
+      headerText = theme.palette.textOnDark or theme.palette.textPrimary,
     })
     local coreInner = inset(bounds, 1, 1, 1, 1)
     local anchors = TomAssets.getAnchors("reactor", coreInner.x, coreInner.y, coreInner.w, coreInner.h)
@@ -1284,7 +1289,7 @@ function M.build(api)
       bg = theme.palette.panelBg,
       border = theme.palette.border,
       headerBg = theme.palette.panelHeader,
-      headerText = theme.palette.textPrimary,
+      headerText = theme.palette.textOnDark or theme.palette.textPrimary,
     })
     ui.drawLabelValue(panels.reactor, 0, "Reactor", hw.reactor and "OK" or "MISSING", hw.reactor and theme.palette.ok or theme.palette.critical, theme.palette.textMuted)
     ui.drawLabelValue(panels.reactor, 1, "Logic", hw.logic and "OK" or "MISSING", hw.logic and theme.palette.ok or theme.palette.critical, theme.palette.textMuted)
@@ -1297,7 +1302,7 @@ function M.build(api)
       bg = theme.palette.panelBg,
       border = theme.palette.warning,
       headerBg = theme.palette.panelHeaderAlt,
-      headerText = theme.palette.textPrimary,
+      headerText = theme.palette.textOnDark or theme.palette.textPrimary,
     })
     local relayLaser = type(CFG.actions) == "table" and type(CFG.actions.laser_charge) == "table" and CFG.actions.laser_charge.relay or "N/A"
     local relayT = type(CFG.actions) == "table" and type(CFG.actions.tritium) == "table" and CFG.actions.tritium.relay or "N/A"
@@ -1313,7 +1318,7 @@ function M.build(api)
       bg = theme.palette.panelBg,
       border = theme.palette.ok,
       headerBg = theme.palette.panelHeaderAlt,
-      headerText = theme.palette.textPrimary,
+      headerText = theme.palette.textOnDark or theme.palette.textPrimary,
     })
     local methods = type(state.runtimeMethodMatches) == "table" and state.runtimeMethodMatches or {}
     ui.drawLabelValue(panels.laser, 0, "plasma", asText(methods.plasma, "N/A"), theme.palette.textPrimary, theme.palette.textMuted)
@@ -1338,7 +1343,7 @@ function M.build(api)
       bg = theme.palette.panelBg,
       border = theme.palette.warning,
       headerBg = theme.palette.panelHeaderAlt,
-      headerText = theme.palette.textPrimary,
+      headerText = theme.palette.textOnDark or theme.palette.textPrimary,
     })
     ui.drawLabelValue(panels.temperatures, 0, "Local", asText(updateState.localVersion, "N/A"), theme.palette.info, theme.palette.textMuted)
     ui.drawLabelValue(panels.temperatures, 1, "Remote", asText(updateState.remoteVersion, "N/A"), theme.palette.info, theme.palette.textMuted)
@@ -1350,7 +1355,7 @@ function M.build(api)
       bg = theme.palette.panelBg,
       border = theme.palette.ok,
       headerBg = theme.palette.panelHeaderAlt,
-      headerText = theme.palette.textPrimary,
+      headerText = theme.palette.textOnDark or theme.palette.textPrimary,
     })
     ui.drawLabelValue(panels.laser, 0, "Message", asText(updateState.lastMessage, "Ready"), theme.palette.textPrimary, theme.palette.textMuted)
     ui.drawLabelValue(panels.laser, 1, "Last Action", asText(model.lastAction, "NONE"), theme.palette.textPrimary, theme.palette.textMuted)
@@ -1374,7 +1379,7 @@ function M.build(api)
       bg = theme.palette.panelBg,
       border = theme.palette.warning,
       headerBg = theme.palette.panelHeaderAlt,
-      headerText = theme.palette.textPrimary,
+      headerText = theme.palette.textOnDark or theme.palette.textPrimary,
     })
     ui.drawLabelValue(panels.temperatures, 0, "UI Scale", tostring(uiCfg.scale or CFG.uiScale or "1.0"), theme.palette.info, theme.palette.textMuted)
     ui.drawLabelValue(panels.temperatures, 1, "Text Scale", tostring(monCfg.scale or CFG.monitorScale or "0.5"), theme.palette.info, theme.palette.textMuted)
@@ -1387,7 +1392,7 @@ function M.build(api)
       bg = theme.palette.panelBg,
       border = theme.palette.ok,
       headerBg = theme.palette.panelHeaderAlt,
-      headerText = theme.palette.textPrimary,
+      headerText = theme.palette.textOnDark or theme.palette.textPrimary,
     })
     ui.drawLabelValue(panels.laser, 0, "Status", asText(setup.saveStatus, "N/A"), theme.palette.info, theme.palette.textMuted)
     ui.drawLabelValue(panels.laser, 1, "Message", asText(setup.lastMessage, "Ready"), theme.palette.textPrimary, theme.palette.textMuted)
@@ -1407,7 +1412,7 @@ function M.build(api)
       bg = theme.palette.panelBg,
       border = theme.palette.borderStrong,
       headerBg = theme.palette.panelHeader,
-      headerText = theme.palette.textPrimary,
+      headerText = theme.palette.textOnDark or theme.palette.textPrimary,
     })
     ui.drawLabelValue(panels.reactor, 0, "Monitor", asText(working.monitor and working.monitor.name, model.monitorName), theme.palette.info, theme.palette.textMuted)
     ui.drawLabelValue(panels.reactor, 1, "Reactor", asText(devices.reactorController, "N/A"), theme.palette.info, theme.palette.textMuted)
@@ -1419,7 +1424,7 @@ function M.build(api)
       bg = theme.palette.panelBg,
       border = theme.palette.warning,
       headerBg = theme.palette.panelHeaderAlt,
-      headerText = theme.palette.textPrimary,
+      headerText = theme.palette.textOnDark or theme.palette.textPrimary,
     })
     ui.drawLabelValue(panels.temperatures, 0, "Save", asText(setup.saveStatus, "N/A"), theme.palette.info, theme.palette.textMuted)
     ui.drawLabelValue(panels.temperatures, 1, "Test", asText(setup.lastTestResult, "N/A"), theme.palette.info, theme.palette.textMuted)
@@ -1431,7 +1436,7 @@ function M.build(api)
       bg = theme.palette.panelBg,
       border = theme.palette.ok,
       headerBg = theme.palette.panelHeaderAlt,
-      headerText = theme.palette.textPrimary,
+      headerText = theme.palette.textOnDark or theme.palette.textPrimary,
     })
     local rows = type(api.getSetupStatusRows) == "function" and api.getSetupStatusRows() or {}
     local cap = math.max(0, panels.laser.h - 4)
@@ -1451,7 +1456,7 @@ function M.build(api)
       bg = theme.palette.panelBg,
       border = theme.palette.borderStrong,
       headerBg = theme.palette.panelHeader,
-      headerText = theme.palette.textPrimary,
+      headerText = theme.palette.textOnDark or theme.palette.textPrimary,
     })
     ui.drawLabelValue(panels.reactor, 0, "Present", state.inductionPresent and "YES" or "NO", state.inductionPresent and theme.palette.ok or theme.palette.critical, theme.palette.textMuted)
     ui.drawLabelValue(panels.reactor, 1, "Formed", state.inductionFormed and "FORMED" or "UNFORMED", state.inductionFormed and theme.palette.ok or theme.palette.warning, theme.palette.textMuted)
@@ -1492,7 +1497,7 @@ function M.build(api)
       bg = theme.palette.panelBg,
       border = theme.palette.borderStrong,
       headerBg = theme.palette.panelHeader,
-      headerText = theme.palette.textPrimary,
+      headerText = theme.palette.textOnDark or theme.palette.textPrimary,
     })
     ui.drawLabelValue(panels.reactor, 0, "Detected", tostring(#list), theme.palette.info, theme.palette.textMuted)
     ui.drawLabelValue(panels.reactor, 1, "Input", "Touch / key 1..9", theme.palette.info, theme.palette.textMuted)
@@ -1502,7 +1507,7 @@ function M.build(api)
       bg = theme.palette.panelBg,
       border = theme.palette.warning,
       headerBg = theme.palette.panelHeaderAlt,
-      headerText = theme.palette.textPrimary,
+      headerText = theme.palette.textOnDark or theme.palette.textPrimary,
     })
     local cap = math.max(1, panels.temperatures.h - 3)
     for i = 1, math.min(#list, cap) do
@@ -1515,7 +1520,7 @@ function M.build(api)
       bg = theme.palette.panelBg,
       border = theme.palette.ok,
       headerBg = theme.palette.panelHeaderAlt,
-      headerText = theme.palette.textPrimary,
+      headerText = theme.palette.textOnDark or theme.palette.textPrimary,
     })
     ui.drawLabelValue(panels.laser, 0, "Selected", asText(hw.monitorBackend, "terminal"), theme.palette.info, theme.palette.textMuted)
     ui.drawLabelValue(panels.laser, 1, "Family", asText(hw.monitorBackendFamily, "fallback"), theme.palette.info, theme.palette.textMuted)
@@ -1820,20 +1825,33 @@ function M.build(api)
     local warningTone = warning == "NONE" and theme.palette.info or theme.palette.warning
     local headerLeft = "FUSION SUPERVISOR"
     local activeView = string.upper(tostring(state.currentView or "supervision"))
-    local headerCenter = model.phase .. " | " .. activeView
-    local headerRight = model.statusText .. " | " .. asText(warning, "NONE")
+    local warningText = asText(warning, "NONE")
+    if #warningText > 24 then
+      warningText = warningText:sub(1, 23) .. "~"
+    end
+    local actionText = asText(model.lastAction, "NONE")
+    if #actionText > 18 then
+      actionText = actionText:sub(1, 17) .. "~"
+    end
+    local monitorText = asText(model.monitorName, "N/A")
+    if #monitorText > 16 then
+      monitorText = monitorText:sub(1, 15) .. "~"
+    end
+    local headerCenter = model.phase .. " / " .. activeView
+    local headerRight = model.statusText .. " | " .. warningText
 
     local footerSegments = {
-      { text = "ACT " .. model.lastAction, tone = theme.palette.textMuted },
+      { text = "ACT " .. actionText, tone = theme.palette.textMuted },
       { text = "LAS " .. model.laserState .. " " .. tostring(model.laserPct) .. "%", tone = model.laserTone },
       { text = "GRID " .. (model.energyKnown and string.format("%3.0f%%", model.energyPct) or "N/A"), tone = theme.palette.energy },
-      { text = "MON " .. model.monitorName, tone = theme.palette.info },
+      { text = "MON " .. monitorText, tone = theme.palette.info },
     }
     local legacyLayout = buildLegacyLayout(layout, theme)
     local navBounds = layout.navBar or (layout.controls and layout.controls.navBounds) or nil
+    local navTitleBounds = layout.controls and layout.controls.navTitleBounds or nil
 
     rootUi.drawHeader(layout.header, headerLeft, headerCenter, headerRight, model.phaseTone, warningTone)
-    drawNavigationBar(rootUi, navBounds, theme, state.currentView)
+    drawNavigationBar(rootUi, navBounds, navTitleBounds, theme, state.currentView)
     rootUi.drawFooter(layout.controls.statusBounds or layout.footer, footerSegments)
 
     local view = tostring(state.currentView or "supervision")
@@ -1863,7 +1881,7 @@ function M.build(api)
       bg = theme.palette.panelBg,
       border = theme.palette.border,
       headerBg = theme.palette.panelHeaderAlt,
-      headerText = theme.palette.textPrimary,
+      headerText = theme.palette.textOnDark or theme.palette.textPrimary,
     })
 
     local controlsInner = inset(controlsBounds, 1, 1, 1, 1)
@@ -1905,3 +1923,4 @@ function M.build(api)
 end
 
 return M
+

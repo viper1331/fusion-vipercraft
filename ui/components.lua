@@ -371,9 +371,17 @@ function M.buildButtons(ctx, layout)
           if i == #rowItems then
             wBtn = math.max(minWidths[i], (bx + bw) - x)
           end
+          local hitPadX = item.hitPadX
+          local hitPadY = item.hitPadY
+          if hitPadX == nil then
+            hitPadX = (rowH <= 2) and 2 or 1
+          end
+          if hitPadY == nil then
+            hitPadY = 1
+          end
           addButton(item.id, x, y, wBtn, rowH, item.label, item.bg, item.fg, item.action, {
-            hitPadX = 0,
-            hitPadY = 0,
+            hitPadX = hitPadX,
+            hitPadY = hitPadY,
             disabled = item.disabled and true or false,
           })
           x = x + wBtn + gapX
@@ -391,7 +399,7 @@ function M.buildButtons(ctx, layout)
         w = math.max(12, ctrl.w - 2),
         h = 3,
       }
-      local navRowH = navArea.h >= 4 and 3 or 2
+      local navRowH = navArea.h >= 9 and 4 or (navArea.h >= 5 and 3 or 2)
       addGridRowsInArea({
         { id = "viewSup", label = "SUP", bg = state.currentView == "supervision" and C.btnOn or C.panelMid, action = function() actions.setView("supervision") end },
         { id = "viewDiag", label = "DIAG", bg = state.currentView == "diagnostic" and C.btnOn or C.panelMid, action = function() actions.setView("diagnostic") end },
@@ -431,7 +439,7 @@ function M.buildButtons(ctx, layout)
       w = math.max(12, ctrl.w - 2),
       h = math.max(3, ctrl.h - 6),
     }
-    local actionRowH = actionArea.h >= 4 and 3 or 2
+    local actionRowH = actionArea.h >= 11 and 4 or (actionArea.h >= 5 and 3 or 2)
     addGridRowsInArea(items, actionArea, actionRowH, 1, 1)
 
     return
@@ -511,9 +519,17 @@ function M.buildButtons(ctx, layout)
         if i == #rowItems then
           wBtn = math.max(minWidths[i], (bx + bw) - x)
         end
+        local hitPadX = item.hitPadX
+        local hitPadY = item.hitPadY
+        if hitPadX == nil then
+          hitPadX = (rowH <= 2) and 2 or 1
+        end
+        if hitPadY == nil then
+          hitPadY = 1
+        end
         addButton(item.id, x, y, wBtn, rowH, item.label, item.bg, item.fg, item.action, {
-          hitPadX = 0,
-          hitPadY = 0,
+          hitPadX = hitPadX,
+          hitPadY = hitPadY,
           disabled = item.disabled and true or false,
         })
         x = x + wBtn + gapX
