@@ -98,6 +98,9 @@ function M.run(ctx)
     if name == "ui.toms.pages.monitor_selection" then
       return assert(dofile(toPath("ui/toms/pages/monitor_selection.lua")))
     end
+    if name == "ui.toms.pages.registry" then
+      return assert(dofile(toPath("ui/toms/pages/registry.lua")))
+    end
     if type(originalRequire) == "function" then
       return originalRequire(name)
     end

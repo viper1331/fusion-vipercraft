@@ -2,14 +2,7 @@ local TomTheme = require("ui.toms.theme")
 local TomLayout = require("ui.toms.layout")
 local TomComponents = require("ui.toms.components")
 local TomPageCommon = require("ui.toms.pages.common")
-local TomPageSupervision = require("ui.toms.pages.supervision")
-local TomPageDiagnostic = require("ui.toms.pages.diagnostic")
-local TomPageManual = require("ui.toms.pages.manual")
-local TomPageInduction = require("ui.toms.pages.induction")
-local TomPageUpdate = require("ui.toms.pages.update")
-local TomPageConfig = require("ui.toms.pages.config")
-local TomPageSetup = require("ui.toms.pages.setup")
-local TomPageMonitorSelection = require("ui.toms.pages.monitor_selection")
+local TomPageRegistry = require("ui.toms.pages.registry")
 local function loadTomAssets()
   local okRequire, moduleRequire = pcall(require, "ui.toms.assets")
   if okRequire and type(moduleRequire) == "table" then
@@ -1083,16 +1076,6 @@ function M.build(api)
     assets = TomAssets,
   })
 
-  local pageRenderers = {
-    supervision = TomPageSupervision.render,
-    diagnostic = TomPageDiagnostic.render,
-    manual = TomPageManual.render,
-    induction = TomPageInduction.render,
-    update = TomPageUpdate.render,
-    config = TomPageConfig.render,
-    setup = TomPageSetup.render,
-  }
-
   local function drawNavigationBar(ui, bounds, titleBounds, theme, activeView)
     local nav = type(bounds) == "table" and bounds or nil
     if not nav then
@@ -1152,19 +1135,9 @@ function M.build(api)
 
   local function drawTomView(view, ui, layout, theme, model)
     local pageContext = buildPageContext(ui, layout, theme, model)
-    if state.choosingMonitor then
-      return TomPageMonitorSelection.render(pageContext)
-    end
-
-    local pageKey = tostring(view or "supervision")
-    local renderer = pageRenderers[pageKey] or pageRenderers.supervision
-    if type(renderer) ~= "function" then
-      renderer = pageRenderers.supervision
-    end
-    if type(renderer) ~= "function" then
-      return false
-    end
-    return renderer(pageContext) ~= false
+    local ok, resolvedPage = TomPageRegistry.render(view, state, pageContext)
+    state.tomActivePage = tostring(resolvedPage or "supervision")
+    return ok == true
   end
 
   local function computeDiagnosticLayout(width, height, theme)
@@ -1427,7 +1400,8 @@ function M.build(api)
     local warning = model.warnings[1] or "NONE"
     local warningTone = warning == "NONE" and theme.palette.info or theme.palette.warning
     local headerLeft = "FUSION SUPERVISOR"
-    local activeView = string.upper(tostring(state.currentView or "supervision"))
+    local navView = state.choosingMonitor and "monitor_selection" or tostring(state.currentView or "supervision")
+    local activeView = string.upper(navView)
     local warningText = asText(warning, "NONE")
     if #warningText > 24 then
       warningText = warningText:sub(1, 23) .. "~"
@@ -1454,10 +1428,10 @@ function M.build(api)
     local navTitleBounds = layout.controls and layout.controls.navTitleBounds or nil
 
     rootUi.drawHeader(layout.header, headerLeft, headerCenter, headerRight, model.phaseTone, warningTone)
-    drawNavigationBar(rootUi, navBounds, navTitleBounds, theme, state.currentView)
+    drawNavigationBar(rootUi, navBounds, navTitleBounds, theme, navView)
     rootUi.drawFooter(layout.controls.statusBounds or layout.footer, footerSegments)
 
-    local view = tostring(state.currentView or "supervision")
+    local view = navView
     local inputSource = tostring(renderCtx.inputSource or source or "monitor")
     local useWindows = false
     diag.windowAllowed = useWindows == true
@@ -1476,10 +1450,7 @@ function M.build(api)
     local okView, errView = pcall(drawTomView, view, rootUi, layout, theme, model)
     if not okView then
       pushDiagError(diag, "tom_view_failed:" .. tostring(errView))
-      local fallbackRenderer = pageRenderers.supervision
-      if type(fallbackRenderer) == "function" then
-        pcall(fallbackRenderer, buildPageContext(rootUi, layout, theme, model))
-      end
+      pcall(TomPageRegistry.render, "supervision", state, buildPageContext(rootUi, layout, theme, model))
     end
 
     local controlsBounds = layout.controls.buttonBounds

@@ -1,5 +1,5 @@
 {
-    "version":  "2.4.68",
+    "version":  "2.4.69",
     "files":  [
                   "fusion.lua",
                   "fusion.version",
@@ -43,6 +43,7 @@
                   "ui/toms/pages/induction.lua",
                   "ui/toms/pages/manual.lua",
                   "ui/toms/pages/monitor_selection.lua",
+                  "ui/toms/pages/registry.lua",
                   "ui/toms/pages/setup.lua",
                   "ui/toms/pages/supervision.lua",
                   "ui/toms/pages/update.lua",

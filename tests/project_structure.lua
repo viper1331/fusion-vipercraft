@@ -61,6 +61,7 @@ function M.run(ctx)
     "ui/toms/pages/config.lua",
     "ui/toms/pages/setup.lua",
     "ui/toms/pages/monitor_selection.lua",
+    "ui/toms/pages/registry.lua",
   }
 
   for _, dir in ipairs(requiredDirs) do
