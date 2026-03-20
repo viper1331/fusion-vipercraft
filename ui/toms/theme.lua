@@ -18,32 +18,8 @@ local function normalizeText(text)
   return tostring(text or ""):gsub("[%c]", " ")
 end
 
-local function truncate(text, maxLen)
-  text = normalizeText(text)
-  maxLen = math.max(0, asInt(maxLen, 0))
-  if maxLen <= 0 then return "" end
-  if #text <= maxLen then return text end
-  if maxLen <= 3 then
-    return text:sub(1, maxLen)
-  end
-  return text:sub(1, maxLen - 3) .. "..."
-end
-
-local function abbreviate(text, maxLen)
-  text = normalizeText(text)
-  maxLen = math.max(1, asInt(maxLen, 1))
-  if #text <= maxLen then
-    return text
-  end
-  local compact = text:gsub("[%s_%-_]+", "")
-  if #compact <= maxLen then
-    return compact
-  end
-  local vowelless = compact:gsub("[AEIOUaeiou]", "")
-  if #vowelless >= 3 and #vowelless <= maxLen then
-    return vowelless
-  end
-  return truncate(text, maxLen)
+local function keepText(text)
+  return normalizeText(text)
 end
 
 local function detectDensity(width, height)
@@ -249,8 +225,10 @@ function M.build(width, height, options)
     },
     text = {
       normalize = normalizeText,
-      truncate = truncate,
-      abbreviate = abbreviate,
+      -- Phase 4 rule: never force automatic text truncation at theme level.
+      -- Rendering layers can wrap/reflow/clip by pixel bounds when needed.
+      truncate = keepText,
+      abbreviate = keepText,
     },
     clamp = clamp,
     asInt = asInt,

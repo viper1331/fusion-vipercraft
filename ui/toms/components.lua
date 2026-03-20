@@ -114,24 +114,11 @@ function M.new(options)
   local fontCharWidth = math.max(1, asInt(metrics.fontCharWidthPx or 1, 1))
   local fontCharHeight = math.max(1, asInt(metrics.fontCharHeightPx or lineHeight, lineHeight))
   local textRules = type(theme.text) == "table" and theme.text or {}
-  local truncate = type(textRules.truncate) == "function"
-    and textRules.truncate
-    or function(value, maxLen)
-      local raw = tostring(value or "")
-      maxLen = math.max(0, asInt(maxLen, 0))
-      if #raw <= maxLen then return raw end
-      if maxLen <= 3 then return raw:sub(1, maxLen) end
-      return raw:sub(1, maxLen - 3) .. "..."
+  local normalizeText = type(textRules.normalize) == "function"
+    and textRules.normalize
+    or function(value)
+      return tostring(value or ""):gsub("[%c]", " ")
     end
-  local abbreviate = type(textRules.abbreviate) == "function"
-    and textRules.abbreviate
-    or function(value, maxLen)
-      return truncate(value, maxLen)
-    end
-
-  local function clipText(text, maxLen)
-    return truncate(tostring(text or ""), math.max(0, asInt(maxLen, 0)))
-  end
 
   local function colorToArgb(colorValue, fallback)
     local n = tonumber(colorValue)
@@ -166,7 +153,7 @@ function M.new(options)
   end
 
   local function measureTextPixels(textValue)
-    local textRaw = tostring(textValue or "")
+    local textRaw = normalizeText(textValue)
     if textRaw == "" then
       return 0
     end
@@ -177,6 +164,115 @@ function M.new(options)
       end
     end
     return math.max(1, #textRaw * fontCharWidth)
+  end
+
+  local function fitTextToChars(textValue, maxChars)
+    local raw = normalizeText(textValue)
+    local limit = math.max(0, asInt(maxChars, 0))
+    if limit <= 0 or raw == "" then
+      return "", raw ~= ""
+    end
+    if #raw <= limit then
+      return raw, false
+    end
+    return raw:sub(1, limit), true
+  end
+
+  local function fitTextToPixels(textValue, maxPixels)
+    local raw = normalizeText(textValue)
+    local limit = math.max(0, asInt(maxPixels, 0))
+    if limit <= 0 or raw == "" then
+      return "", raw ~= ""
+    end
+    if measureTextPixels(raw) <= limit then
+      return raw, false
+    end
+
+    local lo = 0
+    local hi = #raw
+    while lo < hi do
+      local mid = math.floor((lo + hi + 1) / 2)
+      local chunk = raw:sub(1, mid)
+      if measureTextPixels(chunk) <= limit then
+        lo = mid
+      else
+        hi = mid - 1
+      end
+    end
+
+    if lo <= 0 then
+      return "", true
+    end
+    return raw:sub(1, lo), true
+  end
+
+  local function fitTextToLimit(textValue, maxWidth)
+    if nativePixels then
+      return fitTextToPixels(textValue, maxWidth)
+    end
+    return fitTextToChars(textValue, maxWidth)
+  end
+
+  local function clipText(textValue, maxWidth)
+    local clipped = fitTextToLimit(textValue, maxWidth)
+    return clipped
+  end
+
+  local function wrapTextLine(rawLine, maxWidth, out)
+    local clean = normalizeText(rawLine or "")
+    if clean == "" then
+      out[#out + 1] = ""
+      return
+    end
+
+    local segment = clean
+    while segment ~= "" do
+      local fitted, clipped = fitTextToLimit(segment, maxWidth)
+      if fitted == "" then
+        break
+      end
+
+      if not clipped then
+        out[#out + 1] = fitted
+        break
+      end
+
+      local cutIndex = #fitted
+      local split = fitted:match("^.*()%s+%S*$")
+      if split and split >= 2 then
+        cutIndex = split - 1
+      end
+      if cutIndex < 1 then
+        cutIndex = #fitted
+      end
+      local lineOut = fitted:sub(1, cutIndex):gsub("%s+$", "")
+      if lineOut == "" then
+        lineOut = fitted
+        cutIndex = #fitted
+      end
+      out[#out + 1] = lineOut
+      segment = segment:sub(cutIndex + 1):gsub("^%s+", "")
+    end
+  end
+
+  local function wrapText(textValue, maxWidth, maxLines)
+    local widthLimit = math.max(1, asInt(maxWidth, 1))
+    local lines = {}
+    local maxLineCount = math.max(0, asInt(maxLines, 0))
+    local source = normalizeText(textValue)
+
+    if source == "" then
+      return { "" }, false
+    end
+
+    for rawLine in (source .. "\n"):gmatch("(.-)\n") do
+      wrapTextLine(rawLine, widthLimit, lines)
+      if maxLineCount > 0 and #lines >= maxLineCount then
+        return lines, true
+      end
+    end
+
+    return lines, false
   end
 
   -- Safe drawing helpers inherited from fusion_panel_v2 philosophy:
@@ -237,19 +333,15 @@ function M.new(options)
     local yy = asInt(y, 1)
     if yy < 1 or yy > height then return end
     local xx = asInt(x, 1)
-    local textRaw = tostring(textValue or "")
-    local widthLimitRaw = asInt(maxWidth, nativePixels and measureTextPixels(textRaw) or #textRaw)
-    local widthLimit = widthLimitRaw
-    if nativePixels then
-      widthLimit = math.max(1, math.floor(widthLimitRaw / math.max(1, fontCharWidth)))
-    end
+    local textRaw = normalizeText(textValue)
+    local widthLimit = asInt(maxWidth, nativePixels and measureTextPixels(textRaw) or #textRaw)
     if widthLimit <= 0 then return end
 
-    local out = clipText(textRaw, widthLimit)
+    local out, clipped = fitTextToLimit(textRaw, widthLimit)
     local outLen = #out
     if outLen <= 0 then return end
     local textSpan = nativePixels and measureTextPixels(out) or outLen
-    local limitSpan = nativePixels and widthLimitRaw or widthLimit
+    local limitSpan = widthLimit
 
     if align == "center" then
       xx = xx + math.floor((limitSpan - textSpan) / 2)
@@ -259,18 +351,25 @@ function M.new(options)
 
     if xx > width or (xx + textSpan - 1) < 1 then return end
     if xx < 1 then
-      local cut = 1 - xx
-      local cutChars = nativePixels and math.floor(cut / math.max(1, fontCharWidth)) or cut
-      if cutChars >= outLen then return end
-      out = out:sub(cutChars + 1)
+      clipped = true
       outLen = #out
-      textSpan = nativePixels and measureTextPixels(out) or outLen
       xx = 1
     end
-    if xx + textSpan - 1 > width then
+    local screenLimit = math.max(0, width - xx + 1)
+    local visibleLimit = math.min(limitSpan, screenLimit)
+    if visibleLimit <= 0 then
+      return
+    end
+    if textSpan > visibleLimit then
+      local fitted
+      fitted, clipped = fitTextToLimit(out, visibleLimit)
+      out = fitted
+      outLen = #out
+      if outLen <= 0 then return end
+      textSpan = nativePixels and measureTextPixels(out) or outLen
+    elseif xx + textSpan - 1 > width then
       local remain = width - xx + 1
-      local maxChars = nativePixels and math.max(1, math.floor(remain / math.max(1, fontCharWidth))) or remain
-      out = out:sub(1, maxChars)
+      out, clipped = fitTextToLimit(out, remain)
       outLen = #out
       if outLen <= 0 then return end
       textSpan = nativePixels and measureTextPixels(out) or outLen
@@ -310,6 +409,48 @@ function M.new(options)
       pcall(target.setCursorPos, xx, yy)
       pcall(target.write, out)
     end
+  end
+
+  local function safeTextBlock(bounds, textValue, fg, bg, opts)
+    local b = fitRect(bounds, width, height)
+    if not b then return 0, false end
+
+    opts = type(opts) == "table" and opts or {}
+    local lineStep = math.max(1, asInt(opts.lineStep, rowStep))
+    local lineHeightPx = math.max(1, asInt(opts.lineHeight, nativePixels and fontCharHeight or 1))
+    local maxLines = math.floor((b.h + math.max(0, lineStep - lineHeightPx)) / lineStep)
+    if maxLines < 1 then
+      maxLines = 1
+    end
+
+    local lines, clipped = wrapText(textValue, b.w, maxLines)
+    local lineCount = #lines
+    if lineCount <= 0 then
+      return 0, false
+    end
+
+    local align = tostring(opts.align or "left")
+    local vAlign = tostring(opts.vAlign or "top")
+    local startY = b.y
+    local blockHeight = ((lineCount - 1) * lineStep) + lineHeightPx
+    if vAlign == "middle" or vAlign == "center" then
+      startY = b.y + math.max(0, math.floor((b.h - blockHeight) / 2))
+    elseif vAlign == "bottom" then
+      startY = b.y2 - blockHeight + 1
+    end
+    if startY < b.y then
+      startY = b.y
+    end
+
+    for i = 1, lineCount do
+      local y = startY + ((i - 1) * lineStep)
+      if y > b.y2 then
+        clipped = true
+        break
+      end
+      safeText(b.x, y, lines[i], fg, bg, b.w, align)
+    end
+    return lineCount, clipped
   end
 
   local function safeFrame(bounds, stroke, fill)
@@ -433,7 +574,7 @@ function M.new(options)
     safeText(
       b.x + 2,
       y,
-      abbreviate(tostring(title or ""), math.max(4, b.w - 4)),
+      tostring(title or ""),
       tone or palette.info or colors.cyan,
       nil,
       math.max(1, b.w - 4),
@@ -451,8 +592,7 @@ function M.new(options)
     local valueText = tostring(value or "N/A")
 
     if usable <= 26 then
-      local compactLabel = abbreviate(labelText, math.max(3, math.floor(usable * 0.34)))
-      local compact = compactLabel .. ": " .. valueText
+      local compact = labelText .. ": " .. valueText
       safeText(
         b.x + 2,
         y,
@@ -470,7 +610,7 @@ function M.new(options)
     safeText(
       b.x + 2,
       y,
-      abbreviate(labelText, keyW),
+      labelText,
       labelTone or palette.textMuted or colors.lightGray,
       nil,
       keyW,
@@ -892,6 +1032,7 @@ function M.new(options)
     safeFilledRect = safeFilledRect,
     safeRect = safeRect,
     safeText = safeText,
+    safeTextBlock = safeTextBlock,
     drawBackdrop = drawBackdrop,
     drawPanel = drawPanel,
     drawPanelHeader = drawPanelHeader,

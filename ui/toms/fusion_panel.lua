@@ -1241,17 +1241,8 @@ function M.build(api)
     local navView = TomNav.resolveActiveView(state, state.currentView)
     local activeView = string.upper(navView)
     local warningText = asText(warning, "NONE")
-    if #warningText > 24 then
-      warningText = warningText:sub(1, 23) .. "~"
-    end
     local actionText = asText(model.lastAction, "NONE")
-    if #actionText > 18 then
-      actionText = actionText:sub(1, 17) .. "~"
-    end
     local monitorText = asText(model.monitorName, "N/A")
-    if #monitorText > 16 then
-      monitorText = monitorText:sub(1, 15) .. "~"
-    end
     local headerCenter = model.phase .. " / " .. activeView
     local headerRight = model.statusText .. " | " .. warningText
 
