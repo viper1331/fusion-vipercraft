@@ -137,6 +137,7 @@ local modules = {
   "reactor_diagram_render.lua",
   "responsive_render.lua",
   "toms_layout_engine.lua",
+  "toms_navigation.lua",
   "toms_text_reflow.lua",
   "toms_footer_controls.lua",
   "toms_diagnostic_mode.lua",

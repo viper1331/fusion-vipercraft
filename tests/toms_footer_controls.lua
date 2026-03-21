@@ -40,7 +40,8 @@ function M.run(ctx)
     choosingMonitor = false,
     injectionWritable = true,
     currentView = "supervision",
-    controlBounds = { x = 2, y = 2, w = 90, h = 30 },
+    controlBounds = { x = 2, y = 11, w = 90, h = 20 },
+    tomNavBounds = { x = 2, y = 2, w = 90, h = 8 },
   }
 
   UIComponents.buildButtons({
@@ -77,9 +78,9 @@ function M.run(ctx)
     },
   }, {
     tomFooterControls = true,
-    right = { x = 1, y = 1, w = 90, h = 6 },
+    right = { x = 1, y = 1, w = 92, h = 32 },
     width = 96,
-    bottom = 20,
+    bottom = 36,
   })
 
   local required = {

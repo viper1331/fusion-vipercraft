@@ -271,6 +271,24 @@ function M.buildButtons(ctx, layout)
   local addRowButton = ctx.addRowButton
   local drawBigButton = ctx.drawBigButton
   local actions = ctx.actions
+  local tomNav = type(ctx.tomNav) == "table" and ctx.tomNav or nil
+
+  local function buildNavigationItems(compact)
+    if tomNav and type(tomNav.buildButtonItems) == "function" then
+      return tomNav.buildButtonItems(state, C, actions, {
+        compact = compact == true,
+      })
+    end
+    return {
+      { id = "viewSup", label = compact and "SUP" or "SUP", bg = state.currentView == "supervision" and C.btnOn or C.panelMid, action = function() actions.setView("supervision") end },
+      { id = "viewDiag", label = compact and "DIAG" or "DIAG", bg = state.currentView == "diagnostic" and C.btnOn or C.panelMid, action = function() actions.setView("diagnostic") end },
+      { id = "viewMan", label = compact and "MAN" or "MAN", bg = state.currentView == "manual" and C.btnOn or C.panelMid, action = function() actions.setView("manual") end },
+      { id = "viewInd", label = compact and "IND" or "IND", bg = state.currentView == "induction" and C.btnOn or C.panelMid, action = function() actions.setView("induction") end },
+      { id = "viewUpd", label = compact and "UPD" or "UPDATE", bg = state.currentView == "update" and C.btnOn or C.panelMid, action = function() actions.setView("update") end },
+      { id = "viewCfg", label = "CFG", bg = state.currentView == "config" and C.btnOn or C.panelMid, action = function() actions.setView("config") end },
+      { id = "viewSetup", label = compact and "SET" or "SETUP", bg = state.currentView == "setup" and C.btnOn or C.panelMid, action = function() actions.setView("setup") end },
+    }
+  end
 
   -- Shared hitbox policy for every adaptive button row:
   -- row height drives default padding, while each item can override it.
@@ -407,15 +425,7 @@ function M.buildButtons(ctx, layout)
       }
       local navRowH = navArea.h >= 14 and 4 or (navArea.h >= 8 and 3 or 2)
       local navGapY = navArea.h >= 10 and 1 or 0
-      addGridRowsInArea({
-        { id = "viewSup", label = "SUP", bg = state.currentView == "supervision" and C.btnOn or C.panelMid, action = function() actions.setView("supervision") end },
-        { id = "viewDiag", label = "DIAG", bg = state.currentView == "diagnostic" and C.btnOn or C.panelMid, action = function() actions.setView("diagnostic") end },
-        { id = "viewMan", label = "MAN", bg = state.currentView == "manual" and C.btnOn or C.panelMid, action = function() actions.setView("manual") end },
-        { id = "viewInd", label = "IND", bg = state.currentView == "induction" and C.btnOn or C.panelMid, action = function() actions.setView("induction") end },
-        { id = "viewUpd", label = "UPDATE", bg = state.currentView == "update" and C.btnOn or C.panelMid, action = function() actions.setView("update") end },
-        { id = "viewCfg", label = "CFG", bg = state.currentView == "config" and C.btnOn or C.panelMid, action = function() actions.setView("config") end },
-        { id = "viewSetup", label = "SETUP", bg = state.currentView == "setup" and C.btnOn or C.panelMid, action = function() actions.setView("setup") end },
-      }, navArea, navRowH, 1, navGapY)
+      addGridRowsInArea(buildNavigationItems(false), navArea, navRowH, 1, navGapY)
     end
 
     local injAvailable = state.injectionWritable == true
@@ -537,17 +547,18 @@ function M.buildButtons(ctx, layout)
   end
 
   local function buildNavigationButtons()
-    addGridRow({
-      { id = "viewSup", label = "SUP", bg = state.currentView == "supervision" and C.btnOn or C.panelMid, action = function() actions.setView("supervision") end },
-      { id = "viewDiag", label = "DIAG", bg = state.currentView == "diagnostic" and C.btnOn or C.panelMid, action = function() actions.setView("diagnostic") end },
-      { id = "viewMan", label = "MAN", bg = state.currentView == "manual" and C.btnOn or C.panelMid, action = function() actions.setView("manual") end },
-      { id = "viewInd", label = "IND", bg = state.currentView == "induction" and C.btnOn or C.panelMid, action = function() actions.setView("induction") end },
-    }, 2, 1)
-    addGridRow({
-      { id = "viewUpd", label = "UPD", bg = state.currentView == "update" and C.btnOn or C.panelMid, action = function() actions.setView("update") end },
-      { id = "viewCfg", label = "CFG", bg = state.currentView == "config" and C.btnOn or C.panelMid, action = function() actions.setView("config") end },
-      { id = "viewSetup", label = "SET", bg = state.currentView == "setup" and C.btnOn or C.panelMid, action = function() actions.setView("setup") end },
-    }, 2, 1)
+    local navItems = buildNavigationItems(true)
+    local firstRow = {}
+    local secondRow = {}
+    for index, item in ipairs(navItems) do
+      if index <= 4 then
+        firstRow[#firstRow + 1] = item
+      else
+        secondRow[#secondRow + 1] = item
+      end
+    end
+    addGridRow(firstRow, 2, 1)
+    addGridRow(secondRow, 2, 1)
   end
 
   local function buildRefreshButton()

@@ -3,6 +3,7 @@
 
 local M = {}
 local CoreUiAdaptive = require("core.ui_adaptive")
+local TomNav = require("ui.toms.nav")
 
 local function unpackMonitorCoords(hw, p1, p2, p3, p4)
   if type(p1) == "string" then
@@ -75,27 +76,6 @@ local function handleMainChar(ch, api)
     state.gasAuto = not state.gasAuto
   elseif ch == "m" then
     api.startMonitorSelection()
-  elseif ch == "1" then
-    state.currentView = "supervision"
-    api.pushEvent("View supervision")
-  elseif ch == "2" then
-    state.currentView = "diagnostic"
-    api.pushEvent("View diagnostic")
-  elseif ch == "3" then
-    state.currentView = "manual"
-    api.pushEvent("View manual")
-  elseif ch == "4" then
-    state.currentView = "induction"
-    api.pushEvent("View induction")
-  elseif ch == "5" then
-    state.currentView = "update"
-    api.pushEvent("View update")
-  elseif ch == "6" then
-    state.currentView = "config"
-    api.pushEvent("View config")
-  elseif ch == "7" then
-    state.currentView = "setup"
-    api.pushEvent("View setup")
   elseif ch == "8" then
     state.tomUiDiagnosticMode = not state.tomUiDiagnosticMode
     state.lastAction = state.tomUiDiagnosticMode and "Tom UI diag ON" or "Tom UI diag OFF"
@@ -108,6 +88,11 @@ local function handleMainChar(ch, api)
     api.openDTFuel(true)
   elseif ch == "p" then
     api.openDTFuel(false)
+  else
+    local changed, view = TomNav.handleHotkey(state, ch)
+    if changed and view then
+      api.pushEvent("View " .. tostring(view))
+    end
   end
 end
 
