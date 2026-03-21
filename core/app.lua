@@ -18,7 +18,6 @@ function M.run(options)
   local UIReactorDiagram = require("ui.reactor_diagram")
   local UIInductionDiagram = require("ui.induction_diagram")
   local UITomFusionPanel = require("ui.toms.fusion_panel")
-  local UITomNav = require("ui.toms.nav")
   local CoreConfig = require("core.config")
   local CoreEnergy = require("core.energy")
   local CoreTemperature = require("core.temperature")
@@ -2650,7 +2649,7 @@ function M.run(options)
         state.lastAction = "Refresh"
       end,
       setView = function(view)
-        local changed, resolved = UITomNav.setActiveView(state, view)
+        local changed, resolved = require("ui.toms.nav").setActiveView(state, view)
         local viewName = tostring(resolved or state.currentView or view or "supervision")
         if changed or state.lastAction == nil then
           state.lastAction = "View " .. viewName
@@ -2767,7 +2766,7 @@ function M.run(options)
       addRowButton = addRowButton,
       drawBigButton = drawBigButton,
       actions = buildButtonActions(),
-      tomNav = UITomNav,
+      tomNav = require("ui.toms.nav"),
     }, layout)
   end
 
