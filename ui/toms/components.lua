@@ -89,6 +89,7 @@ function M.new(options)
   options = type(options) == "table" and options or {}
   local target = options.target or term.current()
   local assetDrawer = type(options.assetDrawer) == "function" and options.assetDrawer or nil
+  local assetTools = type(options.assetTools) == "table" and options.assetTools or nil
   local width = asInt(options.width, 0)
   local height = asInt(options.height, 0)
   if (width <= 0 or height <= 0) and target and type(target.getSize) == "function" then
@@ -482,6 +483,57 @@ function M.new(options)
     return drawn == true
   end
 
+  local function getLaserModuleAspect(fallback)
+    if type(assetTools) == "table" and type(assetTools.getSpriteAspect) == "function" then
+      local aspect = tonumber(assetTools.getSpriteAspect("laser_module", fallback))
+      if aspect and aspect > 0 then
+        return aspect
+      end
+    end
+    return tonumber(fallback) or 6.75
+  end
+
+  local function planVerticalStack(bounds, options)
+    if type(assetTools) == "table" and type(assetTools.planVerticalStack) == "function" then
+      local plan = assetTools.planVerticalStack(bounds, options)
+      if type(plan) == "table" and type(plan.modules) == "table" then
+        return plan
+      end
+    end
+
+    local b = copyRect(bounds)
+    local opts = type(options) == "table" and options or {}
+    local count = clamp(asInt(opts.count, 1), 1, math.max(1, asInt(opts.maxCount, 32)))
+    local moduleW = clamp(asInt(opts.fixedWidth, b.w), 1, b.w)
+    local moduleH = clamp(asInt(opts.fixedHeight, 1), 1, b.h)
+    local gap = math.max(0, asInt(opts.gap, 0))
+    local stackHeight = (count * moduleH) + ((count - 1) * gap)
+    local stackTop = clamp(asInt(opts.top, b.y), b.y, math.max(b.y, b.y2 - stackHeight + 1))
+    local centerX = clamp(asInt(opts.centerX, b.x + math.floor((b.w - 1) / 2)), b.x, b.x2)
+    local stackX = clamp(centerX - math.floor(moduleW / 2), b.x, b.x2 - moduleW + 1)
+    local modules = {}
+    for i = 1, count do
+      modules[#modules + 1] = {
+        x = stackX,
+        y = stackTop + ((i - 1) * (moduleH + gap)),
+        w = moduleW,
+        h = moduleH,
+      }
+    end
+    return {
+      bounds = b,
+      count = count,
+      centerX = centerX,
+      moduleW = moduleW,
+      moduleH = moduleH,
+      gap = gap,
+      stackHeight = stackHeight,
+      x = stackX,
+      top = stackTop,
+      modules = modules,
+    }
+  end
+
   local function drawBackdrop(bounds)
     local b = copyRect(bounds)
     local bg = palette.bgBackdrop or palette.bgRoot or colors.black
@@ -809,30 +861,56 @@ function M.new(options)
     local bottomPad = math.max(2, math.floor(lineHeight * 0.55))
     local sidePad = math.max(2, math.floor(lineHeight * 0.45))
     local reactorArea = inset(inner, sidePad, topPad, sidePad, bottomPad)
-    local cx = reactorArea.x + math.floor((reactorArea.w - 1) / 2)
-    local cy = reactorArea.y + math.floor((reactorArea.h - 1) / 2)
-
     local moduleCount = clamp(asInt((model and model.laserCount) or 1, 1), 1, 16)
-    local moduleAspect = tonumber(model and model.laserModuleAspect) or 6.75
-    if moduleAspect < 1 then
-      moduleAspect = 6.75
-    end
-    local moduleW = clamp(math.floor(reactorArea.w * 0.34), 24, math.max(24, math.floor(reactorArea.w * 0.58)))
-    local moduleH = clamp(math.floor(moduleW / moduleAspect + 0.5), 4, 14)
-    local moduleGap = math.max(1, math.floor(moduleH * 0.20))
-    local stackH = (moduleCount * moduleH) + ((moduleCount - 1) * moduleGap)
-    local topSpaceBudget = math.max(12, math.floor(reactorArea.h * 0.35))
-    while stackH > topSpaceBudget and moduleH > 3 do
-      moduleH = moduleH - 1
-      moduleGap = math.max(1, math.floor(moduleH * 0.20))
-      stackH = (moduleCount * moduleH) + ((moduleCount - 1) * moduleGap)
+    local moduleAspect = tonumber(model and model.laserModuleAspect) or getLaserModuleAspect(6.75)
+    if moduleAspect < 1 then moduleAspect = getLaserModuleAspect(6.75) end
+
+    local laserGap = math.max(2, math.floor(lineHeight * 0.45))
+    local scene = nil
+    if type(assetTools) == "table" and type(assetTools.planReactorScene) == "function" then
+      scene = assetTools.planReactorScene(reactorArea, {
+        laserCount = moduleCount,
+        moduleAspect = moduleAspect,
+        laserGap = laserGap,
+        maxLaserCount = 16,
+      })
     end
 
-    local reactorW = clamp(math.floor(reactorArea.w * 0.72), math.max(20, math.floor(reactorArea.w * 0.58)), math.max(22, reactorArea.w - 2))
-    local reactorH = clamp(math.floor(reactorArea.h * 0.64), math.max(14, math.floor(reactorArea.h * 0.48)), math.max(16, reactorArea.h - 2))
-    local reactorX = clamp(cx - math.floor(reactorW / 2), reactorArea.x, reactorArea.x2 - reactorW + 1)
-    local reactorY = clamp(cy - math.floor(reactorH / 2), reactorArea.y + stackH + 3, reactorArea.y2 - reactorH + 1)
-    local reactor = rect(reactorX, reactorY, reactorW, reactorH)
+    if type(scene) ~= "table" then
+      local cx = reactorArea.x + math.floor((reactorArea.w - 1) / 2)
+      local cy = reactorArea.y + math.floor((reactorArea.h - 1) / 2)
+      local reactorW = clamp(math.floor(reactorArea.w * 0.72), math.max(20, math.floor(reactorArea.w * 0.58)), math.max(22, reactorArea.w - 2))
+      local reactorH = clamp(math.floor(reactorArea.h * 0.64), math.max(14, math.floor(reactorArea.h * 0.48)), math.max(16, reactorArea.h - 2))
+      local reactorX = clamp(cx - math.floor(reactorW / 2), reactorArea.x, reactorArea.x2 - reactorW + 1)
+      local reactorY = clamp(cy - math.floor(reactorH / 2), reactorArea.y + math.max(4, math.floor(reactorArea.h * 0.35)), reactorArea.y2 - reactorH + 1)
+      local reactor = rect(reactorX, reactorY, reactorW, reactorH)
+      local stackBounds = rect(reactorArea.x, reactorArea.y, reactorArea.w, math.max(1, reactor.y - reactorArea.y - laserGap))
+      local stack = planVerticalStack(stackBounds, {
+        count = moduleCount,
+        maxCount = 16,
+        centerX = reactor.x + math.floor((reactor.w - 1) / 2),
+        aspect = moduleAspect,
+        widthRatio = 0.34,
+        minWidth = 24,
+        maxWidth = math.max(24, math.floor(reactorArea.w * 0.58)),
+        minHeight = 3,
+        maxHeight = 14,
+        gapRatio = 0.2,
+        minGap = 0,
+        maxGap = 4,
+      })
+      scene = {
+        bounds = reactorArea,
+        centerX = reactor.x + math.floor((reactor.w - 1) / 2),
+        reactor = reactor,
+        stack = stack,
+        emitterY = math.min(reactor.y, (stack.top or reactor.y) + (stack.stackHeight or 1)),
+      }
+    end
+
+    local reactor = copyRect(scene.reactor or reactorArea)
+    local stack = type(scene.stack) == "table" and scene.stack or { modules = {}, moduleW = 1, top = reactor.y - 1, stackHeight = 1 }
+    local laserX = clamp(asInt(scene.centerX, reactor.x + math.floor((reactor.w - 1) / 2)), reactorArea.x, reactorArea.x2)
 
     local reactorDrawn = drawAsset("reactor", reactor.x, reactor.y, reactor.w, reactor.h)
     if not reactorDrawn then
@@ -854,30 +932,22 @@ function M.new(options)
     end
 
     local reactorCenterX = reactor.x + math.floor((reactor.w - 1) / 2)
-    local coreCx, coreCy = point(anchors.core, reactorCenterX, cy)
+    local coreCx, coreCy = point(anchors.core, reactorCenterX, reactor.y + math.floor((reactor.h - 1) / 2))
     local tX, tY = point(anchors.tritium, reactor.x + math.floor(reactor.w * 0.42), reactor.y2)
     local dtX, dtY = point(anchors.dtfuel, coreCx, reactor.y2)
     local dX, dY = point(anchors.deuterium, reactor.x + math.floor(reactor.w * 0.58), reactor.y2)
     local energyX, energyY = point(anchors.energy, reactor.x2, reactor.y + math.floor(reactor.h * 0.5))
-    local laserX = reactorCenterX
 
-    local moduleX = clamp(reactorCenterX - math.floor(moduleW / 2), inner.x + 1, inner.x2 - moduleW + 1)
-    local laserGap = math.max(2, math.floor(lineHeight * 0.45))
-    local stackTop = clamp(
-      reactor.y - stackH - laserGap,
-      inner.y + 1,
-      math.max(inner.y + 1, reactor.y - stackH - 1)
-    )
-    for i = 1, moduleCount do
-      local my = stackTop + ((i - 1) * (moduleH + moduleGap))
-      if my > reactor.y - 1 then break end
-      local drawnModule = drawAsset("laser_module", moduleX, my, moduleW, moduleH)
+    local firstModule = stack.modules[1]
+    for i = 1, #stack.modules do
+      local moduleRect = stack.modules[i]
+      local drawnModule = drawAsset("laser_module", moduleRect.x, moduleRect.y, moduleRect.w, moduleRect.h)
       if not drawnModule and i == 1 then
-        safeText(moduleX, my, "LASER ASSET MISSING", palette.critical or colors.red, nil, moduleW, "center")
+        safeText(moduleRect.x, moduleRect.y, "LASER ASSET MISSING", palette.critical or colors.red, nil, moduleRect.w, "center")
       end
     end
 
-    local emitterY = stackTop + stackH
+    local emitterY = clamp(asInt(scene.emitterY, reactor.y - 1), inner.y + 1, reactor.y)
     safeFilledRect(laserX, emitterY, 1, math.max(1, reactor.y - emitterY), palette.reactorLaserCharge or colors.lightBlue)
     local beamVisible = (model and model.laserActive) == true or (model and model.laserCharging) == true
     if beamVisible then
@@ -885,7 +955,18 @@ function M.new(options)
         or (palette.reactorLaserCharge or colors.lightBlue)
       safeFilledRect(laserX, emitterY, 1, math.max(1, reactor.y + math.floor(reactor.h * 0.15) - emitterY), beamColor)
     end
-    safeText(laserX - math.floor(moduleW / 2), stackTop - 1, tostring((model and model.laserLabel) or "LAS"), palette.ok or colors.lime, nil, moduleW, "center")
+
+    local labelW = math.max(8, asInt(stack.moduleW, math.max(8, math.floor(reactor.w * 0.3))))
+    local labelY = (firstModule and firstModule.y - 1) or (reactor.y - 1)
+    safeText(
+      laserX - math.floor(labelW / 2),
+      labelY,
+      tostring((model and model.laserLabel) or "LAS"),
+      palette.ok or colors.lime,
+      nil,
+      labelW,
+      "center"
+    )
 
     local badgeW = clamp(math.floor(math.min(reactor.w, reactor.h) * 0.22), 8, 24)
     local badgeH = 2
@@ -936,20 +1017,40 @@ function M.new(options)
     local moduleGap = math.max(0, asInt(spacing.denseGap or 0, 0))
     local moduleH = math.max(1, math.min(asInt(sizes.laserModuleHeight, 2), math.floor((stackHeight - ((count - 1) * moduleGap)) / count)))
     local moduleW = math.max(3, math.min(asInt(sizes.laserModuleWidth, 3), modulesW - 2))
+    local moduleAspect = getLaserModuleAspect(moduleW / math.max(1, moduleH))
+    local stackPlan = planVerticalStack(rect(moduleX, modulesTop, modulesW - 1, stackHeight), {
+      count = count,
+      maxCount = 24,
+      centerX = moduleX + math.floor((modulesW - 1) / 2),
+      aspect = moduleAspect,
+      fixedWidth = moduleW,
+      minHeight = 1,
+      maxHeight = math.max(1, stackHeight),
+      gap = moduleGap,
+      minGap = 0,
+      maxGap = moduleGap,
+    })
 
-    for i = 1, count do
-      local y = modulesTop + (i - 1) * (moduleH + moduleGap)
-      if y > modulesBottom then break end
+    for i = 1, #stackPlan.modules do
+      local moduleRect = stackPlan.modules[i]
       local active = i <= activeCount
       local color = active and (palette.ok or colors.lime) or (palette.textDim or colors.gray)
-      local drawnModule = drawAsset("laser_module", moduleX, y, moduleW, moduleH)
+      local drawnModule = drawAsset("laser_module", moduleRect.x, moduleRect.y, moduleRect.w, moduleRect.h)
       if not drawnModule then
-        safeFilledRect(moduleX, y, moduleW, moduleH, color)
-        safeRect(moduleX, y, moduleW, moduleH, palette.panelBg or colors.black)
+        safeFilledRect(moduleRect.x, moduleRect.y, moduleRect.w, moduleRect.h, color)
+        safeRect(moduleRect.x, moduleRect.y, moduleRect.w, moduleRect.h, palette.panelBg or colors.black)
       end
-      if moduleW >= 5 then
+      if moduleRect.w >= 5 then
         local stateLabel = active and "ON" or "OFF"
-        safeText(moduleX + 1, y + math.floor((moduleH - 1) / 2), stateLabel, palette.panelBg or colors.black, color, math.max(1, moduleW - 2), "left")
+        safeText(
+          moduleRect.x + 1,
+          moduleRect.y + math.floor((moduleRect.h - 1) / 2),
+          stateLabel,
+          palette.panelBg or colors.black,
+          color,
+          math.max(1, moduleRect.w - 2),
+          "left"
+        )
       end
     end
 

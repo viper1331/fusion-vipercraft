@@ -142,13 +142,14 @@ function M.build(deps)
     })
     local coreInner = inset(bounds, 1, 1, 1, 1)
     local anchors = type(assets.getAnchors) == "function" and assets.getAnchors("reactor", coreInner.x, coreInner.y, coreInner.w, coreInner.h) or nil
-    local laserSpriteW, laserSpriteH = 0, 0
-    if type(assets.getSpriteSize) == "function" then
-      laserSpriteW, laserSpriteH = assets.getSpriteSize("laser_module")
-    end
     local moduleAspect = 6.75
-    if tonumber(laserSpriteW) and tonumber(laserSpriteH) and tonumber(laserSpriteH) > 0 then
-      moduleAspect = tonumber(laserSpriteW) / tonumber(laserSpriteH)
+    if type(assets.getSpriteAspect) == "function" then
+      moduleAspect = tonumber(assets.getSpriteAspect("laser_module", 6.75)) or 6.75
+    elseif type(assets.getSpriteSize) == "function" then
+      local laserSpriteW, laserSpriteH = assets.getSpriteSize("laser_module")
+      if tonumber(laserSpriteW) and tonumber(laserSpriteH) and tonumber(laserSpriteH) > 0 then
+        moduleAspect = tonumber(laserSpriteW) / tonumber(laserSpriteH)
+      end
     end
     ui.drawReactorCore(coreInner, {
       tick = state.tick or 0,

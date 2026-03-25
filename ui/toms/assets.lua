@@ -212,4 +212,188 @@ function M.getSpriteSize(key)
   return math.max(1, asInt(sprite.width, 1)), math.max(1, asInt(sprite.height, 1))
 end
 
+function M.getSpriteAspect(key, fallback)
+  local w, h = M.getSpriteSize(key)
+  if w > 0 and h > 0 then
+    return w / h
+  end
+  return tonumber(fallback) or 1
+end
+
+function M.resolveLaserModuleCount(cfg, state, fallback)
+  local cfgValue = type(cfg) == "table" and cfg.laserCount or nil
+  local stateValue = type(state) == "table" and state.laserCount or nil
+  local value = tonumber(cfgValue or stateValue or fallback or 1) or 1
+  value = math.floor(value + 0.00001)
+  if value < 1 then
+    value = 1
+  end
+  return value
+end
+
+function M.planVerticalStack(bounds, options)
+  local b = type(bounds) == "table" and bounds or { x = 1, y = 1, w = 1, h = 1 }
+  local opts = type(options) == "table" and options or {}
+  local bx = asInt(b.x, 1)
+  local by = asInt(b.y, 1)
+  local bw = math.max(1, asInt(b.w, 1))
+  local bh = math.max(1, asInt(b.h, 1))
+  local count = math.max(1, asInt(opts.count, 1))
+  local maxCount = math.max(1, asInt(opts.maxCount, 32))
+  if count > maxCount then
+    count = maxCount
+  end
+
+  local aspect = tonumber(opts.aspect) or M.getSpriteAspect("laser_module", 6.75)
+  if aspect <= 0 then
+    aspect = 6.75
+  end
+
+  local minWidth = math.max(1, asInt(opts.minWidth, 3))
+  local maxWidth = math.max(minWidth, asInt(opts.maxWidth, bw))
+  local widthRatio = tonumber(opts.widthRatio)
+  local moduleW = asInt(opts.fixedWidth, 0)
+  if moduleW <= 0 then
+    moduleW = asInt(widthRatio and (bw * widthRatio) or bw, bw)
+  end
+  moduleW = clamp(moduleW, minWidth, maxWidth)
+
+  local minHeight = math.max(1, asInt(opts.minHeight, 1))
+  local maxHeight = math.max(minHeight, asInt(opts.maxHeight, bh))
+  local moduleH = asInt(opts.fixedHeight, 0)
+  if moduleH <= 0 then
+    moduleH = asInt(moduleW / aspect, minHeight)
+  end
+  moduleH = clamp(moduleH, minHeight, maxHeight)
+
+  local gapRatio = tonumber(opts.gapRatio) or 0.2
+  local gap = math.max(0, asInt(opts.gap, moduleH * gapRatio))
+  local minGap = math.max(0, asInt(opts.minGap, 0))
+  local maxGap = math.max(minGap, asInt(opts.maxGap, bh))
+  gap = clamp(gap, minGap, maxGap)
+
+  local stackHeight = (count * moduleH) + ((count - 1) * gap)
+  while stackHeight > bh and moduleH > minHeight do
+    moduleH = moduleH - 1
+    gap = clamp(math.max(minGap, asInt(moduleH * gapRatio, minGap)), minGap, maxGap)
+    stackHeight = (count * moduleH) + ((count - 1) * gap)
+  end
+  while stackHeight > bh and gap > minGap do
+    gap = gap - 1
+    stackHeight = (count * moduleH) + ((count - 1) * gap)
+  end
+
+  local centerX = asInt(opts.centerX, bx + math.floor((bw - 1) / 2))
+  centerX = clamp(centerX, bx, bx + bw - 1)
+  local stackX = clamp(centerX - math.floor(moduleW / 2), bx, bx + bw - moduleW)
+  local maxTop = by + bh - stackHeight
+  if maxTop < by then
+    maxTop = by
+  end
+  local stackTop = clamp(asInt(opts.top, by + math.floor((bh - stackHeight) / 2)), by, maxTop)
+
+  local modules = {}
+  for i = 1, count do
+    local y = stackTop + ((i - 1) * (moduleH + gap))
+    modules[#modules + 1] = {
+      x = stackX,
+      y = y,
+      w = moduleW,
+      h = moduleH,
+    }
+  end
+
+  return {
+    bounds = { x = bx, y = by, w = bw, h = bh, x2 = bx + bw - 1, y2 = by + bh - 1 },
+    count = count,
+    centerX = centerX,
+    moduleW = moduleW,
+    moduleH = moduleH,
+    gap = gap,
+    stackHeight = stackHeight,
+    x = stackX,
+    top = stackTop,
+    modules = modules,
+  }
+end
+
+function M.planReactorScene(bounds, options)
+  local b = type(bounds) == "table" and bounds or { x = 1, y = 1, w = 1, h = 1 }
+  local opts = type(options) == "table" and options or {}
+  local bx = asInt(b.x, 1)
+  local by = asInt(b.y, 1)
+  local bw = math.max(1, asInt(b.w, 1))
+  local bh = math.max(1, asInt(b.h, 1))
+
+  local centerX = bx + math.floor((bw - 1) / 2)
+  local centerY = by + math.floor((bh - 1) / 2)
+  local laserGap = math.max(1, asInt(opts.laserGap, 2))
+  local count = M.resolveLaserModuleCount(opts.cfg, opts.state, opts.laserCount or 1)
+
+  local reactorMinW = math.max(8, asInt(opts.reactorMinW, 20))
+  local reactorMinH = math.max(6, asInt(opts.reactorMinH, 14))
+  local reactorMaxW = math.max(reactorMinW, asInt(opts.reactorMaxW, bw - 2))
+  local reactorMaxH = math.max(reactorMinH, asInt(opts.reactorMaxH, bh - 2))
+  local reactorW = clamp(
+    asInt(opts.reactorW, math.floor(bw * 0.72)),
+    reactorMinW,
+    reactorMaxW
+  )
+  local reactorH = clamp(
+    asInt(opts.reactorH, math.floor(bh * 0.64)),
+    reactorMinH,
+    reactorMaxH
+  )
+
+  local topReserve = math.max(3, asInt(opts.topReserve, math.floor(bh * 0.35)))
+  local reactorYMin = by + topReserve + laserGap
+  local reactorYMax = by + bh - reactorH
+  if reactorYMin > reactorYMax then
+    reactorYMin = by
+  end
+  local reactorX = clamp(centerX - math.floor(reactorW / 2), bx, bx + bw - reactorW)
+  local reactorY = clamp(centerY - math.floor(reactorH / 2), reactorYMin, reactorYMax)
+  local reactor = {
+    x = reactorX,
+    y = reactorY,
+    w = reactorW,
+    h = reactorH,
+    x2 = reactorX + reactorW - 1,
+    y2 = reactorY + reactorH - 1,
+  }
+
+  local stackZoneTop = by
+  local stackZoneHeight = math.max(1, reactor.y - stackZoneTop - laserGap)
+  local stackBounds = { x = bx, y = stackZoneTop, w = bw, h = stackZoneHeight }
+  local stack = M.planVerticalStack(stackBounds, {
+    count = count,
+    maxCount = asInt(opts.maxLaserCount, 32),
+    centerX = centerX,
+    aspect = tonumber(opts.moduleAspect) or M.getSpriteAspect("laser_module", 6.75),
+    widthRatio = tonumber(opts.moduleWidthRatio) or 0.34,
+    minWidth = asInt(opts.moduleMinWidth, 24),
+    maxWidth = asInt(opts.moduleMaxWidth, math.floor(bw * 0.58)),
+    minHeight = asInt(opts.moduleMinHeight, 3),
+    maxHeight = asInt(opts.moduleMaxHeight, 14),
+    gapRatio = tonumber(opts.moduleGapRatio) or 0.2,
+    minGap = asInt(opts.moduleMinGap, 0),
+    maxGap = asInt(opts.moduleMaxGap, 4),
+  })
+
+  local emitterY = stack.top + stack.stackHeight
+  if emitterY > reactor.y then
+    emitterY = reactor.y
+  end
+
+  return {
+    bounds = { x = bx, y = by, w = bw, h = bh, x2 = bx + bw - 1, y2 = by + bh - 1 },
+    centerX = centerX,
+    centerY = centerY,
+    reactor = reactor,
+    stack = stack,
+    laserGap = laserGap,
+    emitterY = emitterY,
+  }
+end
+
 return M

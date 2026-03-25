@@ -60,6 +60,57 @@ function M.run(ctx)
     return
   end
 
+  local resolvedCount = Assets.resolveLaserModuleCount({ laserCount = 7 }, { laserCount = 2 }, 1)
+  if resolvedCount ~= 7 then
+    fail(222, "resolveLaserModuleCount should prioritize CFG laserCount")
+    return
+  end
+
+  local fallbackCount = Assets.resolveLaserModuleCount({}, { laserCount = 3 }, 1)
+  if fallbackCount ~= 3 then
+    fail(223, "resolveLaserModuleCount should fallback to runtime state")
+    return
+  end
+
+  local stackPlan = Assets.planVerticalStack({ x = 10, y = 5, w = 40, h = 30 }, {
+    count = 5,
+    aspect = Assets.getSpriteAspect("laser_module", 6.75),
+    centerX = 30,
+    widthRatio = 0.5,
+    minWidth = 8,
+    maxWidth = 24,
+  })
+  if type(stackPlan) ~= "table" or type(stackPlan.modules) ~= "table" or #stackPlan.modules ~= 5 then
+    fail(224, "planVerticalStack returned invalid module placement")
+    return
+  end
+
+  if stackPlan.centerX ~= 30 then
+    fail(225, "planVerticalStack did not preserve requested center axis")
+    return
+  end
+
+  local scene = Assets.planReactorScene({ x = 1, y = 1, w = 120, h = 90 }, {
+    laserCount = 6,
+    moduleAspect = Assets.getSpriteAspect("laser_module", 6.75),
+    laserGap = 2,
+  })
+  if type(scene) ~= "table" or type(scene.reactor) ~= "table" or type(scene.stack) ~= "table" then
+    fail(226, "planReactorScene returned invalid scene")
+    return
+  end
+
+  if #scene.stack.modules ~= 6 then
+    fail(227, "planReactorScene does not expose the expected laser stack size")
+    return
+  end
+
+  local reactorCenter = scene.reactor.x + math.floor((scene.reactor.w - 1) / 2)
+  if math.abs((scene.centerX or reactorCenter) - reactorCenter) > 1 then
+    fail(228, "planReactorScene center axis is not aligned with reactor")
+    return
+  end
+
   ok("Tom assets integration OK")
 end
 

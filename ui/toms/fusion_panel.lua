@@ -948,6 +948,7 @@ function M.build(api)
       width = width,
       height = height,
       theme = theme,
+      assetTools = TomAssets,
       assetDrawer = function(key, x, y, w, h)
         return TomAssets.draw(renderTarget, key, x, y, w, h)
       end,

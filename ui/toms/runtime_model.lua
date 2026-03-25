@@ -1,4 +1,5 @@
 local M = {}
+local TomAssets = require("ui.toms.assets")
 
 function M.asNumber(value, fallback)
   local n = tonumber(value)
@@ -107,8 +108,7 @@ function M.build(options)
     local warnings = type(state.safetyWarnings) == "table" and state.safetyWarnings or {}
     local events = type(state.eventLog) == "table" and state.eventLog or {}
     local blockers = type(state.ignitionBlockers) == "table" and state.ignitionBlockers or {}
-    local configuredLaserCount = math.max(1, math.floor(tonumber(CFG.laserCount or state.laserCount or 1) or 1))
-    local laserCount = configuredLaserCount
+    local laserCount = TomAssets.resolveLaserModuleCount(CFG, state, 1)
     local activeLasers = 0
     if state.laserState == "READY" then
       activeLasers = laserCount
